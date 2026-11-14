@@ -1,0 +1,50 @@
+/**
+ * Configuración de la prueba de humo: contra qué se corre y con qué topes.
+ *
+ * Modo local (lo que corre el CI): sirve `dist/` bajo `VITE_BASE_PATH`.
+ * Modo remoto: `npm run smoke:prod`, `node scripts/smoke.mjs <url>` o `SMOKE_URL=…`.
+ * Ahí no se sirve dist/: se comprueba lo publicado, que es donde se ven un base mal
+ * puesto, un Content-Type raro o una caché que oculta el último despliegue.
+ */
+import { resolve } from 'node:path';
+
+const URL_REMOTA = (
+  process.argv.slice(2).find((arg) => /^https?:\/\//i.test(arg)) ??
+  process.env.SMOKE_URL ??
+  ''
+).trim();
+
+export const ES_REMOTO = URL_REMOTA.length > 0;
+export const URL_PUBLICADA = URL_REMOTA;
+
+const RAW_BASE = ES_REMOTO ? new URL(URL_REMOTA).pathname : process.env.VITE_BASE_PATH ?? '/';
+const CLEAN_BASE = RAW_BASE.replace(/^\/+|\/+$/g, '');
+export const BASE = CLEAN_BASE ? `/${CLEAN_BASE}/` : '/';
+export const DIST = resolve(process.cwd(), 'dist');
+
+// Topes de peso: un asset de varios MB o un salto del bundle no debería pasar el CI.
+// Los valores salen de lo que ocupa hoy el build, con ~20 % de margen.
+export const PRESUPUESTO = {
+  entradaJs: 600 * 1024,
+  entradaJsGzip: 170 * 1024,
+  sprite: 450 * 1024,
+  tarjetaSocial: 150 * 1024,
+  dist: 2.6 * 1024 * 1024,
+};
+
+/** Tipos que usa el servidor local para imitar a GitHub Pages. */
+export const CONTENT_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.woff2': 'font/woff2',
+  '.ico': 'image/x-icon',
+  '.txt': 'text/plain; charset=utf-8',
+};
