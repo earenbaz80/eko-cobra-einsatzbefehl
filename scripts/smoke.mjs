@@ -7,9 +7,12 @@
  *   3. que la Misión 1 arranca y muestra el HUD en juego,
  *   4. que los metadatos sociales, los iconos y el manifest están completos,
  *   5. que en viewport móvil con hasTouch aparece el joystick y mueve de verdad al operador,
- *   6. que el JS de entrada y los assets críticos no superan sus topes de peso.
+ *   6. que el JS de entrada y los assets críticos no superan sus topes de peso,
+ *   7. en modo remoto, que lo publicado devuelve los Content-Type y las cabeceras
+ *      de caché con las que Pages sirve el juego.
  *
- * Uso: VITE_BASE_PATH=/eko-cobra-einsatzbefehl/ npm run build && npm run smoke
+ * Uso local (lo que corre el CI): VITE_BASE_PATH=/eko-cobra-einsatzbefehl/ npm run build && npm run smoke
+ * Uso contra lo publicado:        npm run smoke:prod   (o `node scripts/smoke.mjs <url>`)
  */
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -17,7 +20,16 @@ import { extname, join, normalize, resolve, sep } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { chromium } from 'playwright';
 
-const RAW_BASE = process.env.VITE_BASE_PATH ?? '/';
+// Modo remoto opcional: `npm run smoke:prod` o `node scripts/smoke.mjs <url>`.
+// Ahí no se sirve dist/: se comprueba lo que hay publicado, que es donde se ven un
+// base mal puesto, un Content-Type raro o una caché que oculta el último despliegue.
+const URL_REMOTA = (
+  process.argv.slice(2).find((arg) => /^https?:\/\//i.test(arg)) ??
+  process.env.SMOKE_URL ??
+  ''
+).trim();
+const ES_REMOTO = URL_REMOTA.length > 0;
+const RAW_BASE = ES_REMOTO ? new URL(URL_REMOTA).pathname : process.env.VITE_BASE_PATH ?? '/';
 const CLEAN_BASE = RAW_BASE.replace(/^\/+|\/+$/g, '');
 const BASE = CLEAN_BASE ? `/${CLEAN_BASE}/` : '/';
 const DIST = resolve(process.cwd(), 'dist');
@@ -72,6 +84,25 @@ const fail = (mensaje) => failures.push(mensaje);
 
 const kb = (bytes) => `${(bytes / 1024).toFixed(0)} KB`;
 
+/** Content-Type sin charset y en minúsculas ("application/javascript; charset=utf-8"). */
+const tipoDe = (respuesta) => (respuesta.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+
+const exigirTipo = (etiqueta, respuesta, esperados) => {
+  const cabecera = respuesta.headers.get('content-type') ?? '';
+  if (!esperados.includes(tipoDe(respuesta))) {
+    fail(`${etiqueta}: Content-Type ${cabecera || '(ninguno)'}, se esperaba ${esperados.join(' o ')}`);
+  } else console.log(`${etiqueta}: ${tipoDe(respuesta)}`);
+};
+
+const exigirCache = (etiqueta, respuesta, maximoSegundos) => {
+  const cache = respuesta.headers.get('cache-control') ?? '';
+  const maxAge = Number(cache.match(/max-age=(\d+)/)?.[1] ?? NaN);
+  if (!cache) fail(`${etiqueta}: no envía Cache-Control`);
+  else if (/immutable/i.test(cache)) fail(`${etiqueta}: Cache-Control ${cache} dejaría el próximo despliegue sin verse hasta caducar`);
+  else if (Number.isFinite(maxAge) && maxAge > maximoSegundos) fail(`${etiqueta}: Cache-Control ${cache} caduca en más de ${maximoSegundos}s`);
+  else console.log(`caché ${etiqueta}: ${cache}`);
+};
+
 /** Suma recursiva del tamaño de dist/, para vigilar el peso total publicado. */
 const pesoDirectorio = (dir) =>
   readdirSync(dir, { withFileTypes: true }).reduce((total, entrada) => {
@@ -107,12 +138,12 @@ const cambioEntreFirmas = (a, b, umbral = 12) => {
   return distintas / a.length;
 };
 
-if (!existsSync(DIST)) {
+if (!ES_REMOTO && !existsSync(DIST)) {
   console.error('No existe dist/. Compila antes: VITE_BASE_PATH=... npm run build');
   process.exit(1);
 }
 
-const server = createServer((req, res) => {
+const server = ES_REMOTO ? null : createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://local');
   if (!url.pathname.startsWith(BASE)) {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -129,10 +160,10 @@ const server = createServer((req, res) => {
   createReadStream(abs).pipe(res);
 });
 
-await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
-const origin = `http://127.0.0.1:${server.address().port}`;
+if (server) await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+const origin = server ? `http://127.0.0.1:${server.address().port}` : new URL(URL_REMOTA).origin;
 const url = `${origin}${BASE}`;
-console.log(`sirviendo dist/ en ${url}`);
+console.log(ES_REMOTO ? `comprobando lo publicado en ${url}` : `sirviendo dist/ en ${url}`);
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
@@ -155,45 +186,92 @@ page.on('console', (message) => {
 });
 
 try {
-  // --- Pesos: JS de entrada, sprite, tarjeta social y total publicado.
-  const html = readFileSync(join(DIST, 'index.html'), 'utf8');
-  const entradaSrc = html.match(/<script[^>]+type="module"[^>]+src="([^"]+)"/)?.[1];
-  if (!entradaSrc) {
-    fail('pesos: no se encuentra el JS de entrada en index.html');
-  } else {
-    const entrada = join(DIST, entradaSrc.replace(BASE, ''));
-    if (!existsSync(entrada)) {
-      fail(`pesos: no existe el JS de entrada (${entradaSrc})`);
-    } else {
-      const crudo = statSync(entrada).size;
-      const gzip = gzipSync(readFileSync(entrada), { level: 6 }).length;
-      if (crudo > PRESUPUESTO.entradaJs) fail(`pesos: el JS de entrada ocupa ${kb(crudo)} (tope ${kb(PRESUPUESTO.entradaJs)})`);
-      if (gzip > PRESUPUESTO.entradaJsGzip) fail(`pesos: el JS de entrada pesa ${kb(gzip)} comprimido (tope ${kb(PRESUPUESTO.entradaJsGzip)})`);
-      console.log(`JS de entrada: ${kb(crudo)} (${kb(gzip)} gzip)`);
+  // --- Pesos: en local salen de dist/; en remoto se descargan de la URL publicada,
+  // que es donde se ven el base, los Content-Type y la caché real de Pages.
+  if (ES_REMOTO) {
+    const pedir = async (destino, etiqueta) => {
+      const respuesta = await fetch(destino, { headers: { 'cache-control': 'no-cache' } });
+      if (respuesta.status !== 200) {
+        fail(`${etiqueta}: responde ${respuesta.status} en ${destino}`);
+        return null;
+      }
+      return respuesta;
+    };
+
+    const htmlRemoto = await pedir(url, 'index.html');
+    if (htmlRemoto) {
+      exigirTipo('index.html', htmlRemoto, ['text/html']);
+      exigirCache('index.html', htmlRemoto, 3600);
+      const entradaSrc = (await htmlRemoto.text()).match(/<script[^>]+type="module"[^>]+src="([^"]+)"/)?.[1];
+      if (!entradaSrc) {
+        fail('pesos: no se encuentra el JS de entrada en index.html');
+      } else {
+        const entrada = await pedir(new URL(entradaSrc, url).href, 'JS de entrada');
+        if (entrada) {
+          exigirTipo('JS de entrada', entrada, ['application/javascript', 'text/javascript']);
+          exigirCache('JS de entrada', entrada, 3600);
+          const crudo = Buffer.from(await entrada.arrayBuffer());
+          const gzip = gzipSync(crudo, { level: 6 }).length;
+          if (crudo.length > PRESUPUESTO.entradaJs) fail(`pesos: el JS de entrada ocupa ${kb(crudo.length)} (tope ${kb(PRESUPUESTO.entradaJs)})`);
+          if (gzip > PRESUPUESTO.entradaJsGzip) fail(`pesos: el JS de entrada pesa ${kb(gzip)} comprimido (tope ${kb(PRESUPUESTO.entradaJsGzip)})`);
+          console.log(`JS de entrada: ${kb(crudo.length)} (${kb(gzip)} gzip)`);
+        }
+      }
     }
-  }
 
-  const sprite = join(DIST, 'assets', 'aistudio', 'operador-8dir.webp');
-  if (!existsSync(sprite)) {
-    fail('pesos: falta el sprite del operador (operador-8dir.webp)');
+    for (const [etiqueta, relativa, tipo, tope] of [
+      ['sprite', 'assets/aistudio/operador-8dir.webp', 'image/webp', PRESUPUESTO.sprite],
+      ['tarjeta social', 'social-card.jpg', 'image/jpeg', PRESUPUESTO.tarjetaSocial],
+    ]) {
+      const respuesta = await pedir(new URL(relativa, url).href, etiqueta);
+      if (!respuesta) continue;
+      exigirTipo(etiqueta, respuesta, [tipo]);
+      exigirCache(etiqueta, respuesta, 3600);
+      const peso = Buffer.from(await respuesta.arrayBuffer()).length;
+      if (peso > tope) fail(`pesos: la ${etiqueta} ocupa ${kb(peso)} (tope ${kb(tope)})`);
+      else console.log(`${etiqueta}: ${kb(peso)}`);
+    }
+    console.log('dist total: no aplica en modo remoto');
   } else {
-    const peso = statSync(sprite).size;
-    if (peso > PRESUPUESTO.sprite) fail(`pesos: el sprite ocupa ${kb(peso)} (tope ${kb(PRESUPUESTO.sprite)})`);
-    else console.log(`sprite: ${kb(peso)}`);
-  }
+    const html = readFileSync(join(DIST, 'index.html'), 'utf8');
+    const entradaSrc = html.match(/<script[^>]+type="module"[^>]+src="([^"]+)"/)?.[1];
+    if (!entradaSrc) {
+      fail('pesos: no se encuentra el JS de entrada en index.html');
+    } else {
+      const entrada = join(DIST, entradaSrc.replace(BASE, ''));
+      if (!existsSync(entrada)) {
+        fail(`pesos: no existe el JS de entrada (${entradaSrc})`);
+      } else {
+        const crudo = statSync(entrada).size;
+        const gzip = gzipSync(readFileSync(entrada), { level: 6 }).length;
+        if (crudo > PRESUPUESTO.entradaJs) fail(`pesos: el JS de entrada ocupa ${kb(crudo)} (tope ${kb(PRESUPUESTO.entradaJs)})`);
+        if (gzip > PRESUPUESTO.entradaJsGzip) fail(`pesos: el JS de entrada pesa ${kb(gzip)} comprimido (tope ${kb(PRESUPUESTO.entradaJsGzip)})`);
+        console.log(`JS de entrada: ${kb(crudo)} (${kb(gzip)} gzip)`);
+      }
+    }
 
-  const tarjeta = join(DIST, 'social-card.jpg');
-  if (!existsSync(tarjeta)) {
-    fail('pesos: falta social-card.jpg');
-  } else {
-    const peso = statSync(tarjeta).size;
-    if (peso > PRESUPUESTO.tarjetaSocial) fail(`pesos: la tarjeta social ocupa ${kb(peso)} (tope ${kb(PRESUPUESTO.tarjetaSocial)})`);
-    else console.log(`tarjeta social: ${kb(peso)}`);
-  }
+    const sprite = join(DIST, 'assets', 'aistudio', 'operador-8dir.webp');
+    if (!existsSync(sprite)) {
+      fail('pesos: falta el sprite del operador (operador-8dir.webp)');
+    } else {
+      const peso = statSync(sprite).size;
+      if (peso > PRESUPUESTO.sprite) fail(`pesos: el sprite ocupa ${kb(peso)} (tope ${kb(PRESUPUESTO.sprite)})`);
+      else console.log(`sprite: ${kb(peso)}`);
+    }
 
-  const totalDist = pesoDirectorio(DIST);
-  if (totalDist > PRESUPUESTO.dist) fail(`pesos: dist/ ocupa ${kb(totalDist)} (tope ${kb(PRESUPUESTO.dist)})`);
-  else console.log(`dist total: ${kb(totalDist)} (tope ${kb(PRESUPUESTO.dist)})`);
+    const tarjeta = join(DIST, 'social-card.jpg');
+    if (!existsSync(tarjeta)) {
+      fail('pesos: falta social-card.jpg');
+    } else {
+      const peso = statSync(tarjeta).size;
+      if (peso > PRESUPUESTO.tarjetaSocial) fail(`pesos: la tarjeta social ocupa ${kb(peso)} (tope ${kb(PRESUPUESTO.tarjetaSocial)})`);
+      else console.log(`tarjeta social: ${kb(peso)}`);
+    }
+
+    const totalDist = pesoDirectorio(DIST);
+    if (totalDist > PRESUPUESTO.dist) fail(`pesos: dist/ ocupa ${kb(totalDist)} (tope ${kb(PRESUPUESTO.dist)})`);
+    else console.log(`dist total: ${kb(totalDist)} (tope ${kb(PRESUPUESTO.dist)})`);
+  }
 
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForSelector('canvas', { timeout: 20000 });
@@ -300,6 +378,7 @@ try {
   if (respuestaManifest.status !== 200) {
     fail(`manifest: responde ${respuestaManifest.status} en ${BASE}manifest.webmanifest`);
   } else {
+    if (ES_REMOTO) exigirTipo('manifest', respuestaManifest, ['application/manifest+json', 'application/json']);
     let manifest = null;
     try {
       manifest = await respuestaManifest.json();
@@ -323,6 +402,7 @@ try {
           fail(`manifest: ${icono.src} responde ${respuesta.status}`);
           continue;
         }
+        if (ES_REMOTO) exigirTipo(`manifest ${icono.src}`, respuesta, ['image/png']);
         const medidas = imageSize(Buffer.from(await respuesta.arrayBuffer()));
         if (!medidas) fail(`manifest: ${icono.src} no es una imagen legible`);
         else if (`${medidas.width}x${medidas.height}` !== icono.sizes) {
@@ -336,6 +416,7 @@ try {
   const favicon = await fetch(`${origin}${BASE}favicon.ico`);
   if (favicon.status !== 200) fail(`favicon.ico: responde ${favicon.status}`);
   else {
+    if (ES_REMOTO) exigirTipo('favicon.ico', favicon, ['image/x-icon', 'image/vnd.microsoft.icon']);
     const bytes = Buffer.from(await favicon.arrayBuffer());
     if (bytes.length < 22 || bytes.readUInt16LE(0) !== 0 || bytes.readUInt16LE(2) !== 1) {
       fail('favicon.ico: no es un ICO válido');
@@ -556,11 +637,13 @@ try {
   if (badRequests.length) fail(`peticiones fallidas (${badRequests.length}):\n  ${badRequests.slice(0, 10).join('\n  ')}`);
   if (consoleErrors.length) fail(`errores en consola (${consoleErrors.length}):\n  ${consoleErrors.slice(0, 10).join('\n  ')}`);
   await browser.close();
-  server.close();
+  server?.close();
 }
 
 if (failures.length) {
   console.error(`\n✗ Prueba de humo fallida:\n- ${failures.join('\n- ')}`);
   process.exit(1);
 }
-console.log('\n✓ Prueba de humo correcta: canvas pintado, sin 404, Misión 1 en marcha, móvil con joystick y pesos dentro de tope.');
+console.log(
+  `\n✓ Prueba de humo correcta${ES_REMOTO ? ' (URL publicada)' : ''}: canvas pintado, sin 404, Misión 1 en marcha, móvil con joystick y pesos dentro de tope.`
+);
