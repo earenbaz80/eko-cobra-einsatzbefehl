@@ -4,7 +4,8 @@
  * Sirve dist/ bajo el mismo base que usa Pages, abre la página con Chromium y comprueba:
  *   1. que el canvas se ha renderizado (no está en blanco),
  *   2. que ninguna petición del propio sitio devuelve 404/5xx,
- *   3. que la Misión 1 arranca y muestra el HUD en juego,
+ *   3. que la Misión 1 arranca y muestra el HUD en juego, y que las siete misiones
+ *      pintan una escena con contenido,
  *   4. que los metadatos sociales, los iconos y el manifest están completos,
  *   5. que en viewport móvil con hasTouch aparece el joystick y mueve de verdad al operador,
  *   6. que el JS de entrada y los assets críticos no superan sus topes de peso,
@@ -13,6 +14,7 @@
  *
  * Cada bloque vive en su módulo, con nombre propio:
  *   smoke/checks/entrega.mjs     pesos, Content-Type y caché (local y remoto)
+ *   smoke/checks/misiones.mjs    las siete misiones arrancan y pintan escena
  *   smoke/checks/escritorio.mjs  partida, canvas, metadatos, manifest, iconos y favicon
  *   smoke/checks/movil.mjs       audio al primer toque, joystick y franjas del HUD
  * y las piezas comunes en smoke/config, informa, archivos, servidor-local, navegador y canvas.
@@ -27,6 +29,7 @@ import { fail, fallos } from './smoke/informe.mjs';
 import { arrancarServidorLocal } from './smoke/servidor-local.mjs';
 import { vigilarPagina } from './smoke/navegador.mjs';
 import { comprobarEntrega } from './smoke/checks/entrega.mjs';
+import { comprobarMisiones } from './smoke/checks/misiones.mjs';
 import { comprobarEscritorio } from './smoke/checks/escritorio.mjs';
 import { comprobarMovil } from './smoke/checks/movil.mjs';
 
@@ -52,6 +55,7 @@ vigilarPagina(page, { origin, badRequests, consoleErrors });
 
 try {
   await comprobarEntrega(contexto);
+  await comprobarMisiones(page, contexto);
   await comprobarEscritorio(page, contexto);
   await comprobarMovil(browser, contexto);
 } catch (error) {
