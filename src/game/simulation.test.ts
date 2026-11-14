@@ -169,6 +169,18 @@ describe('movimiento y colisión', () => {
     expect(a.tick).toBe(b.tick);
   });
 
+  it('contra una pared real de Graz el jugador se detiene antes del muro', () => {
+    const partida = crearPartida('graz', 7);
+    partida.entrada = { x: -1, y: 0 };
+    correr(partida, 200);
+    // Pared exterior izquierda en x = 90: el jugador (radio 9 + margen 3) no puede atravesarla.
+    expect(partida.jugador.x).toBeGreaterThan(90);
+    expect(partida.jugador.x).toBeLessThanOrEqual(110);
+    const antes = partida.jugador.x;
+    correr(partida, 10);
+    expect(partida.jugador.x).toBe(antes);
+  });
+
   it('dos partidas con la misma semilla recorren lo mismo', () => {
     const a = crearPartida('almacen', 99);
     const b = crearPartida('almacen', 99);
