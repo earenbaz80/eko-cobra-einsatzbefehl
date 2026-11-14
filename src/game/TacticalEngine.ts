@@ -42,6 +42,7 @@ import { classifyLethalShot, computeRoeImpact, isLawfulThreat, LETHAL_SHOT_POINT
 import { soundEngine } from './soundEngine';
 import { computeSquadNavTarget } from './squadAi';
 import { canSurrender, resolveBreachReaction } from './suspectAi';
+import { colisiona, deslizarConColision, distanciaASegmento } from './simulation';
 import {
   computeMoveSpeedPct,
   computePulseStabilityPct,
@@ -10712,37 +10713,12 @@ public keybinds: Record<string, string> = {
   }
 
   private moveActorWithCollision(actor: ActorEntity, nextX: number, nextY: number) {
-    if (!this.collidesAt(nextX, actor.y, actor.radius)) {
-      actor.x = nextX;
-    }
-    if (!this.collidesAt(actor.x, nextY, actor.radius)) {
-      actor.y = nextY;
-    }
+    // El deslizamiento y la colisión viven en simulation.ts, compartidos con los tests.
+    deslizarConColision(actor, nextX, nextY, (x, y) => this.collidesAt(x, y, actor.radius));
   }
 
   private collidesAt(x: number, y: number, radius: number): boolean {
-    for (const w of this.walls) {
-      if (this.distToSegment(x, y, w.x1, w.y1, w.x2, w.y2) < radius + 3) {
-        return true;
-      }
-    }
-    for (const d of this.doors) {
-      if (!d.isOpen && !d.isDestroyed) {
-        if (this.distToSegment(x, y, d.x1, d.y1, d.x2, d.y2) < radius + 3) {
-          return true;
-        }
-      }
-    }
-    for (const f of this.furniture) {
-      if (f.blocksMovement && !f.isDestroyed) {
-        const cx = Math.max(f.x, Math.min(x, f.x + f.w));
-        const cy = Math.max(f.y, Math.min(y, f.y + f.h));
-        if (Math.hypot(x - cx, y - cy) < radius) {
-          return true;
-        }
-      }
-    }
-    return false;
+    return colisiona(x, y, radius, this.walls, this.doors, this.furniture);
   }
 
   private distToSegment(
@@ -10753,11 +10729,7 @@ public keybinds: Record<string, string> = {
     x2: number,
     y2: number
   ): number {
-    const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
-    if (l2 === 0) return Math.hypot(px - x1, py - y1);
-    let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
-    t = Math.max(0, Math.min(1, t));
-    return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
+    return distanciaASegmento(px, py, x1, y1, x2, y2);
   }
 
   private computeVisibilityPolygon(
