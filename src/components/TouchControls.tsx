@@ -63,12 +63,12 @@ export function TouchControls({ onMove, onAction, onFire, onOpenPad }: TouchCont
       style={{ touchAction: 'none' }}
     >
       {hintVisible && (
-        <div className="absolute left-1/2 top-14 max-w-[92vw] -translate-x-1/2 rounded border border-[#334155]/70 bg-[#080C11]/88 px-3 py-1.5 text-center font-mono-tabular text-[10.5px] text-[#CBD5E1]">
+        <div className="absolute right-3 top-[48px] w-[52vw] max-w-[230px] rounded border border-[#334155]/70 bg-[#080C11]/88 px-2.5 py-1.5 text-left font-mono-tabular text-[10px] leading-tight text-[#CBD5E1] sm:left-1/2 sm:right-auto sm:top-14 sm:w-auto sm:max-w-[92vw] sm:-translate-x-1/2 sm:px-3 sm:text-center sm:text-[10.5px]">
           <span className="hidden landscape:inline">
             Joystick para moverte · toca la escena para apuntar y disparar
           </span>
           <span className="landscape:hidden">
-            Mejor en horizontal · gira el móvil. Joystick a la izquierda, toca la escena para disparar
+            Mejor en horizontal · gira el móvil. Toca la escena para disparar
           </span>
         </div>
       )}
@@ -77,7 +77,7 @@ export function TouchControls({ onMove, onAction, onFire, onOpenPad }: TouchCont
         ref={baseRef}
         role="group"
         aria-label="Joystick de movimiento"
-        className="pointer-events-auto absolute bottom-[92px] left-3 h-24 w-24 rounded-full border-2 border-[#38BDF8]/35 bg-[#0B1220]/55 backdrop-blur-sm sm:bottom-[78px] sm:left-4 sm:h-[124px] sm:w-[124px]"
+        className="pointer-events-auto absolute bottom-[116px] left-3 h-24 w-24 rounded-full border-2 border-[#38BDF8]/35 bg-[#0B1220]/55 backdrop-blur-sm sm:bottom-[78px] sm:left-4 sm:h-[124px] sm:w-[124px]"
         style={{ touchAction: 'none' }}
         onPointerDown={(event) => {
           event.preventDefault();
@@ -104,13 +104,13 @@ export function TouchControls({ onMove, onAction, onFire, onOpenPad }: TouchCont
       </div>
 
       <div
-        className="pointer-events-auto absolute bottom-[92px] right-3 flex flex-col items-end gap-2 sm:bottom-[78px] sm:right-4"
+        className="pointer-events-auto absolute bottom-[116px] right-3 flex flex-col items-end gap-1.5 sm:bottom-[78px] sm:right-4 sm:gap-2"
         style={{ touchAction: 'none' }}
       >
         <button
           type="button"
           aria-label="Disparar"
-          className="h-14 w-14 rounded-full border-2 border-[#D97706] bg-[#D97706]/25 font-mono-tabular text-[10px] font-bold tracking-wider text-[#FDE68A] active:bg-[#D97706]/50 sm:h-16 sm:w-16 sm:text-[11px]"
+          className="h-[52px] w-[52px] rounded-full border-2 border-[#D97706] bg-[#D97706]/25 font-mono-tabular text-[10px] font-bold tracking-wider text-[#FDE68A] active:bg-[#D97706]/50 sm:h-16 sm:w-16 sm:text-[11px]"
           onPointerDown={(event) => {
             event.preventDefault();
             onFire();
@@ -119,14 +119,14 @@ export function TouchControls({ onMove, onAction, onFire, onOpenPad }: TouchCont
           FUEGO
         </button>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-2 sm:gap-2">
           {ACTIONS.map((action) => (
             <button
               key={action.code}
               type="button"
               aria-label={action.title}
               title={action.title}
-              className="h-12 w-12 rounded-full border border-[#38BDF8]/50 bg-[#0B1220]/75 font-mono-tabular text-[8.5px] font-bold tracking-wide text-[#BAE6FD] active:bg-[#38BDF8]/25 sm:h-14 sm:w-14 sm:text-[9px]"
+              className="h-11 w-11 rounded-full border border-[#38BDF8]/50 bg-[#0B1220]/75 font-mono-tabular text-[8.5px] font-bold tracking-wide text-[#BAE6FD] active:bg-[#38BDF8]/25 sm:h-14 sm:w-14 sm:text-[9px]"
               onPointerDown={(event) => {
                 event.preventDefault();
                 onAction(action.code);
@@ -138,7 +138,7 @@ export function TouchControls({ onMove, onAction, onFire, onOpenPad }: TouchCont
           <button
             type="button"
             aria-label="Abrir EKO-Pad"
-            className="h-12 w-12 rounded-full border border-[#38BDF8]/50 bg-[#0B1220]/75 font-mono-tabular text-[8.5px] font-bold tracking-wide text-[#BAE6FD] active:bg-[#38BDF8]/25 sm:h-14 sm:w-14 sm:text-[9px]"
+            className="h-11 w-11 rounded-full border border-[#38BDF8]/50 bg-[#0B1220]/75 font-mono-tabular text-[8.5px] font-bold tracking-wide text-[#BAE6FD] active:bg-[#38BDF8]/25 sm:h-14 sm:w-14 sm:text-[9px]"
             onPointerDown={(event) => {
               event.preventDefault();
               onOpenPad();

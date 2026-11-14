@@ -587,6 +587,23 @@ export default function App() {
     engineRef.current?.startTrainingRange();
   };
 
+  // Safari iOS y Chrome Android mantienen el AudioContext suspendido hasta un gesto
+  // real: lo desbloqueamos con el primer toque o tecla para que la misión suene.
+  useEffect(() => {
+    // En captura: los manejadores táctiles del canvas cortan la propagación, y en
+    // burbuja el primer toque nunca llegaría aquí.
+    const unlockAudio = () => soundEngine.unlock();
+    const opciones: AddEventListenerOptions = { once: true, capture: true };
+    window.addEventListener('pointerdown', unlockAudio, opciones);
+    window.addEventListener('keydown', unlockAudio, opciones);
+    window.addEventListener('touchstart', unlockAudio, { ...opciones, passive: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlockAudio, opciones);
+      window.removeEventListener('keydown', unlockAudio, opciones);
+      window.removeEventListener('touchstart', unlockAudio, opciones);
+    };
+  }, []);
+
   const handleStartTutorial = () => {
     openModalExclusive('NONE');
     setTutorialActive(true);
@@ -916,7 +933,7 @@ export default function App() {
 
       {/* SUBTITLES OVERLAY */}
       {subtitlesEnabled && gameState === 'PLAYING' && activeTickerMessage && (
-        <div className="fixed bottom-16 left-1/2 -translate-x-1/2 z-40 max-w-3xl px-4 py-2 bg-[#080C11]/85 backdrop-blur-md border border-[#334155]/70 text-center text-sm text-white font-medium shadow-lg">
+        <div className="fixed bottom-[284px] left-1/2 -translate-x-1/2 z-40 w-[calc(100vw-1.5rem)] max-w-3xl px-3 py-1.5 bg-[#080C11]/85 backdrop-blur-md border border-[#334155]/70 text-center text-[11.5px] leading-snug text-white font-medium shadow-lg sm:bottom-16 sm:w-auto sm:px-4 sm:py-2 sm:text-sm">
           <strong className={activeTickerMessage.tone === 'alert' ? 'text-[#EF4444]' : activeTickerMessage.tone === 'ok' ? 'text-[#34D399]' : 'text-[#38BDF8]'}>
             {activeTickerMessage.speaker}:
           </strong>{' '}
@@ -1190,7 +1207,7 @@ export default function App() {
         >
           {/* ==================== SITUACIÓN DE PELIGRO HUD BADGE (DOCKED ABOVE FOOTER) ==================== */}
           {hud.dangerState?.active && (
-            <div className="pointer-events-auto self-center mb-1.5 px-3 py-1 bg-[#EF4444]/90 backdrop-blur-sm border border-[#FCA5A5] text-black font-mono-tabular font-extrabold text-[11px] shadow-[0_0_22px_rgba(239,68,68,0.9)] flex items-center gap-2 animate-pulse shrink-0">
+            <div className="pointer-events-auto self-center mb-1.5 max-w-[calc(100vw-1rem)] px-3 py-1 bg-[#EF4444]/90 backdrop-blur-sm border border-[#FCA5A5] text-black font-mono-tabular font-extrabold text-[11px] shadow-[0_0_22px_rgba(239,68,68,0.9)] flex items-center gap-2 animate-pulse shrink-0">
               <AlertTriangle className="w-4 h-4 fill-current shrink-0 text-black" />
               <span>⚠ SITUACIÓN DE PELIGRO: {hud.dangerState.reason}</span>
             </div>
@@ -1283,7 +1300,7 @@ export default function App() {
           )}
 
           {/* ==================== SINGLE COMPACT CONTEXTUAL PROMPT (TRANSLUCENT) ==================== */}
-          <div className="mb-1.5 flex flex-col items-center pointer-events-none">
+          <div className="mb-1.5 flex flex-col items-center pointer-events-none px-2 max-sm:mb-[124px]">
             {hud.breachAction ? (
               <div className="px-4 py-1.5 bg-[#080C11]/55 backdrop-blur-sm border border-[#D97706]/80 shadow-lg flex items-center gap-3 font-mono-tabular text-[11px]">
                 <span className="font-bold text-[#FDE68A]">
@@ -1353,7 +1370,7 @@ export default function App() {
           )}
 
           {/* ==================== UNIFIED TACTICAL HUD FOOTER ==================== */}
-          <div className="pointer-events-auto bg-[#080C11]/92 backdrop-blur-md border-t border-[#334155]/70 px-2 py-0.5 font-mono-tabular shadow-2xl flex flex-row items-center gap-1.5 overflow-x-auto whitespace-nowrap z-20">
+          <div className="pointer-events-auto bg-[#080C11]/92 backdrop-blur-md border-t border-[#334155]/70 px-1.5 sm:px-2 py-0.5 font-mono-tabular shadow-2xl flex flex-row flex-wrap sm:flex-nowrap items-center gap-1 sm:gap-1.5 overflow-visible sm:overflow-x-auto whitespace-nowrap z-20">
             {/* 1. OPERATOR & SQUADMATE TELEMETRY */}
             <div className="relative flex items-center gap-3 shrink-0">
               {/* Upward Popover 1: Anatomical Telemetry */}
@@ -1617,7 +1634,7 @@ export default function App() {
             {(() => {
               const rank = hud.playerMissionRank || computePlayerMissionRank(hud.score || 0);
               return (
-                <div className="relative flex items-center shrink-0 border-l border-r border-[#334155]/60 px-2.5">
+                <div className="relative hidden sm:flex items-center shrink-0 border-l border-r border-[#334155]/60 px-2.5">
                   {/* Upward Popover: Rank Tiers & Mission Performance Details */}
                   <div
                     aria-hidden={!rankDrawerOpen}
@@ -1783,7 +1800,7 @@ export default function App() {
                   engineRef.current?.togglePlayerStance();
                 }}
                 title="Postura táctica: Clic para alternar Parado / Agachado [Z]"
-                className={`px-2.5 py-1.5 bg-[#080C11]/95 border flex items-center gap-2 font-mono-tabular transition-all duration-200 transform cursor-pointer hover:scale-105 active:scale-95 scale-100 rotate-0 ${
+                className={`hidden sm:flex px-2.5 py-1.5 bg-[#080C11]/95 border items-center gap-2 font-mono-tabular transition-all duration-200 transform cursor-pointer hover:scale-105 active:scale-95 scale-100 rotate-0 ${
                   hud.playerStance === 'AGACHADO'
                     ? 'border-[#10B981] bg-[#064E3B]/60 text-[#34D399] shadow-[0_0_15px_rgba(16,185,129,0.5)]'
                     : 'border-[#38BDF8] bg-[#0F172A]/95 text-[#38BDF8] shadow-[0_0_15px_rgba(56,189,248,0.4)]'
@@ -1861,7 +1878,7 @@ export default function App() {
               {/* Primary Weapon & Smart Diegetic HUD Telemetry indicator */}
               <div
                 title="HUD Diegético Activo: El contador de balas, cargador y modo de disparo [V] flotan en la retícula del cursor para evitar el viaje ocular."
-                className="flex items-center gap-2 px-2.5 py-1.5 bg-[#080C11]/85 border border-[#334155]/70"
+                className="hidden sm:flex items-center gap-2 px-2.5 py-1.5 bg-[#080C11]/85 border border-[#334155]/70"
               >
                 <div className="w-5 h-5 flex items-center justify-center text-xs text-[#F59E0B]">
                   <Zap className="w-3.5 h-3.5" />
@@ -1910,7 +1927,7 @@ export default function App() {
 
               {/* Compact Radio TETRA Bar */}
               <div
-                className={`relative flex items-center gap-1.5 px-2 py-1 bg-[#0F172A]/80 border text-[10px] max-w-xs md:max-w-sm transition-colors ${
+                className={`relative hidden sm:flex items-center gap-1.5 px-2 py-1 bg-[#0F172A]/80 border text-[10px] max-w-xs md:max-w-sm transition-colors ${
                   hud.radioTransmitting ? 'border-[#10B981] bg-[#064E3B]/30' : 'border-[#334155]/60'
                 }`}
               >

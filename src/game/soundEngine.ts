@@ -23,6 +23,23 @@ class TacticalSoundEngine {
     return this.ctx;
   }
 
+  /**
+   * Crea o reanuda el AudioContext en el primer gesto del usuario. Safari iOS y
+   * Chrome Android no arrancan el audio sin uno, y el motor lo necesita ya creado
+   * para los sonidos que no nacen de un clic (ambiente, radio, pasos).
+   */
+  public unlock() {
+    const ctx = this.ensureContext();
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+  }
+
+  /** Estado del AudioContext, para diagnósticos y pruebas de humo. */
+  public get audioState(): AudioContextState | 'none' {
+    return this.ctx ? this.ctx.state : 'none';
+  }
+
   public setMuted(mute: boolean) {
     this.muted = mute;
     if (this.rainGain && this.ctx) {
