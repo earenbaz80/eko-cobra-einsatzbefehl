@@ -7,7 +7,8 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { exigirCache, exigirTipo, fail, kb } from '../informe.mjs';
-import { pesoDirectorio } from '../archivos.mjs';
+import { listarArchivos, pesoDirectorio } from '../archivos.mjs';
+import { assetsHuerfanos, esFuenteDeReferencias } from '../referencias.mjs';
 import { leerMarca, coincideMarca } from '../marca.mjs';
 import { BASE, DIST, ES_REMOTO, PRESUPUESTO, SHA_ESPERADO } from '../config.mjs';
 
@@ -117,6 +118,14 @@ function comprobarBuildLocal() {
   const totalDist = pesoDirectorio(DIST);
   if (totalDist > PRESUPUESTO.dist) fail(`pesos: dist/ ocupa ${kb(totalDist)} (tope ${kb(PRESUPUESTO.dist)})`);
   else console.log(`dist total: ${kb(totalDist)} (tope ${kb(PRESUPUESTO.dist)})`);
+
+  // Nada publicado debe quedar sin que nadie lo nombre: los restos de escenarios o
+  // sprites viejos viajan en cada despliegue y no se echan de menos hasta que pesan.
+  const archivos = listarArchivos(DIST);
+  const textos = archivos.filter(esFuenteDeReferencias).map((ruta) => readFileSync(join(DIST, ruta), 'utf8'));
+  const huerfanos = assetsHuerfanos(archivos, textos);
+  if (huerfanos.length) fail(`assets muertos en dist/: ${huerfanos.join(', ')}`);
+  else console.log(`assets: ${archivos.length} archivos, todos referenciados`);
 }
 
 /** Sección de entrega: elige la fuente de los pesos según el modo. */

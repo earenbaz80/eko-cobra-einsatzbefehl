@@ -21,6 +21,13 @@ export const imageSize = (buffer) => {
   return null;
 };
 
+/** Rutas relativas (con `/`) de todos los archivos de un directorio, recursivo. */
+export const listarArchivos = (dir, prefijo = '') =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((entrada) => {
+    const ruta = prefijo ? `${prefijo}/${entrada.name}` : entrada.name;
+    return entrada.isDirectory() ? listarArchivos(join(dir, entrada.name), ruta) : [ruta];
+  });
+
 /** Suma recursiva del tamaño de dist/, para vigilar el peso total publicado. */
 export const pesoDirectorio = (dir) =>
   readdirSync(dir, { withFileTypes: true }).reduce((total, entrada) => {
