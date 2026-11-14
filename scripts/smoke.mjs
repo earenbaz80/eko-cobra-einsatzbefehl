@@ -353,6 +353,25 @@ try {
     hasTouch: true,
     isMobile: true,
   });
+  // Instrumenta el AudioContext: así se puede comprobar que el primer gesto lo deja
+  // sonando (en iOS/Android nace suspendido y solo un toque lo reanuda).
+  await contextoMovil.addInitScript(() => {
+    const Original = window.AudioContext;
+    if (!Original) return;
+    window.__ekoAudio = [];
+    window.__ekoResumes = 0;
+    const resumeOriginal = Original.prototype.resume;
+    Original.prototype.resume = function (...args) {
+      window.__ekoResumes += 1;
+      return resumeOriginal.apply(this, args);
+    };
+    window.AudioContext = class extends Original {
+      constructor(...args) {
+        super(...args);
+        window.__ekoAudio.push(this);
+      }
+    };
+  });
   const movil = await contextoMovil.newPage();
   movil.on('response', (response) => {
     const target = response.url();
@@ -369,6 +388,28 @@ try {
   await movil.bringToFront();
   await movil.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await movil.waitForSelector('canvas', { timeout: 20000 });
+
+  // Audio: se fuerza el estado real de un móvil (contexto suspendido) y se toca la
+  // pantalla; ese primer contacto tiene que dejarlo en running.
+  const audioAntes = await movil.evaluate(async () => {
+    const contextos = window.__ekoAudio ?? [];
+    for (const contexto of contextos) await contexto.suspend().catch(() => {});
+    return contextos.map((contexto) => contexto.state);
+  });
+  await movil.touchscreen.tap(195, 120);
+  await movil.waitForTimeout(500);
+  const audioDespues = await movil.evaluate(() => ({
+    estados: (window.__ekoAudio ?? []).map((contexto) => contexto.state),
+    resumes: window.__ekoResumes ?? 0,
+  }));
+  if (!audioDespues.estados.length) {
+    fail('audio: el primer toque no creó ningún AudioContext');
+  } else if (audioDespues.estados.some((estado) => estado !== 'running')) {
+    fail(`audio: tras el primer toque el AudioContext sigue en ${audioDespues.estados.join('/')}`);
+  } else {
+    console.log(`audio: ${audioAntes[0] ?? 'sin contexto'} -> running tras el primer toque (${audioDespues.resumes} resume)`);
+  }
+
   await movil.getByRole('button', { name: 'Misión 1: Piso Graz - Lend' }).click();
   await movil.getByText('K1 OPERATIVO').first().waitFor({ timeout: 20000 });
   await movil.waitForTimeout(1800);
@@ -448,8 +489,7 @@ try {
     }
   }
 
-  // La barra del HUD envuelve en más o menos filas según el ancho: al cambiar de
-  // viewport las franjas se recalculan solas y no pueden pisarse ni salirse.
+  // --- Franjas del HUD: joystick, botones, subtítulos y barra inferior no se pisan.
   try {
     await movil.waitForFunction(
       () => [...document.querySelectorAll('div')].some((el) => (el.className || '').includes('radio-subtitles')),
@@ -459,12 +499,8 @@ try {
   } catch {
     // Sin mensaje de radio no hay subtítulo que medir; los controles se comprueban igual.
   }
-  for (const [ancho, alto] of [
-    [320, 568],
-    [360, 640],
-  ]) {
-    await movil.setViewportSize({ width: ancho, height: alto });
-    await movil.waitForTimeout(600);
+
+  const comprobarFranjas = async (etiqueta) => {
     const cajas = await movil.evaluate(() => {
       const caja = (el) => {
         const b = el.getBoundingClientRect();
@@ -491,15 +527,31 @@ try {
     });
     const solapa = (a, b) => Boolean(a && b && !(a.right <= b.x || b.right <= a.x || a.bottom <= b.y || b.bottom <= a.y));
     const pisados = [
+      solapa(cajas.joystick, cajas.acciones) && 'joystick/botones',
       solapa(cajas.joystick, cajas.footer) && 'joystick/HUD',
       solapa(cajas.acciones, cajas.footer) && 'botones/HUD',
       solapa(cajas.subtitulos, cajas.joystick) && 'subtítulos/joystick',
       solapa(cajas.subtitulos, cajas.acciones) && 'subtítulos/botones',
+      solapa(cajas.subtitulos, cajas.footer) && 'subtítulos/HUD',
     ].filter(Boolean);
-    if (pisados.length) fail(`móvil ${ancho}px: se pisan ${pisados.join(', ')} (${JSON.stringify(cajas)})`);
-    if (cajas.hijosCortados > 0) fail(`móvil ${ancho}px: la barra inferior corta ${cajas.hijosCortados} bloque(s) por la derecha`);
-    console.log(`móvil ${ancho}px: franjas sin solape (HUD ${cajas.stack})`);
+    if (pisados.length) fail(`${etiqueta}: se pisan ${pisados.join(', ')} (${JSON.stringify(cajas)})`);
+    if (cajas.hijosCortados > 0) fail(`${etiqueta}: la barra inferior corta ${cajas.hijosCortados} bloque(s) por la derecha`);
+    if (!pisados.length && cajas.hijosCortados === 0) {
+      console.log(`${etiqueta}: sin solapes (HUD ${cajas.stack}, subtítulos ${cajas.subtitulos ? 'medidos' : 'sin mensaje'})`);
+    }
+  };
+
+  // El viewport vertical de partida, y luego dos anchos donde la barra envuelve distinto.
+  await comprobarFranjas('móvil 390x844');
+  for (const [ancho, alto] of [
+    [320, 568],
+    [360, 640],
+  ]) {
+    await movil.setViewportSize({ width: ancho, height: alto });
+    await movil.waitForTimeout(600);
+    await comprobarFranjas(`móvil ${ancho}x${alto}`);
   }
+
   await contextoMovil.close();
 } catch (error) {
   fail(`navegación/interacción: ${error.message}`);
