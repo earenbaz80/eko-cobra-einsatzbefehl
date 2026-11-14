@@ -104,6 +104,8 @@ La lógica que no depende del canvas vive en módulos puros y está cubierta por
 
 GitHub Actions ejecuta typecheck, tests y build en cada push a `main` y en cada pull request.
 
+Un job aparte compila con el base de GitHub Pages, sirve `dist/` y abre la página en Chromium (`npm run smoke`, con Playwright) para comprobar que el canvas se pinta, que no hay ningún 404 de assets y que la Misión 1 arranca: así una pantalla en blanco no llega a publicarse.
+
 ## Estructura
 
 ```
