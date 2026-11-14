@@ -304,6 +304,8 @@ class BattlemapAssetCache {
   private proceduralReady = false;
   private grazStationImg?: HTMLImageElement;
   private grazStationLoading = false;
+  /** La referencia de Graz (varios MB) solo se pide si el escenario de estación la usa. */
+  private wantGrazStation = false;
 
   public ensureLoaded() {
     if (typeof window === 'undefined') return;
@@ -311,7 +313,7 @@ class BattlemapAssetCache {
       this.buildProceduralSprites();
       this.proceduralReady = true;
     }
-    if (!this.grazStationImg && !this.grazStationLoading) {
+    if (this.wantGrazStation && !this.grazStationImg && !this.grazStationLoading) {
       this.grazStationLoading = true;
       const stImg = new Image();
       stImg.crossOrigin = 'anonymous';
@@ -351,6 +353,7 @@ class BattlemapAssetCache {
   }
 
   public getGrazStationImage(): HTMLImageElement | undefined {
+    this.wantGrazStation = true;
     this.ensureLoaded();
     return this.grazStationImg;
   }
