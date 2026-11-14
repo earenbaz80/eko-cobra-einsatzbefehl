@@ -34,6 +34,25 @@ const CONTENT_TYPES = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
+/** Ancho y alto de un PNG o JPEG a partir de sus cabeceras. */
+const imageSize = (buffer) => {
+  if (buffer.length > 24 && buffer.readUInt32BE(0) === 0x89504e47) {
+    return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20), tipo: 'png' };
+  }
+  if (buffer[0] === 0xff && buffer[1] === 0xd8) {
+    let offset = 2;
+    while (offset + 9 < buffer.length) {
+      if (buffer[offset] !== 0xff) return null;
+      const marcador = buffer[offset + 1];
+      if (marcador >= 0xc0 && marcador <= 0xcf && marcador !== 0xc4 && marcador !== 0xc8 && marcador !== 0xcc) {
+        return { height: buffer.readUInt16BE(offset + 5), width: buffer.readUInt16BE(offset + 7), tipo: 'jpeg' };
+      }
+      offset += 2 + buffer.readUInt16BE(offset + 2);
+    }
+  }
+  return null;
+};
+
 const failures = [];
 const fail = (mensaje) => failures.push(mensaje);
 
@@ -126,6 +145,62 @@ try {
     console.log(
       `canvas ${canvas.width}x${canvas.height}: ${canvas.tonos} tonos, ${(proporcion * 100).toFixed(1)} % de píxeles visibles`
     );
+  }
+  // --- Metadatos sociales: una ruta de assets rota aquí no rompe el juego, pero
+  // deja el enlace compartido sin imagen y nadie se enteraría.
+  const social = await page.evaluate(() => {
+    const contenido = (selector) => document.querySelector(selector)?.getAttribute('content') ?? null;
+    return {
+      canonical: document.querySelector('link[rel="canonical"]')?.getAttribute('href') ?? null,
+      ogImage: contenido('meta[property="og:image"]'),
+      ogImageWidth: contenido('meta[property="og:image:width"]'),
+      ogImageHeight: contenido('meta[property="og:image:height"]'),
+      twitterImage: contenido('meta[name="twitter:image"]'),
+    };
+  });
+
+  const esAbsoluta = (url) => typeof url === 'string' && /^https?:\/\//i.test(url);
+  if (!social.canonical) fail('metadatos: falta <link rel="canonical">');
+  else if (!esAbsoluta(social.canonical)) fail(`metadatos: canonical no es una URL absoluta (${social.canonical})`);
+
+  if (social.ogImageWidth && social.ogImageWidth !== '1200') fail(`metadatos: og:image:width es ${social.ogImageWidth}, se esperaba 1200`);
+  if (social.ogImageHeight && social.ogImageHeight !== '630') fail(`metadatos: og:image:height es ${social.ogImageHeight}, se esperaba 630`);
+
+  const revisadas = new Map();
+  for (const [nombre, valor] of [
+    ['og:image', social.ogImage],
+    ['twitter:image', social.twitterImage],
+  ]) {
+    if (!valor) {
+      fail(`metadatos: falta ${nombre}`);
+      continue;
+    }
+    if (!esAbsoluta(valor)) {
+      fail(`metadatos: ${nombre} no es una URL absoluta (${valor})`);
+      continue;
+    }
+    const ruta = new URL(valor).pathname;
+    if (!ruta.startsWith(BASE)) {
+      fail(`metadatos: ${nombre} apunta fuera del base (${ruta}, base ${BASE})`);
+      continue;
+    }
+    if (!revisadas.has(ruta)) {
+      const respuesta = await fetch(`${origin}${ruta}`);
+      if (respuesta.status !== 200) {
+        revisadas.set(ruta, `responde ${respuesta.status}`);
+      } else {
+        const tipo = respuesta.headers.get('content-type') ?? '';
+        const medidas = imageSize(Buffer.from(await respuesta.arrayBuffer()));
+        if (!/^image\//.test(tipo)) revisadas.set(ruta, `no es una imagen (${tipo})`);
+        else if (!medidas) revisadas.set(ruta, 'no se pudo leer el tamaño');
+        else if (medidas.width !== 1200 || medidas.height !== 630) {
+          revisadas.set(ruta, `mide ${medidas.width}x${medidas.height}, se esperaba 1200x630`);
+        } else revisadas.set(ruta, null);
+      }
+    }
+    const problema = revisadas.get(ruta);
+    if (problema) fail(`metadatos: ${nombre} -> ${ruta} ${problema}`);
+    else if (nombre === 'og:image') console.log(`${nombre} -> ${ruta} (200, 1200x630)`);
   }
 } catch (error) {
   fail(`navegación/interacción: ${error.message}`);
