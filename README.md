@@ -109,4 +109,6 @@ React 19 · TypeScript (modo `strict`) · Vite 8 · Tailwind CSS 4 · Canvas 2D 
 
 ## Licencia
 
-Sin licencia: el código es **UNLICENSED** (todos los derechos reservados). Se publica para consulta y estudio; no se concede permiso de reutilización, modificación ni redistribución sin autorización expresa.
+El **código** se distribuye bajo licencia **MIT** (ver [LICENSE](LICENSE)): puedes usarlo, modificarlo y redistribuirlo citando la autoría, sin garantía de ningún tipo.
+
+Los **assets** de `public/assets/` (ilustraciones, sprites, fondos e imágenes generadas) **no** están cubiertos por esa licencia: son © 2026 earenbaz80, todos los derechos reservados, y no pueden reutilizarse ni redistribuirse sin permiso expreso.

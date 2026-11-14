@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "Simulador táctico top-down 2D de intervención policial antiterrorista del EKO Cobra (Austria), con documento de diseño interactivo.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
