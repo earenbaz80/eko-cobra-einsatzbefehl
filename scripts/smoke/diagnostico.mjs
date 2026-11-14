@@ -3,7 +3,7 @@
  * Playwright del contexto. En local quedan en `.smoke-fallos/`; en CI, el job las sube
  * como artifact, porque en el log solo se ve el mensaje del fallo y no la pantalla.
  */
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 export const DIR_DIAGNOSTICO = resolve(process.cwd(), '.smoke-fallos');
@@ -17,6 +17,16 @@ export const limpiarDiagnostico = () => rmSync(DIR_DIAGNOSTICO, { recursive: tru
  * por run; con los snapshots queda en ~0,7 MB y la captura final da la parte visual.
  */
 export const arrancarTraza = (contexto) => contexto.tracing.start({ screenshots: false, snapshots: true, sources: false });
+
+/**
+ * Deja el informe del fallo por escrito junto a la captura. El log de un job se pierde
+ * al terminar el run; este fichero viaja en el artifact y se puede leer después.
+ */
+export function escribirInforme(fallos) {
+  if (!fallos.length) return;
+  mkdirSync(DIR_DIAGNOSTICO, { recursive: true });
+  writeFileSync(join(DIR_DIAGNOSTICO, 'informe.txt'), `${fallos.map((fallo) => `- ${fallo}`).join('\n')}\n`, 'utf8');
+}
 
 /** Captura la pestaña tal como está. Nunca lanza: el fallo original es el que importa. */
 export async function capturarPantalla(page, nombre) {

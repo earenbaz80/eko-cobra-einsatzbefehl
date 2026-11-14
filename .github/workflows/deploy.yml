@@ -118,6 +118,18 @@ jobs:
           echo "::error::la URL publicada no pasa la prueba de humo"
           exit 1
 
+      # Igual que en el CI: un fallo aquí solo dejaba el log del run, que se pierde. El
+      # informe.txt del artifact dice qué comprobación falló; si el humo se reintentó,
+      # quedan los ficheros del último intento, que es el que decide.
+      - name: Subir captura e informe del humo publicado
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-fallos-publicado
+          path: .smoke-fallos
+          if-no-files-found: ignore
+          retention-days: 7
+
       # Un run rojo sin contexto no dice si el sitio quedó bien o mal: el resumen deja
       # escrito que SÍ se publicó y con qué problema, para que no se pierda en el rojo.
       - name: Resumen del despliegue con problemas

@@ -33,7 +33,7 @@ import { BASE, DIST, ES_REMOTO, URL_PUBLICADA } from './smoke/config.mjs';
 import { fail, fallos } from './smoke/informe.mjs';
 import { arrancarServidorLocal } from './smoke/servidor-local.mjs';
 import { vigilarPagina } from './smoke/navegador.mjs';
-import { arrancarTraza, guardarDiagnostico, limpiarDiagnostico, DIR_DIAGNOSTICO } from './smoke/diagnostico.mjs';
+import { arrancarTraza, escribirInforme, guardarDiagnostico, limpiarDiagnostico, DIR_DIAGNOSTICO } from './smoke/diagnostico.mjs';
 import { comprobarEntrega } from './smoke/checks/entrega.mjs';
 import { comprobarMisiones } from './smoke/checks/misiones.mjs';
 import { comprobarEscritorio } from './smoke/checks/escritorio.mjs';
@@ -77,6 +77,7 @@ try {
   if (badRequests.length) fail(`peticiones fallidas (${badRequests.length}):\n  ${badRequests.slice(0, 10).join('\n  ')}`);
   if (consoleErrors.length) fail(`errores en consola (${consoleErrors.length}):\n  ${consoleErrors.slice(0, 10).join('\n  ')}`);
   if (fallos.length) {
+    escribirInforme(fallos);
     await guardarDiagnostico(contextoNavegador, page, 'escritorio');
     console.error(`captura y traza en ${DIR_DIAGNOSTICO} (el CI las sube como artifact)`);
   }

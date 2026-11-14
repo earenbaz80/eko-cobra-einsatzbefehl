@@ -61,16 +61,30 @@ function comprobarFrames(etiqueta, deltas, topeP95) {
   else console.log(`${etiqueta}: ${resumen} (tope p95 ${topeP95} ms)`);
 }
 
+/**
+ * Mide la ventana y, si salieron muy pocos frames, la repite una vez: una pestaña que el
+ * navegador tiene por oculta produce cuatro frames y no dice nada del juego.
+ */
+async function medirVentana(page) {
+  let deltas = await medirFrames(page);
+  if (estadisticasFrames(deltas).muestras >= MUESTRAS_MINIMAS) return deltas;
+  await page.bringToFront();
+  await page.waitForTimeout(300);
+  return medirFrames(page);
+}
+
 /** Mide las misiones pautadas en una pestaña ya abierta. */
 async function medirMisiones(perfil, page, url, tope) {
   for (const mision of MISIONES_MEDIDAS) {
     await arrancarMision(page, url, mision);
-    comprobarFrames(`rendimiento ${perfil} · ${mision}`, await medirFrames(page), tope);
+    comprobarFrames(`rendimiento ${perfil} · ${mision}`, await medirVentana(page), tope);
   }
 }
 
 /** Sección de rendimiento: escritorio en la pestaña compartida y móvil en un contexto táctil. */
 export async function comprobarRendimiento(page, { url, origin, badRequests, consoleErrors }) {
+  // En primer plano: una pestaña en segundo plano estrangula rAF y falsea la medición.
+  await page.bringToFront();
   await medirMisiones('escritorio', page, url, PRESUPUESTO_FRAMES.escritorio);
 
   const navegador = page.context().browser();
