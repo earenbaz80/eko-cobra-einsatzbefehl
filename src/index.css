@@ -269,3 +269,25 @@
     bottom: calc(var(--eko-hud-stack-h, 111px) + var(--eko-touch-cluster-h, 152px) + 20px);
   }
 }
+
+/* A 320 px la telemetría de K1 + IFAK + K2 no cabe en una fila y el bloque de K2
+   desbordaba por el borde: se deja envolver dentro de su propio bloque. */
+@media (max-width: 359px) {
+  .hud-operador {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+}
+
+/* En un móvil de 320 px la etiqueta de blindaje de K2 no cabe en su columna y
+   empujaba el texto fuera de la pantalla; el dato sigue en el panel de órdenes. */
+@media (max-width: 359px) {
+  .hud-k2-blindaje {
+    display: none;
+  }
+}
+
+/* Los desplegables del HUD (w-80/w-96) no caben en pantallas de 320 px. */
+.tactical-popover-up {
+  max-width: calc(100vw - 0.75rem);
+}

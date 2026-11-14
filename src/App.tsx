@@ -1406,7 +1406,7 @@ export default function App() {
           {/* ==================== UNIFIED TACTICAL HUD FOOTER ==================== */}
           <div className="pointer-events-auto bg-[#080C11]/92 backdrop-blur-md border-t border-[#334155]/70 px-1.5 sm:px-2 py-0.5 font-mono-tabular shadow-2xl flex flex-row flex-wrap sm:flex-nowrap items-center gap-1 sm:gap-1.5 overflow-visible sm:overflow-x-auto whitespace-nowrap z-20">
             {/* 1. OPERATOR & SQUADMATE TELEMETRY */}
-            <div className="relative flex items-center gap-3 shrink-0">
+            <div className="hud-operador relative flex items-center gap-3 shrink-0">
               {/* Upward Popover 1: Anatomical Telemetry */}
               <div
                 aria-hidden={!anatomyDrawerOpen}
@@ -1637,7 +1637,7 @@ export default function App() {
                           : 'K2 CRÍTICO'}
                     </span>
                   </span>
-                  <span className="text-[9px] text-[#CBD5E1]">
+                  <span className="hud-k2-blindaje text-[9px] text-[#CBD5E1]">
                     {hud.squadVitals.armor > 50 ? 'KV III-A' : hud.squadVitals.armor > 0 ? 'KV DAÑADO' : 'SIN BLINDAJE'}
                   </span>
                 </div>
