@@ -24,6 +24,7 @@ import {
   MicOff,
 } from 'lucide-react';
 import { TouchControls } from './components/TouchControls';
+import { construirResumen, publicarResumen, quiereMenu } from './components/errorReport';
 const BlueprintModal = lazy(() =>
   import('./components/BlueprintModal').then((m) => ({ default: m.BlueprintModal }))
 );
@@ -655,6 +656,22 @@ export default function App() {
       soundEngine.stopAmbientDrone();
     }
   };
+
+  // El ErrorBoundary no puede hablar con el motor: App le deja aquí el último estado
+  // conocido (misión, tick, entidades) para el informe de fallo.
+  useEffect(() => {
+    publicarResumen(construirResumen({ hud, gameState, ticks: engineRef.current?.ticks ?? 0 }));
+  }, [hud, gameState]);
+
+  // El enlace de recuperación (`?menu=1`) siempre abre el menú: no se retoma la partida
+  // que acaba de romperse, y el parámetro se limpia para que un F5 posterior tampoco.
+  useEffect(() => {
+    if (!quiereMenu(window.location.search)) return;
+    if (engineRef.current) engineRef.current.gameState = 'TITLE';
+    setGameState('TITLE');
+    openModalExclusive('NONE');
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`);
+  }, []);
 
   useEffect(() => {
     if (!tutorialActive || gameState !== 'PLAYING') return;

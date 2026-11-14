@@ -292,6 +292,8 @@ export class TacticalEngine {
   private onStateChange: (newState: GameState) => void;
 
   public gameState: GameState = 'TITLE';
+  /** Pasos de simulación dados; el informe de fallo lo enseña como «tick». */
+  public ticks: number = 0;
   public plan: MissionPlan;
 
   private rooms: RoomZone[] = [];
@@ -5474,6 +5476,8 @@ public keybinds: Record<string, string> = {
     }
 
     if (this.gameState !== 'PLAYING') return;
+
+    this.ticks += 1;
 
     if (this.hitstopTimer > 0) {
       this.hitstopTimer -= dt;
