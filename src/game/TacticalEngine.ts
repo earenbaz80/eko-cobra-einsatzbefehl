@@ -42,7 +42,7 @@ import { classifyLethalShot, computeRoeImpact, isLawfulThreat, LETHAL_SHOT_POINT
 import { soundEngine } from './soundEngine';
 import { computeSquadNavTarget } from './squadAi';
 import { canSurrender, resolveBreachReaction } from './suspectAi';
-import { colisiona, deslizarConColision, distanciaASegmento } from './simulation';
+import { colisiona, deslizarConColision, distanciaASegmento, PASO_MAXIMO } from './simulation';
 import {
   computeMoveSpeedPct,
   computePulseStabilityPct,
@@ -5464,7 +5464,7 @@ public keybinds: Record<string, string> = {
   }
 
   public update(rawDt: number) {
-    const dt = Math.min(rawDt, 0.05);
+    const dt = Math.min(rawDt, PASO_MAXIMO);
 
     this.updateWeatherAndAmbientDust(dt);
 
