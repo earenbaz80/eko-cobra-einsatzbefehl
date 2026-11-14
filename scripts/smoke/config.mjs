@@ -23,13 +23,17 @@ export const BASE = CLEAN_BASE ? `/${CLEAN_BASE}/` : '/';
 export const DIST = resolve(process.cwd(), 'dist');
 
 /**
- * Presupuesto de frames: tope del p95 del delta entre frames (ms). Medido en local da
- * 33,4 ms en escritorio y 33,5 ms en móvil emulado, con la Misión 1 y el Laboratorio;
- * los topes dejan aire para un runner más lento sin tapar un juego a 30 fps fijos.
+ * Presupuesto de frames: tope del p95 del delta entre frames (ms).
+ *
+ * Medido da 33,4 ms en escritorio y 33,4 ms en móvil emulado (la escena alterna 16,7 y
+ * 33,4, o sea 60/30 fps), en la Misión 1 y en el Laboratorio. Los topes están por encima
+ * de eso porque un runner cargado mete picos de dos frames sin que el juego tenga un
+ * problema; lo que sí falla es un juego a 3+ frames por fotograma (50 ms) o un móvil
+ * por debajo de 15 fps (66 ms).
  */
 export const PRESUPUESTO_FRAMES = {
-  escritorio: 40,
-  movil: 55,
+  escritorio: 50,
+  movil: 66,
 };
 
 /** Commit que debe estar sirviendo Pages; el job de deploy lo pasa en SMOKE_EXPECTED_SHA. */

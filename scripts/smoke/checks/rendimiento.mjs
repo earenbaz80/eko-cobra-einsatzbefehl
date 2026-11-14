@@ -56,7 +56,7 @@ function comprobarFrames(etiqueta, deltas, topeP95) {
     fail(`${etiqueta}: medición insuficiente (${stats.muestras} frames, ${stats.pausas} pausas)`);
     return;
   }
-  const resumen = `p50 ${stats.p50.toFixed(1)} ms · p95 ${stats.p95.toFixed(1)} ms · max ${stats.maximo.toFixed(1)} ms · ${stats.muestras} frames`;
+  const resumen = `p50 ${stats.p50.toFixed(1)} ms · p95 ${stats.p95.toFixed(1)} ms · max ${stats.maximo.toFixed(1)} ms · ${stats.muestras} frames · ${stats.pausas} pausas`;
   if (stats.p95 > topeP95) fail(`${etiqueta}: ${resumen} (tope p95 ${topeP95} ms)`);
   else console.log(`${etiqueta}: ${resumen} (tope p95 ${topeP95} ms)`);
 }
