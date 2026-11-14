@@ -67,6 +67,7 @@ jobs:
       # Se espera a que aparezca la marca del commit publicado antes de medir nada;
       # así un fallo aquí es del despliegue y no de una caché lenta.
       - name: Esperar a que Pages sirva este commit
+        id: espera
         env:
           SHA: ${{ github.sha }}
           URL_PUBLICADA: ${{ steps.deployment.outputs.page_url }}
@@ -84,13 +85,16 @@ jobs:
       # Los reintentos son solo por un fallo de red puntual: la marca del build ya
       # garantiza que lo medido es este commit y no el HTML anterior.
       - name: Prueba de humo contra la URL publicada
+        id: humo
         env:
           SMOKE_EXPECTED_SHA: ${{ github.sha }}
         run: |
           for intento in 1 2 3; do
-            if node scripts/smoke.mjs "${{ steps.deployment.outputs.page_url }}"; then
+            if node scripts/smoke.mjs "${{ steps.deployment.outputs.page_url }}" > humo.log 2>&1; then
+              cat humo.log
               exit 0
             fi
+            cat humo.log
             if [ "$intento" -lt 3 ]; then
               echo "::warning::intento $intento fallido; se espera 30 s por si es caché del CDN"
               sleep 30
@@ -98,3 +102,47 @@ jobs:
           done
           echo "::error::la URL publicada no pasa la prueba de humo"
           exit 1
+
+      # Un run rojo sin contexto no dice si el sitio quedó bien o mal: el resumen deja
+      # escrito que SÍ se publicó y con qué problema, para que no se pierda en el rojo.
+      - name: Resumen del despliegue con problemas
+        if: failure()
+        env:
+          URL_PUBLICADA: ${{ steps.deployment.outputs.page_url }}
+          SHA: ${{ github.sha }}
+          ESPERA: ${{ steps.espera.outcome }}
+          HUMO: ${{ steps.humo.outcome }}
+        run: |
+          if [ "$ESPERA" = "failure" ]; then
+            paso='Esperar a que Pages sirva este commit'
+            detalle='Pages no sirvió en 5 minutos la marca de build del commit, así que puede estar sirviendo el HTML anterior.'
+          elif [ "$HUMO" = "failure" ]; then
+            paso='Prueba de humo contra la URL publicada'
+            detalle='La URL publicada no pasa la prueba de humo: canvas, misiones, móvil, metadatos, pesos, Content-Type o caché.'
+          else
+            paso='Preparación del humo (npm ci o Chromium)'
+            detalle='El sitio se publicó, pero la preparación del humo no llegó a medir la URL publicada.'
+          fi
+
+          {
+            echo '## ⚠️ El sitio quedó publicado con un problema'
+            echo ''
+            echo "El commit \`$SHA\` se publicó en $URL_PUBLICADA y la comprobación posterior ha fallado."
+            echo ''
+            echo '| Dato | Valor |'
+            echo '| --- | --- |'
+            echo "| URL comprobada | $URL_PUBLICADA |"
+            echo "| Commit publicado | \`$SHA\` |"
+            echo "| Paso que falló | \`$paso\` |"
+            echo ''
+            echo "$detalle"
+            echo ''
+            if [ -s humo.log ]; then
+              echo '### Últimas líneas del humo'
+              echo '```'
+              tail -n 30 humo.log
+              echo '```'
+            fi
+            echo ''
+            echo 'El despliegue queda en rojo: revisa el log del paso antes de volver a desplegar.'
+          } >> "$GITHUB_STEP_SUMMARY"
