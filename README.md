@@ -18,6 +18,20 @@ Una única página web que ejecuta un motor de juego propio sobre `<canvas>`. No
 - **HUD diegético**: minimapa 2D arrastrable, PiP de la bodycam de Kobra-2, retícula que sigue al cursor con lectura de munición y objetivo, radio de la central y panel EKO-Pad de planificación.
 - **Audio procedural**: sintetizado con Web Audio (disparos, pasos, ambiente, lluvia) y órdenes por voz con Web Speech.
 
+## Galería
+
+**Misión 4 — Chalet Alpino (Tirol).** Ventisca alpina, nieve y un tirador atrincherado sobre la cresta.
+
+![Misión 4: Chalet Alpino en el Tirol](docs/mision-chalet-alpino.png)
+
+**Misión 5 — Aeropuerto Wien-Schwechat.** Terminal VIP y hangar comprometidos: asalto quirúrgico sin dañar los depósitos de combustible.
+
+![Misión 5: Aeropuerto Wien-Schwechat](docs/mision-aeropuerto.png)
+
+**EKO-Pad C4I.** Planificación en pausa: mapa táctico con marcadores de equipo, dossieres EKIS, auditoría de ROE y progresión del operador.
+
+![Panel EKO-Pad C4I](docs/eko-pad.png)
+
 ## Controles
 
 | Acción | Tecla |
