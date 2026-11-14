@@ -3,23 +3,19 @@ import { ActorEntity, AlertLevel, PrimaryWeaponId } from './types';
 // Multi-Frame Pixel Art Sprite Sheet Engine for EKO COBRA - EINSATZBEFEHL
 // Supports 4-frame walk/stance cycles driven by movement velocity and alert state (CALM | READY | COMBAT)
 
-let ekoSpriteImage: HTMLImageElement | null = null;
-let ekoSpriteLoaded = false;
+// Hoja de 8 direcciones del operador (4 columnas x 2 filas de 560x560 px).
+const EKO_SPRITE_URL = `${import.meta.env.BASE_URL}assets/aistudio/operador-8dir.webp`;
 
+let ekoSpriteImage: HTMLImageElement | null = null;
+
+/** La hoja solo se usa ya decodificada; mientras carga, el actor cae al sprite procedural. */
 function getEkoSpriteImage(): HTMLImageElement | null {
   if (typeof window === 'undefined') return null;
   if (!ekoSpriteImage) {
-    const img = new Image();
-    img.src = `${import.meta.env.BASE_URL}assets/aistudio/BLOQUE1_EKO_agente_8dir_15b5068c.webp`;
-    img.onload = () => {
-      ekoSpriteLoaded = true;
-    };
-    ekoSpriteImage = img;
+    ekoSpriteImage = new Image();
+    ekoSpriteImage.src = EKO_SPRITE_URL;
   }
-  if (ekoSpriteLoaded || (ekoSpriteImage && ekoSpriteImage.complete && ekoSpriteImage.naturalWidth > 0)) {
-    return ekoSpriteImage;
-  }
-  return null;
+  return ekoSpriteImage.complete && ekoSpriteImage.naturalWidth > 0 ? ekoSpriteImage : null;
 }
 
 // 8-Direction Frame Map for the original EKO Cobra operator sprite sheet

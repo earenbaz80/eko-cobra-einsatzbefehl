@@ -173,14 +173,11 @@ try {
     }
   }
 
-  const carpetaSprite = join(DIST, 'assets', 'aistudio');
-  const sprite = existsSync(carpetaSprite)
-    ? readdirSync(carpetaSprite).find((nombre) => /^BLOQUE1.*\.webp$/.test(nombre))
-    : undefined;
-  if (!sprite) {
-    fail('pesos: falta el sprite del operador (BLOQUE1_*.webp)');
+  const sprite = join(DIST, 'assets', 'aistudio', 'operador-8dir.webp');
+  if (!existsSync(sprite)) {
+    fail('pesos: falta el sprite del operador (operador-8dir.webp)');
   } else {
-    const peso = statSync(join(carpetaSprite, sprite)).size;
+    const peso = statSync(sprite).size;
     if (peso > PRESUPUESTO.sprite) fail(`pesos: el sprite ocupa ${kb(peso)} (tope ${kb(PRESUPUESTO.sprite)})`);
     else console.log(`sprite: ${kb(peso)}`);
   }
