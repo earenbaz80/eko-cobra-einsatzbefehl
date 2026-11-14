@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { exigirCache, exigirTipo, fail, kb } from '../informe.mjs';
 import { listarArchivos, pesoDirectorio } from '../archivos.mjs';
-import { assetsHuerfanos, esFuenteDeReferencias } from '../referencias.mjs';
+import { assetsHuerfanos, esFuenteDeReferencias, referenciasRotas } from '../referencias.mjs';
 import { leerMarca, coincideMarca } from '../marca.mjs';
 import { BASE, DIST, ES_REMOTO, PRESUPUESTO, SHA_ESPERADO } from '../config.mjs';
 
@@ -122,10 +122,20 @@ function comprobarBuildLocal() {
   // Nada publicado debe quedar sin que nadie lo nombre: los restos de escenarios o
   // sprites viejos viajan en cada despliegue y no se echan de menos hasta que pesan.
   const archivos = listarArchivos(DIST);
-  const textos = archivos.filter(esFuenteDeReferencias).map((ruta) => readFileSync(join(DIST, ruta), 'utf8'));
-  const huerfanos = assetsHuerfanos(archivos, textos);
+  const fuentes = archivos
+    .filter(esFuenteDeReferencias)
+    .map((ruta) => ({ ruta, texto: readFileSync(join(DIST, ruta), 'utf8') }));
+  const huerfanos = assetsHuerfanos(archivos, fuentes.map((fuente) => fuente.texto));
+  const rotas = referenciasRotas(archivos, fuentes);
   if (huerfanos.length) fail(`assets muertos en dist/: ${huerfanos.join(', ')}`);
-  else console.log(`assets: ${archivos.length} archivos, todos referenciados`);
+  if (rotas.length) {
+    const listado = rotas.slice(0, 10).map((rota) => `${rota.referencia} (en ${rota.fuente})`);
+    const extra = rotas.length > 10 ? ` y ${rotas.length - 10} más` : '';
+    fail(`referencias rotas en dist/: ${listado.join(', ')}${extra}`);
+  }
+  if (!huerfanos.length && !rotas.length) {
+    console.log(`assets: ${archivos.length} archivos, todos referenciados y todas las referencias existen`);
+  }
 }
 
 /** Sección de entrega: elige la fuente de los pesos según el modo. */
