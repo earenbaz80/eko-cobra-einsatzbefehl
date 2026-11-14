@@ -8167,12 +8167,7 @@ public keybinds: Record<string, string> = {
     if (this.missionMode === 'STATION') {
       this.renderStationTrackAndTrainDetails(ctx);
     } else {
-      renderExteriorStreetsAndStairwell(
-        ctx,
-        this.isTrainingMode,
-        'GRAZ_LEND_APT',
-        this.elapsedSeconds
-      );
+      renderExteriorStreetsAndStairwell(ctx, this.isTrainingMode, this.elapsedSeconds);
     }
 
     // Render persistent Floor Decals (Blood Splatters, Arterial Pools, Scorch, Rubble & Spent Brass Casings)

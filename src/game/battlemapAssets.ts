@@ -1,4 +1,4 @@
-import { BattlemapSpriteId, DoorEntity, FurnitureItem, RoomZone, ScenarioId } from './types';
+import { BattlemapSpriteId, DoorEntity, FurnitureItem, RoomZone } from './types';
 import {
   fillAsphaltSurface,
   renderTacticalAsphaltCrack,
@@ -7,9 +7,6 @@ import {
 
 const ASSET_SHEET_URL =
   `${import.meta.env.BASE_URL}assets/aistudio/Free_Modern_Battlemap_Asset_Pack_from_TC_Modern_b6e73fdb.jpg`;
-const GRAZ_STATION_IMAGE_URL =
-  `${import.meta.env.BASE_URL}assets/aistudio/Graz_Haupbahof_f53afac4.jpg`;
-
 interface SpriteRegionSpec {
   id: BattlemapSpriteId;
   /** Bounding region [x0, y0, x1, y1] on the 736x736 reference sheet (or [0,0,0,0] for procedural sprites from Basement A / City Roads) */
@@ -302,29 +299,12 @@ class BattlemapAssetCache {
   private loading = false;
   private loaded = false;
   private proceduralReady = false;
-  private grazStationImg?: HTMLImageElement;
-  private grazStationLoading = false;
-  /** La referencia de Graz (varios MB) solo se pide si el escenario de estación la usa. */
-  private wantGrazStation = false;
 
   public ensureLoaded() {
     if (typeof window === 'undefined') return;
     if (!this.proceduralReady) {
       this.buildProceduralSprites();
       this.proceduralReady = true;
-    }
-    if (this.wantGrazStation && !this.grazStationImg && !this.grazStationLoading) {
-      this.grazStationLoading = true;
-      const stImg = new Image();
-      stImg.crossOrigin = 'anonymous';
-      stImg.onload = () => {
-        this.grazStationImg = stImg;
-        this.grazStationLoading = false;
-      };
-      stImg.onerror = () => {
-        this.grazStationLoading = false;
-      };
-      stImg.src = GRAZ_STATION_IMAGE_URL;
     }
     if (this.loaded || this.loading) return;
     this.loading = true;
@@ -350,12 +330,6 @@ class BattlemapAssetCache {
   public getSprite(id: BattlemapSpriteId): HTMLCanvasElement | undefined {
     this.ensureLoaded();
     return this.sprites[id];
-  }
-
-  public getGrazStationImage(): HTMLImageElement | undefined {
-    this.wantGrazStation = true;
-    this.ensureLoaded();
-    return this.grazStationImg;
   }
 
   /**
@@ -922,14 +896,8 @@ export const URBAN_STREET_LAMPS: UrbanStreetLamp[] = [
 export function renderExteriorStreetsAndStairwell(
   ctx: CanvasRenderingContext2D,
   isTrainingMode: boolean,
-  scenario: ScenarioId = 'GRAZ_LEND_APT',
-  elapsedSeconds = 0
-) {
+  elapsedSeconds = 0) {
   if (isTrainingMode) return;
-  if (scenario === 'GRAZ_HAUPTBAHNHOF') {
-    renderGrazHauptbahnhofEnvironment(ctx);
-    return;
-  }
 
   ctx.save();
 
@@ -2665,336 +2633,6 @@ export function renderExteriorStreetsAndStairwell(
       ctx.stroke();
     }
   }
-
-  ctx.restore();
-}
-
-/**
- * Renders the complete Graz Hauptbahnhof (Estación Principal de Trenes de Graz) environment
- * modeled directly from /assets/aistudio/Graz_Haupbahof_f53afac4.jpg:
- * - Europaplatz & Iconic "Goldenes Auge" (Golden Eye) oval canopy roof + Tram Loop
- * - SPAR Supermarket (West), Bahnhofshalle Concourse (Center), Gastronomie Lounge (East)
- * - Railway tracks (Gleis 1–9) with sleepers and steel rails
- * - Yellow S-Bahn Regional Train (West) & Hijacked Red-Silver ÖBB Railjet Express (East)
- *   with walkable Passenger Coach (Waggon 1) and Taurus Locomotive Cab (Führerstand)
- * - Mittelbahnsteig 2–7 island platform & pedestrian underpasses
- */
-export function renderGrazHauptbahnhofEnvironment(ctx: CanvasRenderingContext2D) {
-  ctx.save();
-
-  // 0. Subtle atmospheric underlay from the uploaded Graz Hauptbahnhof reference map
-  // (Cropping out the top 21% and bottom 10% so any corner HUD from the reference screenshot is excluded)
-  const refImg = battlemapAssetCache.getGrazStationImage();
-  if (refImg && refImg.width > 0 && refImg.height > 0) {
-    ctx.save();
-    ctx.globalAlpha = 0.24;
-    const sx = Math.round(refImg.width * 0.02);
-    const sy = Math.round(refImg.height * 0.21);
-    const sw = Math.round(refImg.width * 0.96);
-    const sh = Math.round(refImg.height * 0.68);
-    ctx.drawImage(refImg, sx, sy, sw, sh, 40, 50, 1200, 720);
-    ctx.restore();
-  }
-
-  // 1. NORTH EUROPAPLATZ ROADWAY, PARK LAWN & TRAM TRACKS (y: 0..200)
-  ctx.fillStyle = '#181D24';
-  ctx.fillRect(0, 0, 1280, 80); // North Gürtel / Europaplatz avenue
-  ctx.fillRect(0, 80, 96, 400); // West street lane
-  ctx.fillRect(1182, 80, 98, 400); // East street lane (Hotel Daniel side)
-
-  // North-West Park Lawn (from top-left of reference image)
-  ctx.fillStyle = '#143321';
-  ctx.fillRect(102, 84, 250, 108);
-  ctx.strokeStyle = '#334155';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(102, 84, 250, 108);
-
-  // Dashed lane lines on North street
-  ctx.strokeStyle = 'rgba(226, 232, 240, 0.42)';
-  ctx.lineWidth = 2;
-  ctx.setLineDash([16, 14]);
-  ctx.beginPath();
-  ctx.moveTo(40, 40);
-  ctx.lineTo(1240, 40);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // Zebra Crosswalks at Europaplatz
-  ctx.fillStyle = 'rgba(241, 245, 249, 0.68)';
-  for (let i = 0; i < 6; i++) {
-    ctx.fillRect(365, 10 + i * 10, 26, 5);
-    ctx.fillRect(745, 10 + i * 10, 26, 5);
-  }
-
-  // Diagonal Tramway Tracks (Straßenbahn Linie 1/4/6/7) entering Goldenes Auge
-  ctx.save();
-  ctx.strokeStyle = '#475569';
-  ctx.lineWidth = 2.2;
-  for (const offset of [-6, 6]) {
-    ctx.beginPath();
-    ctx.moveTo(430, 210 + offset);
-    ctx.lineTo(680, 195 + offset);
-    ctx.lineTo(980, 110 + offset);
-    ctx.stroke();
-  }
-  // Red-White Graz Variobahn Tram parked at Stop B / A (North-East of Goldenes Auge)
-  ctx.translate(855, 122);
-  ctx.rotate(-0.22);
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-  ctx.fillRect(-78, -14, 156, 32);
-  ctx.fillStyle = '#DC2626';
-  ctx.fillRect(-76, -15, 152, 28);
-  ctx.fillStyle = '#F8FAFC';
-  ctx.fillRect(-72, -11, 144, 20);
-  ctx.fillStyle = '#1E293B';
-  for (let wx = -64; wx <= 52; wx += 24) {
-    ctx.fillRect(wx, -9, 18, 16);
-  }
-  ctx.fillStyle = '#84CC16';
-  ctx.font = 'bold 9px "JetBrains Mono", monospace';
-  ctx.fillText('TRAM B/A', -24, 3);
-  ctx.restore();
-
-  // 2. ICONIC "GOLDENES AUGE" (ORANGE OVAL CANOPY ROOF) AT EUROPAPLATZ (x: 360..760, y: 80..320)
-  ctx.save();
-  const augeCx = 555;
-  const augeCy = 195;
-  // Skylight courtyard floor grid inside the oval
-  ctx.beginPath();
-  ctx.ellipse(augeCx, augeCy, 138, 86, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(30, 58, 95, 0.36)';
-  ctx.fill();
-
-  // Outer & Inner Goldenes Auge Ring Canopy (translucent so operators underneath remain visible)
-  ctx.beginPath();
-  ctx.ellipse(augeCx, augeCy, 152, 98, 0, 0, Math.PI * 2);
-  ctx.ellipse(augeCx, augeCy, 102, 58, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(234, 138, 53, 0.34)';
-  ctx.fill('evenodd');
-
-  ctx.strokeStyle = 'rgba(251, 191, 36, 0.75)';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.ellipse(augeCx, augeCy, 152, 98, 0, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.ellipse(augeCx, augeCy, 102, 58, 0, 0, Math.PI * 2);
-  ctx.stroke();
-
-  // Tram Stop Badges D, E, F, B around the Goldenes Auge (matching uploaded image)
-  const drawStopBadge = (bx: number, by: number, letter: string, bg: string) => {
-    ctx.fillStyle = bg;
-    ctx.fillRect(bx - 9, by - 9, 18, 18);
-    ctx.strokeStyle = '#0F172A';
-    ctx.lineWidth = 1.2;
-    ctx.strokeRect(bx - 9, by - 9, 18, 18);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 10px "JetBrains Mono", monospace';
-    ctx.fillText(letter, bx - 3.5, by + 3.5);
-  };
-  drawStopBadge(418, 182, 'E', '#06B6D4');
-  drawStopBadge(452, 198, 'D', '#06B6D4');
-  drawStopBadge(525, 108, 'F', '#06B6D4');
-  drawStopBadge(712, 165, 'B', '#65A30D');
-  ctx.restore();
-
-  // 3. SPAR SUPERMARKET FLOOR & SIGNAGE (x: 100..360, y: 200..480)
-  ctx.save();
-  // Warm supermarket tile stripes
-  ctx.fillStyle = 'rgba(245, 158, 11, 0.07)';
-  ctx.fillRect(104, 204, 252, 272);
-  // Iconic SPAR Red/Green Banner on North Wall
-  ctx.fillStyle = '#DC2626';
-  ctx.fillRect(122, 208, 114, 22);
-  ctx.fillStyle = '#16A34A';
-  ctx.beginPath();
-  ctx.arc(218, 219, 8, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#FFFFFF';
-  ctx.font = 'bold 12px "JetBrains Mono", monospace';
-  ctx.fillText('SPAR', 136, 223);
-  ctx.restore();
-
-  // 4. BAHNHOFSHALLE (MAIN CONCOURSE) DETAILS (x: 360..760, y: 320..480)
-  ctx.save();
-  // Red "Treffpunkt" (Meeting Point) Circle in Center of Concourse
-  ctx.beginPath();
-  ctx.arc(555, 365, 11, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(239, 68, 68, 0.78)';
-  ctx.fill();
-  ctx.strokeStyle = '#FECACA';
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-
-  // Blue ÖBB Info & Ticket Kiosk Badges
-  ctx.fillStyle = '#1D4ED8';
-  ctx.fillRect(465, 438, 22, 16);
-  ctx.fillRect(625, 438, 22, 16);
-  ctx.fillStyle = '#93C5FD';
-  ctx.font = 'bold 8px "JetBrains Mono", monospace';
-  ctx.fillText('ÖBB', 468, 449);
-  ctx.fillText('INFO', 626, 449);
-  ctx.restore();
-
-  // 5. GASTRONOMIE & CAFÉ LOUNGE WOOD PARQUET FLOOR (x: 760..1180, y: 160..355)
-  ctx.save();
-  ctx.fillStyle = 'rgba(180, 83, 9, 0.18)';
-  ctx.fillRect(764, 164, 412, 185);
-  ctx.strokeStyle = 'rgba(217, 119, 6, 0.14)';
-  ctx.lineWidth = 1;
-  for (let py = 172; py < 348; py += 12) {
-    ctx.beginPath();
-    ctx.moveTo(764, py);
-    ctx.lineTo(1176, py);
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  // 6. RAILWAY TRACKS, GRAVEL BALLAST & SLEEPERS (GLEIS 1–9, y: 480..815)
-  ctx.save();
-  // Crushed dark granite track bed below Mittelbahnsteig and along track corridors
-  ctx.fillStyle = '#141820';
-  ctx.fillRect(0, 482, 1280, 106);
-  ctx.fillRect(0, 730, 1280, 90);
-
-  const drawRailwayTrack = (yCenter: number) => {
-    // Wooden/concrete sleepers (Bahnschwellen)
-    ctx.fillStyle = '#2B2623';
-    for (let tx = 8; tx < 1280; tx += 14) {
-      ctx.fillRect(tx, yCenter - 11, 5, 22);
-    }
-    // Parallel steel rails (Schienen)
-    ctx.strokeStyle = '#64748B';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(0, yCenter - 6);
-    ctx.lineTo(1280, yCenter - 6);
-    ctx.moveTo(0, yCenter + 6);
-    ctx.lineTo(1280, yCenter + 6);
-    ctx.stroke();
-  };
-
-  drawRailwayTrack(502); // Gleis 1
-  drawRailwayTrack(535); // Gleis 2 (Hijacked Railjet main track)
-  drawRailwayTrack(568); // Gleis 4
-  drawRailwayTrack(748); // Gleis 8 (South freight/regional track)
-  drawRailwayTrack(782); // Gleis 9 (South track)
-
-  // 7. WEST TRAIN: YELLOW S-BAHN REGIONAL DOUBLE-DECKER (x: 112..485, y: 500..572)
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-  ctx.fillRect(114, 504, 372, 70);
-  // Yellow train body
-  ctx.fillStyle = '#D97706';
-  ctx.fillRect(112, 502, 370, 68);
-  ctx.fillStyle = '#F59E0B';
-  ctx.fillRect(118, 508, 358, 56);
-  // Roof cooling units & pantograph ribs
-  ctx.fillStyle = '#78350F';
-  for (let rx = 145; rx <= 435; rx += 58) {
-    ctx.fillRect(rx, 520, 34, 32);
-  }
-  ctx.fillStyle = '#FEF3C7';
-  ctx.font = 'bold 9px "JetBrains Mono", monospace';
-  ctx.fillText('S-BAHN STEIERMARK (GLEIS 1)', 165, 540);
-
-  // 8. EAST TRAIN (HIJACKED OBJECTIVE): ÖBB RAILJET EXPRESS (x: 560..1180, y: 480..590)
-  // Outer crimson & metallic silver Railjet hull stripes along top and bottom of carriage
-  ctx.fillStyle = '#991B1B';
-  ctx.fillRect(560, 480, 620, 14);
-  ctx.fillRect(560, 576, 620, 14);
-
-  // Interior floor of Waggon 1 (x: 560..960) & Führerstand Cab (x: 960..1180)
-  ctx.fillStyle = '#1E293B';
-  ctx.fillRect(562, 494, 396, 82);
-  ctx.fillStyle = '#27171C';
-  ctx.fillRect(962, 494, 216, 82);
-
-  // Central blue/grey carpeted aisle running down the train
-  ctx.fillStyle = 'rgba(56, 189, 248, 0.12)';
-  ctx.fillRect(566, 524, 560, 22);
-  ctx.strokeStyle = 'rgba(56, 189, 248, 0.28)';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(566, 524, 560, 22);
-
-  // Airline-style passenger seats along North & South windows of Waggon 1
-  for (let sx = 582; sx <= 920; sx += 38) {
-    // Skip doorway zones (x: 640..710 and x: 815..885)
-    if ((sx > 625 && sx < 715) || (sx > 800 && sx < 890)) continue;
-    ctx.fillStyle = '#1E3A8A';
-    ctx.fillRect(sx, 497, 24, 20);
-    ctx.fillRect(sx, 553, 24, 20);
-    ctx.fillStyle = '#DC2626'; // Red headrest trim
-    ctx.fillRect(sx + 18, 498, 5, 18);
-    ctx.fillRect(sx + 18, 554, 5, 18);
-  }
-
-  // Locomotive Cab (Führerstand, x: 960..1180) Aerodynamic Nose & Control Console
-  ctx.fillStyle = '#DC2626';
-  ctx.beginPath();
-  ctx.moveTo(1135, 482);
-  ctx.lineTo(1178, 502);
-  ctx.lineTo(1178, 568);
-  ctx.lineTo(1135, 588);
-  ctx.closePath();
-  ctx.fill();
-
-  // Armored wrap-around locomotive windshield
-  ctx.fillStyle = 'rgba(56, 189, 248, 0.35)';
-  ctx.beginPath();
-  ctx.moveTo(1130, 496);
-  ctx.lineTo(1164, 510);
-  ctx.lineTo(1164, 560);
-  ctx.lineTo(1130, 574);
-  ctx.closePath();
-  ctx.fill();
-
-  // Illuminated ETCS / Traction Control Desk in Cab
-  ctx.fillStyle = '#0F172A';
-  ctx.fillRect(1102, 506, 26, 58);
-  ctx.fillStyle = '#EF4444';
-  ctx.fillRect(1106, 512, 8, 12);
-  ctx.fillStyle = '#38BDF8';
-  ctx.fillRect(1106, 530, 8, 16);
-  ctx.fillStyle = '#10B981';
-  ctx.fillRect(1106, 550, 8, 8);
-
-  // Labels on the hijacked train
-  ctx.fillStyle = 'rgba(254, 202, 202, 0.72)';
-  ctx.font = 'bold 9.5px "JetBrains Mono", monospace';
-  ctx.fillText('ÖBB RAILJET 558 · WAGGON 1 (SECUESTRADO)', 585, 539);
-  ctx.fillStyle = '#FCA5A5';
-  ctx.fillText('FÜHRERSTAND (CABINA)', 978, 539);
-
-  // 9. MITTELBAHNSTEIG 2–7 SAFETY LINES & TRACK BADGES (x: 100..1180, y: 590..730)
-  // Yellow tactile safety lines along platform edges
-  ctx.strokeStyle = 'rgba(250, 204, 21, 0.65)';
-  ctx.lineWidth = 2;
-  ctx.setLineDash([10, 6]);
-  ctx.beginPath();
-  ctx.moveTo(110, 598);
-  ctx.lineTo(1170, 598);
-  ctx.moveTo(110, 722);
-  ctx.lineTo(1170, 722);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // Purple/Blue Track Number Badges (matching 1, 2, 4, 5, 6, 7 in uploaded image)
-  const drawTrackBadge = (bx: number, by: number, num: string) => {
-    ctx.fillStyle = '#4338CA';
-    ctx.fillRect(bx - 8, by - 8, 16, 16);
-    ctx.strokeStyle = '#A5B4FC';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(bx - 8, by - 8, 16, 16);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 9px "JetBrains Mono", monospace';
-    ctx.fillText(num, bx - 3, by + 3);
-  };
-  drawTrackBadge(755, 468, '1');
-  drawTrackBadge(910, 492, '2');
-  drawTrackBadge(910, 580, '4');
-  drawTrackBadge(910, 608, '5');
-  drawTrackBadge(785, 695, '6');
-  drawTrackBadge(785, 715, '7');
 
   ctx.restore();
 }

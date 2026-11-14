@@ -3,7 +3,6 @@ export type GameState = 'TITLE' | 'PLAYING' | 'PAUSED' | 'SUMMARY';
 export type EntryPointId = 'HAUPTEINGANG_A' | 'BALKON_B';
 export type EntryDoctrine = 'STEALTH' | 'DYNAMIC';
 
-export type ScenarioId = 'GRAZ_LEND_APT' | 'GRAZ_HAUPTBAHNHOF';
 
 export type OperatorProfileId = 'AUFKLAERER' | 'BREACHER' | 'VERHANDLUNGSFUEHRER';
 export type PrimaryWeaponId = 'AUG_PARA' | 'AUG_A3' | 'MP7A1' | 'GLOCK_SHIELD';
