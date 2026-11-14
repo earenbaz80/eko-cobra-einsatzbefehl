@@ -6,6 +6,8 @@ Simulador táctico policial en 2D cenital, escrito en TypeScript y renderizado c
 
 ![Gameplay de EKO Cobra](docs/gameplay.png)
 
+**[▶ Jugar en el navegador](https://earenbaz80.github.io/eko-cobra-einsatzbefehl/)** — no hace falta clonar ni instalar nada.
+
 ## Qué es
 
 Una única página web que ejecuta un motor de juego propio sobre `<canvas>`. No hay servidor ni backend: toda la simulación corre en el navegador.

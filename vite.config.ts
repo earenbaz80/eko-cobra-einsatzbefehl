@@ -5,6 +5,8 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    // En GitHub Pages el sitio cuelga de /eko-cobra-einsatzbefehl/; en local se queda en '/'.
+    base: process.env.VITE_BASE_PATH ?? '/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

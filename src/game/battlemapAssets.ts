@@ -6,9 +6,9 @@ import {
 } from './asphaltTexture';
 
 const ASSET_SHEET_URL =
-  '/assets/aistudio/Free_Modern_Battlemap_Asset_Pack_from_TC_Modern_b6e73fdb.jpg';
+  `${import.meta.env.BASE_URL}assets/aistudio/Free_Modern_Battlemap_Asset_Pack_from_TC_Modern_b6e73fdb.jpg`;
 const GRAZ_STATION_IMAGE_URL =
-  '/assets/aistudio/Graz_Haupbahof_f53afac4.jpg';
+  `${import.meta.env.BASE_URL}assets/aistudio/Graz_Haupbahof_f53afac4.jpg`;
 
 interface SpriteRegionSpec {
   id: BattlemapSpriteId;

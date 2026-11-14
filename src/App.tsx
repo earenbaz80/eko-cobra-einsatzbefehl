@@ -746,7 +746,7 @@ export default function App() {
             <div className="lg:col-span-7 flex flex-col justify-center">
               <div className="flex items-center gap-4 mb-2">
                 <img
-                  src="/assets/aistudio/Embl_me_du_Einsatzkommando_Cobra__EKO_Cobra__ff5e252c.svg"
+                  src={`${import.meta.env.BASE_URL}assets/aistudio/Embl_me_du_Einsatzkommando_Cobra__EKO_Cobra__ff5e252c.svg`}
                   alt="EKO Cobra Emblem"
                   className="w-20 h-24 sm:w-24 sm:h-28 object-contain drop-shadow-[0_0_20px_rgba(56,189,248,0.5)] shrink-0"
                 />

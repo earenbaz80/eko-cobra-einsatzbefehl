@@ -25,14 +25,14 @@ class AsphaltTextureManager {
     // 2. Load SVG texture assets asynchronously
     try {
       const img1 = new Image();
-      img1.src = '/assets/asphalt_dark_cracks.svg';
+      img1.src = `${import.meta.env.BASE_URL}assets/asphalt_dark_cracks.svg`;
       img1.onload = () => {
         this.imgCracks = img1;
         this.primaryPattern = null; // Recreate with image
       };
 
       const img2 = new Image();
-      img2.src = '/assets/asphalt_oil_stain.svg';
+      img2.src = `${import.meta.env.BASE_URL}assets/asphalt_oil_stain.svg`;
       img2.onload = () => {
         this.imgOil = img2;
         this.secondaryPattern = null; // Recreate with image
