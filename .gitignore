@@ -2,6 +2,8 @@ node_modules/
 build/
 dist/
 coverage/
+# Captura y traza que deja el humo cuando falla
+.smoke-fallos/
 .DS_Store
 *.log
 .env*

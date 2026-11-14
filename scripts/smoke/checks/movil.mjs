@@ -3,9 +3,10 @@
  * aparece el joystick, la palanca sigue al dedo y mueve de verdad al operador, y
  * joystick, botones, subtítulos y barra inferior no se pisan a 390, 360 y 320 px.
  */
-import { fail } from '../informe.mjs';
+import { fail, fallos } from '../informe.mjs';
 import { cambioEntreFirmas, firmaCanvas } from '../canvas.mjs';
 import { vigilarPagina } from '../navegador.mjs';
+import { capturarPantalla } from '../diagnostico.mjs';
 
 /** El AudioContext nace suspendido en iOS/Android: el primer toque tiene que dejarlo en running. */
 async function comprobarAudio(movil) {
@@ -211,20 +212,26 @@ export async function comprobarMovil(browser, contexto) {
     fallosDeRed: false,
   });
 
-  // La pestaña móvil tiene que estar en primer plano: si el navegador la considera
-  // oculta, rAF se estrangula y los fotogramas saltan (ruido enorme al comparar).
-  await movil.bringToFront();
-  await movil.goto(contexto.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await movil.waitForSelector('canvas', { timeout: 20000 });
+  // Solo se captura si esta sección falla: el móvil no lleva traza para no alterar
+  // los fotogramas que comparan el canvas, pero una captura es la prueba del layout.
+  const fallosAntes = fallos.length;
+  try {
+    // La pestaña móvil tiene que estar en primer plano: si el navegador la considera
+    // oculta, rAF se estrangula y los fotogramas saltan (ruido enorme al comparar).
+    await movil.bringToFront();
+    await movil.goto(contexto.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await movil.waitForSelector('canvas', { timeout: 20000 });
 
-  await comprobarAudio(movil);
+    await comprobarAudio(movil);
 
-  await movil.getByRole('button', { name: 'Misión 1: Piso Graz - Lend' }).click();
-  await movil.getByText('K1 OPERATIVO').first().waitFor({ timeout: 20000 });
-  await movil.waitForTimeout(1800);
+    await movil.getByRole('button', { name: 'Misión 1: Piso Graz - Lend' }).click();
+    await movil.getByText('K1 OPERATIVO').first().waitFor({ timeout: 20000 });
+    await movil.waitForTimeout(1800);
 
-  await comprobarJoystick(movil);
-  await comprobarFranjasEnAnchos(movil);
-
-  await contextoMovil.close();
+    await comprobarJoystick(movil);
+    await comprobarFranjasEnAnchos(movil);
+  } finally {
+    if (fallos.length > fallosAntes) await capturarPantalla(movil, 'movil');
+    await contextoMovil.close();
+  }
 }

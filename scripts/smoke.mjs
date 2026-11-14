@@ -10,7 +10,9 @@
  *   5. que en viewport móvil con hasTouch aparece el joystick y mueve de verdad al operador,
  *   6. que el JS de entrada y los assets críticos no superan sus topes de peso,
  *   7. en modo remoto, que lo publicado devuelve los Content-Type y las cabeceras
- *      de caché con las que Pages sirve el juego.
+ *      de caché con las que Pages sirve el juego,
+ *   8. y, si algo falla, deja captura y traza de Playwright en `.smoke-fallos/` para
+ *      ver la pantalla en el artifact del CI.
  *
  * Cada bloque vive en su módulo, con nombre propio:
  *   smoke/checks/entrega.mjs     pesos, Content-Type y caché (local y remoto)
@@ -28,6 +30,7 @@ import { BASE, DIST, ES_REMOTO, URL_PUBLICADA } from './smoke/config.mjs';
 import { fail, fallos } from './smoke/informe.mjs';
 import { arrancarServidorLocal } from './smoke/servidor-local.mjs';
 import { vigilarPagina } from './smoke/navegador.mjs';
+import { arrancarTraza, guardarDiagnostico, limpiarDiagnostico, DIR_DIAGNOSTICO } from './smoke/diagnostico.mjs';
 import { comprobarEntrega } from './smoke/checks/entrega.mjs';
 import { comprobarMisiones } from './smoke/checks/misiones.mjs';
 import { comprobarEscritorio } from './smoke/checks/escritorio.mjs';
@@ -44,8 +47,13 @@ const { server, origin } = ES_REMOTO
 const url = `${origin}${BASE}`;
 console.log(ES_REMOTO ? `comprobando lo publicado en ${url}` : `sirviendo dist/ en ${url}`);
 
+limpiarDiagnostico();
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+
+// La traza se graba durante toda la pasada: solo se guarda si algo falla.
+const contextoNavegador = page.context();
+await arrancarTraza(contextoNavegador);
 
 // Listas compartidas: las tres secciones apuntan aquí sus fallos de red y consola.
 const badRequests = [];
@@ -63,6 +71,10 @@ try {
 } finally {
   if (badRequests.length) fail(`peticiones fallidas (${badRequests.length}):\n  ${badRequests.slice(0, 10).join('\n  ')}`);
   if (consoleErrors.length) fail(`errores en consola (${consoleErrors.length}):\n  ${consoleErrors.slice(0, 10).join('\n  ')}`);
+  if (fallos.length) {
+    await guardarDiagnostico(contextoNavegador, page, 'escritorio');
+    console.error(`captura y traza en ${DIR_DIAGNOSTICO} (el CI las sube como artifact)`);
+  }
   await browser.close();
   server?.close();
 }

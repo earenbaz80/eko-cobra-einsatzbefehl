@@ -6,9 +6,16 @@ on:
   pull_request:
     branches: [main]
 
+# Un push nuevo cancela el run anterior de la misma rama: no gasta minutos en un
+# commit que ya nadie mira ni retrasa al que sí importa.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -30,6 +37,7 @@ jobs:
 
   smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -53,3 +61,14 @@ jobs:
         env:
           VITE_BASE_PATH: /eko-cobra-einsatzbefehl/
         run: npm run smoke
+
+      # Cuando el humo falla, el mensaje no dice qué se veía: la captura y la traza
+      # de Playwright quedan en `.smoke-fallos/` y aquí se adjuntan al run.
+      - name: Subir captura y traza del humo
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-fallos
+          path: .smoke-fallos
+          if-no-files-found: ignore
+          retention-days: 7
