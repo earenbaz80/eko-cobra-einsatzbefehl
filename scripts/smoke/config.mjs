@@ -22,6 +22,16 @@ const CLEAN_BASE = RAW_BASE.replace(/^\/+|\/+$/g, '');
 export const BASE = CLEAN_BASE ? `/${CLEAN_BASE}/` : '/';
 export const DIST = resolve(process.cwd(), 'dist');
 
+/**
+ * Presupuesto de frames: tope del p95 del delta entre frames (ms). Medido en local da
+ * 33,4 ms en escritorio y 33,5 ms en móvil emulado, con la Misión 1 y el Laboratorio;
+ * los topes dejan aire para un runner más lento sin tapar un juego a 30 fps fijos.
+ */
+export const PRESUPUESTO_FRAMES = {
+  escritorio: 40,
+  movil: 55,
+};
+
 /** Commit que debe estar sirviendo Pages; el job de deploy lo pasa en SMOKE_EXPECTED_SHA. */
 export const SHA_ESPERADO = (process.env.SMOKE_EXPECTED_SHA ?? '').trim().toLowerCase();
 

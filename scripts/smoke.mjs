@@ -6,7 +6,9 @@
  *   2. que ninguna petición del propio sitio devuelve 404/5xx,
  *   3. que la Misión 1 arranca y muestra el HUD en juego, y que las siete misiones
  *      pintan una escena con contenido,
- *   4. que los metadatos sociales, los iconos y el manifest están completos,
+ *   4. que los metadatos sociales, los iconos y el manifest están completos, y que la
+ *      Misión 1 y una misión densa mantienen el p95 de frame time dentro del presupuesto
+ *      en escritorio y en móvil emulado,
  *   5. que en viewport móvil con hasTouch aparece el joystick y mueve de verdad al operador,
  *   6. que el JS de entrada y los assets críticos no superan sus topes de peso,
  *   7. en modo remoto, que lo publicado devuelve los Content-Type y las cabeceras
@@ -18,6 +20,7 @@
  *   smoke/checks/entrega.mjs     pesos, Content-Type y caché (local y remoto)
  *   smoke/checks/misiones.mjs    las siete misiones arrancan y pintan escena
  *   smoke/checks/escritorio.mjs  partida, canvas, metadatos, manifest, iconos y favicon
+ *   smoke/checks/rendimiento.mjs p50/p95 de frame time en escritorio y móvil emulado
  *   smoke/checks/movil.mjs       audio al primer toque, joystick y franjas del HUD
  * y las piezas comunes en smoke/config, informa, archivos, servidor-local, navegador y canvas.
  *
@@ -34,6 +37,7 @@ import { arrancarTraza, guardarDiagnostico, limpiarDiagnostico, DIR_DIAGNOSTICO 
 import { comprobarEntrega } from './smoke/checks/entrega.mjs';
 import { comprobarMisiones } from './smoke/checks/misiones.mjs';
 import { comprobarEscritorio } from './smoke/checks/escritorio.mjs';
+import { comprobarRendimiento } from './smoke/checks/rendimiento.mjs';
 import { comprobarMovil } from './smoke/checks/movil.mjs';
 
 if (!ES_REMOTO && !existsSync(DIST)) {
@@ -65,6 +69,7 @@ try {
   await comprobarEntrega(contexto);
   await comprobarMisiones(page, contexto);
   await comprobarEscritorio(page, contexto);
+  await comprobarRendimiento(page, contexto);
   await comprobarMovil(browser, contexto);
 } catch (error) {
   fail(`navegación/interacción: ${error.message}`);

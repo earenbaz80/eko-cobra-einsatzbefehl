@@ -9,6 +9,7 @@
  */
 import { fail } from '../informe.mjs';
 import { estadisticasCanvas } from '../canvas.mjs';
+import { arrancarMision } from '../navegador.mjs';
 
 /** Nombre accesible de cada botón del menú de misiones, en el orden del menú. */
 export const MISIONES = [
@@ -24,16 +25,7 @@ export const MISIONES = [
 /** Arranca una misión desde cero y devuelve las estadísticas del canvas. */
 async function arrancarYmedir(page, url, nombre) {
   // Se recarga en vez de volver al menú: cada misión empieza con el estado limpio.
-  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await page.waitForSelector('canvas', { timeout: 20000 });
-
-  const boton = page.getByRole('button', { name: nombre, exact: true });
-  await boton.waitFor({ timeout: 15000 });
-  await boton.click();
-
-  // El HUD en partida solo existe con la simulación arrancada.
-  await page.getByText('K1 OPERATIVO').first().waitFor({ timeout: 20000 });
-  await page.waitForTimeout(1000); // deja cargar sprites y pintar varios frames
+  await arrancarMision(page, url, nombre);
   return estadisticasCanvas(page);
 }
 
