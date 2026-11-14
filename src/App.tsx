@@ -45,6 +45,7 @@ const OperatorCareerModal = lazy(() =>
 );
 import { soundEngine } from './game/soundEngine';
 import { TacticalEngine } from './game/TacticalEngine';
+import { loadGame, hasSave, clearSave, saveGame } from './game/save';
 import { GameState, HudSnapshot, MissionPlan, SquadCommand, COBRA_RANK_TIERS, computePlayerMissionRank, RadioFeedItem } from './game/types';
 
 const INITIAL_PLAN: MissionPlan = {
@@ -107,6 +108,7 @@ export default function App() {
   const [hud, setHud] = useState<HudSnapshot | null>(null);
   const [activeModal, setActiveModal] = useState<ActiveModalId>('NONE');
   const [muted, setMuted] = useState(false);
+  const [hasSavedGame, setHasSavedGame] = useState<boolean>(() => hasSave());
   const [subtitlesEnabled, setSubtitlesEnabled] = useState<boolean>(() => {
     try {
       const saved = window.localStorage.getItem('eko_cobra_subtitles');
@@ -535,6 +537,25 @@ export default function App() {
     engineRef.current?.startOperation(selectedMode);
   };
 
+  const handleResumeGame = () => {
+    const saved = loadGame();
+    if (!saved) {
+      setHasSavedGame(false);
+      return;
+    }
+    soundEngine.playUiClick();
+    openModalExclusive('NONE');
+    const savedPlan = (saved.plan && typeof saved.plan === 'object' ? saved.plan : plan) as MissionPlan;
+    setPlan(savedPlan);
+    const mode = saved.missionMode === 'STATION' ? 'STATION' : saved.missionMode === 'LINZ' ? 'LINZ' : saved.missionMode === 'TIROL' ? 'TIROL' : saved.missionMode === 'SCHWECHAT' ? 'SCHWECHAT' : 'APARTMENT';
+    if (mode === 'STATION') engineRef.current?.startStationOperation();
+    else if (mode === 'LINZ') engineRef.current?.startLinzOperation();
+    else if (mode === 'TIROL') engineRef.current?.startTirolOperation();
+    else if (mode === 'SCHWECHAT') engineRef.current?.startSchwechatOperation();
+    else engineRef.current?.startApartmentOperation();
+    setHasSavedGame(false);
+  };
+
   const handleStartStationMission = () => {
     openModalExclusive('NONE');
     setPlan((prev) => ({ ...prev, operationId: 'STATION' }));
@@ -756,6 +777,25 @@ export default function App() {
     }
   };
 
+  // Guardado automático de la partida en curso cada 5 s mientras se juega.
+  useEffect(() => {
+    if (gameState !== 'PLAYING') return;
+    const id = window.setInterval(() => {
+      const eng = engineRef.current;
+      if (!eng) return;
+      saveGame({
+        gameState: 'PLAYING',
+        plan,
+        missionMode: eng.missionMode,
+        elapsedSeconds: hud?.elapsedSeconds ?? 0,
+        score: hud?.score ?? 0,
+        tick: eng.ticks,
+      });
+      setHasSavedGame(true);
+    }, 5000);
+    return () => window.clearInterval(id);
+  }, [gameState, plan, hud]);
+
   const handleSquadCommand = (cmd: SquadCommand) => {
     engineRef.current?.issueSquadCommand(cmd);
   };
@@ -878,6 +918,18 @@ export default function App() {
                 <span>MENÚ TÁCTICO · INICIO</span>
                 <span className="text-[#38BDF8]">DSE-AT</span>
               </div>
+
+              {hasSavedGame && (
+                <button
+                  onClick={handleResumeGame}
+                  className="w-full px-3 py-2 text-xs font-bold text-black bg-[#10B981] hover:bg-[#34D399] transition-colors cursor-pointer flex items-center justify-between border border-[#10B981]"
+                >
+                  <span className="flex items-center gap-2">
+                    <ArrowLeft className="w-4 h-4" />
+                    <span>REANUDAR PARTIDA GUARDADA</span>
+                  </span>
+                </button>
+              )}
 
               {/* Misiones Dropdown / Buttons */}
               <div className="relative">
