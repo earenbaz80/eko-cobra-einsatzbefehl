@@ -4,7 +4,7 @@
 
 Simulador táctico policial en 2D cenital, escrito en TypeScript y renderizado con Canvas 2D. Diriges a un operador de la unidad antiterrorista austríaca **EKO Cobra** y a su binomio (Kobra-2) en intervenciones urbanas, con reglas de enfrentamiento, balística por zonas del cuerpo e identificación de objetivos antes de abrir fuego.
 
-![Gameplay de EKO Cobra](docs/gameplay.png)
+![Gameplay de EKO Cobra](docs/gameplay.webp)
 
 **[▶ Jugar en el navegador](https://earenbaz80.github.io/eko-cobra-einsatzbefehl/)** — no hace falta clonar ni instalar nada.
 
@@ -24,15 +24,15 @@ Una única página web que ejecuta un motor de juego propio sobre `<canvas>`. No
 
 **Misión 4 — Chalet Alpino (Tirol).** Ventisca alpina, nieve y un tirador atrincherado sobre la cresta.
 
-![Misión 4: Chalet Alpino en el Tirol](docs/mision-chalet-alpino.png)
+![Misión 4: Chalet Alpino en el Tirol](docs/mision-chalet-alpino.webp)
 
 **Misión 5 — Aeropuerto Wien-Schwechat.** Terminal VIP y hangar comprometidos: asalto quirúrgico sin dañar los depósitos de combustible.
 
-![Misión 5: Aeropuerto Wien-Schwechat](docs/mision-aeropuerto.png)
+![Misión 5: Aeropuerto Wien-Schwechat](docs/mision-aeropuerto.webp)
 
 **EKO-Pad C4I.** Planificación en pausa: mapa táctico con marcadores de equipo, dossieres EKIS, auditoría de ROE y progresión del operador.
 
-![Panel EKO-Pad C4I](docs/eko-pad.png)
+![Panel EKO-Pad C4I](docs/eko-pad.webp)
 
 ## Controles
 

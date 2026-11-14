@@ -10,7 +10,7 @@ function getEkoSpriteImage(): HTMLImageElement | null {
   if (typeof window === 'undefined') return null;
   if (!ekoSpriteImage) {
     const img = new Image();
-    img.src = `${import.meta.env.BASE_URL}assets/aistudio/BLOQUE1_EKO_agente_8dir_15b5068c.png`;
+    img.src = `${import.meta.env.BASE_URL}assets/aistudio/BLOQUE1_EKO_agente_8dir_15b5068c.webp`;
     img.onload = () => {
       ekoSpriteLoaded = true;
     };
