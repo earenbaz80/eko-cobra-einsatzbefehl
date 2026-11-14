@@ -604,6 +604,39 @@ export default function App() {
     };
   }, []);
 
+  // El HUD inferior cambia de alto con el ancho y el tamaño de letra (la barra envuelve
+  // en más o menos filas). En vez de fijar a mano cuánto suben los controles y los
+  // subtítulos, se mide el bloque real apilado sobre el borde inferior y se publica como
+  // variable CSS para que index.css coloque los pisos.
+  const hudStackRef = useRef<HTMLDivElement | null>(null);
+  const medirHudRef = useRef<() => void>(() => {});
+  const ultimaAlturaHud = useRef(-1);
+
+  useEffect(() => {
+    const medir = () => {
+      const columna = hudStackRef.current;
+      if (!columna) return;
+      let superior = window.innerHeight;
+      for (const hijo of Array.from(columna.children)) {
+        const caja = hijo.getBoundingClientRect();
+        if (caja.height > 0.5 && caja.top < superior) superior = caja.top;
+      }
+      const altura = Math.max(0, Math.round(window.innerHeight - superior));
+      if (altura !== ultimaAlturaHud.current) {
+        ultimaAlturaHud.current = altura;
+        document.documentElement.style.setProperty('--eko-hud-stack-h', `${altura}px`);
+      }
+    };
+    medirHudRef.current = medir;
+    medir();
+  });
+
+  useEffect(() => {
+    const alRedimensionar = () => medirHudRef.current();
+    window.addEventListener('resize', alRedimensionar);
+    return () => window.removeEventListener('resize', alRedimensionar);
+  }, []);
+
   const handleStartTutorial = () => {
     openModalExclusive('NONE');
     setTutorialActive(true);
@@ -933,7 +966,7 @@ export default function App() {
 
       {/* SUBTITLES OVERLAY */}
       {subtitlesEnabled && gameState === 'PLAYING' && activeTickerMessage && (
-        <div className="fixed bottom-[284px] left-1/2 -translate-x-1/2 z-40 w-[calc(100vw-1.5rem)] max-w-3xl px-3 py-1.5 bg-[#080C11]/85 backdrop-blur-md border border-[#334155]/70 text-center text-[11.5px] leading-snug text-white font-medium shadow-lg sm:bottom-16 sm:w-auto sm:px-4 sm:py-2 sm:text-sm">
+        <div className="radio-subtitles fixed left-1/2 -translate-x-1/2 z-40 w-[calc(100vw-1.5rem)] max-w-3xl px-3 py-1.5 bg-[#080C11]/85 backdrop-blur-md border border-[#334155]/70 text-center text-[11.5px] leading-snug text-white font-medium shadow-lg sm:bottom-16 sm:w-auto sm:px-4 sm:py-2 sm:text-sm">
           <strong className={activeTickerMessage.tone === 'alert' ? 'text-[#EF4444]' : activeTickerMessage.tone === 'ok' ? 'text-[#34D399]' : 'text-[#38BDF8]'}>
             {activeTickerMessage.speaker}:
           </strong>{' '}
@@ -1203,6 +1236,7 @@ export default function App() {
       {gameState === 'PLAYING' && hud && (
         <div
           style={{ opacity: hudOpacity / 100 }}
+          ref={hudStackRef}
           className="absolute inset-0 z-10 pointer-events-none flex flex-col justify-end transition-opacity duration-150"
         >
           {/* ==================== SITUACIÓN DE PELIGRO HUD BADGE (DOCKED ABOVE FOOTER) ==================== */}
@@ -1300,7 +1334,7 @@ export default function App() {
           )}
 
           {/* ==================== SINGLE COMPACT CONTEXTUAL PROMPT (TRANSLUCENT) ==================== */}
-          <div className="mb-1.5 flex flex-col items-center pointer-events-none px-2 max-sm:mb-[124px]">
+          <div className="mb-1.5 flex flex-col items-center pointer-events-none px-2">
             {hud.breachAction ? (
               <div className="px-4 py-1.5 bg-[#080C11]/55 backdrop-blur-sm border border-[#D97706]/80 shadow-lg flex items-center gap-3 font-mono-tabular text-[11px]">
                 <span className="font-bold text-[#FDE68A]">

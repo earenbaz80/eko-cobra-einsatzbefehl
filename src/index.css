@@ -254,3 +254,18 @@
   animation: tetraCarrierPing 1.1s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 
+
+/* Franjas del HUD móvil derivadas de medidas reales, no de píxeles fijos.
+   La barra inferior envuelve en más o menos filas según el ancho y el tamaño de letra,
+   así que App publica --eko-hud-stack-h (barra + avisos que se apilan encima) y
+   TouchControls publica --eko-touch-cluster-h (alto del bloque de controles); aquí se
+   ordenan los pisos: controles sobre el HUD, subtítulos sobre los controles. */
+@media (max-width: 639px) {
+  .touch-pad {
+    bottom: calc(var(--eko-hud-stack-h, 111px) + 10px);
+  }
+
+  .radio-subtitles {
+    bottom: calc(var(--eko-hud-stack-h, 111px) + var(--eko-touch-cluster-h, 152px) + 20px);
+  }
+}

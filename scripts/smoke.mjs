@@ -447,6 +447,59 @@ try {
       );
     }
   }
+
+  // La barra del HUD envuelve en más o menos filas según el ancho: al cambiar de
+  // viewport las franjas se recalculan solas y no pueden pisarse ni salirse.
+  try {
+    await movil.waitForFunction(
+      () => [...document.querySelectorAll('div')].some((el) => (el.className || '').includes('radio-subtitles')),
+      null,
+      { timeout: 12000 }
+    );
+  } catch {
+    // Sin mensaje de radio no hay subtítulo que medir; los controles se comprueban igual.
+  }
+  for (const [ancho, alto] of [
+    [320, 568],
+    [360, 640],
+  ]) {
+    await movil.setViewportSize({ width: ancho, height: alto });
+    await movil.waitForTimeout(600);
+    const cajas = await movil.evaluate(() => {
+      const caja = (el) => {
+        const b = el.getBoundingClientRect();
+        return { x: Math.round(b.x), y: Math.round(b.y), right: Math.round(b.right), bottom: Math.round(b.bottom) };
+      };
+      const footer = [...document.querySelectorAll('div')].find((el) => (el.className || '').includes('flex-row flex-wrap'));
+      const joystick = document.querySelector('[aria-label="Joystick de movimiento"]');
+      const disparar = document.querySelector('[aria-label="Disparar"]');
+      const subtitulos = [...document.querySelectorAll('div')].find((el) => (el.className || '').includes('radio-subtitles'));
+      const hijosCortados = footer
+        ? [...footer.children].filter((hijo) => {
+            const b = hijo.getBoundingClientRect();
+            return b.width > 0 && b.right > footer.getBoundingClientRect().right + 1;
+          }).length
+        : 0;
+      return {
+        footer: footer ? caja(footer) : null,
+        joystick: joystick ? caja(joystick) : null,
+        acciones: disparar?.parentElement ? caja(disparar.parentElement) : null,
+        subtitulos: subtitulos ? caja(subtitulos) : null,
+        hijosCortados,
+        stack: getComputedStyle(document.documentElement).getPropertyValue('--eko-hud-stack-h').trim(),
+      };
+    });
+    const solapa = (a, b) => Boolean(a && b && !(a.right <= b.x || b.right <= a.x || a.bottom <= b.y || b.bottom <= a.y));
+    const pisados = [
+      solapa(cajas.joystick, cajas.footer) && 'joystick/HUD',
+      solapa(cajas.acciones, cajas.footer) && 'botones/HUD',
+      solapa(cajas.subtitulos, cajas.joystick) && 'subtítulos/joystick',
+      solapa(cajas.subtitulos, cajas.acciones) && 'subtítulos/botones',
+    ].filter(Boolean);
+    if (pisados.length) fail(`móvil ${ancho}px: se pisan ${pisados.join(', ')} (${JSON.stringify(cajas)})`);
+    if (cajas.hijosCortados > 0) fail(`móvil ${ancho}px: la barra inferior corta ${cajas.hijosCortados} bloque(s) por la derecha`);
+    console.log(`móvil ${ancho}px: franjas sin solape (HUD ${cajas.stack})`);
+  }
   await contextoMovil.close();
 } catch (error) {
   fail(`navegación/interacción: ${error.message}`);

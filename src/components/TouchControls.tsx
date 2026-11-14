@@ -25,6 +25,7 @@ const ACTIONS: { code: string; label: string; title: string }[] = [
  */
 export function TouchControls({ onMove, onAction, onFire, onOpenPad }: TouchControlsProps) {
   const baseRef = useRef<HTMLDivElement | null>(null);
+  const accionesRef = useRef<HTMLDivElement | null>(null);
   const pointerRef = useRef<number | null>(null);
   const [knob, setKnob] = useState({ x: 0, y: 0 });
   const [hintVisible, setHintVisible] = useState(true);
@@ -32,6 +33,29 @@ export function TouchControls({ onMove, onAction, onFire, onOpenPad }: TouchCont
   useEffect(() => {
     const timer = setTimeout(() => setHintVisible(false), 7000);
     return () => clearTimeout(timer);
+  }, []);
+
+  // Publica el alto del bloque más alto de controles para que los subtítulos se
+  // apilen justo encima sin repetir números a mano en el CSS.
+  useEffect(() => {
+    const clusters = [baseRef.current, accionesRef.current].filter((el): el is HTMLDivElement => Boolean(el));
+    if (!clusters.length) return;
+    const raiz = document.documentElement;
+    let previo = -1;
+    const medir = () => {
+      const alto = Math.max(...clusters.map((el) => Math.ceil(el.getBoundingClientRect().height)));
+      if (alto !== previo) {
+        previo = alto;
+        raiz.style.setProperty('--eko-touch-cluster-h', `${alto}px`);
+      }
+    };
+    medir();
+    const observador = new ResizeObserver(medir);
+    clusters.forEach((el) => observador.observe(el));
+    return () => {
+      observador.disconnect();
+      raiz.style.removeProperty('--eko-touch-cluster-h');
+    };
   }, []);
 
   const updateFromPointer = (clientX: number, clientY: number) => {
@@ -77,7 +101,7 @@ export function TouchControls({ onMove, onAction, onFire, onOpenPad }: TouchCont
         ref={baseRef}
         role="group"
         aria-label="Joystick de movimiento"
-        className="pointer-events-auto absolute bottom-[116px] left-3 h-24 w-24 rounded-full border-2 border-[#38BDF8]/35 bg-[#0B1220]/55 backdrop-blur-sm sm:bottom-[78px] sm:left-4 sm:h-[124px] sm:w-[124px]"
+        className="touch-pad pointer-events-auto absolute left-3 h-24 w-24 rounded-full border-2 border-[#38BDF8]/35 bg-[#0B1220]/55 backdrop-blur-sm sm:bottom-[78px] sm:left-4 sm:h-[124px] sm:w-[124px]"
         style={{ touchAction: 'none' }}
         onPointerDown={(event) => {
           event.preventDefault();
@@ -104,7 +128,8 @@ export function TouchControls({ onMove, onAction, onFire, onOpenPad }: TouchCont
       </div>
 
       <div
-        className="pointer-events-auto absolute bottom-[116px] right-3 flex flex-col items-end gap-1.5 sm:bottom-[78px] sm:right-4 sm:gap-2"
+        ref={accionesRef}
+        className="touch-pad pointer-events-auto absolute right-3 flex flex-col items-end gap-1.5 sm:bottom-[78px] sm:right-4 sm:gap-2"
         style={{ touchAction: 'none' }}
       >
         <button
