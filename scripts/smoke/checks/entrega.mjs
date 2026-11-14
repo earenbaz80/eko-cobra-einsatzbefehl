@@ -8,7 +8,8 @@ import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { exigirCache, exigirTipo, fail, kb } from '../informe.mjs';
 import { pesoDirectorio } from '../archivos.mjs';
-import { BASE, DIST, ES_REMOTO, PRESUPUESTO } from '../config.mjs';
+import { leerMarca, coincideMarca } from '../marca.mjs';
+import { BASE, DIST, ES_REMOTO, PRESUPUESTO, SHA_ESPERADO } from '../config.mjs';
 
 /** Descarga un recurso publicado y lo devuelve, anotando el fallo si no es 200. */
 const pedir = async (destino, etiqueta) => {
@@ -26,7 +27,19 @@ async function comprobarPublicado(url) {
   if (htmlRemoto) {
     exigirTipo('index.html', htmlRemoto, ['text/html']);
     exigirCache('index.html', htmlRemoto, 3600);
-    const entradaSrc = (await htmlRemoto.text()).match(/<script[^>]+type="module"[^>]+src="([^"]+)"/)?.[1];
+    const html = await htmlRemoto.text();
+
+    // La marca de build distingue el despliegue nuevo del HTML cacheado anterior.
+    const marca = leerMarca(html);
+    if (!SHA_ESPERADO) {
+      console.log(`marca de build: ${marca ?? 'sin marca'} (sin SHA esperado, no se comprueba)`);
+    } else if (!coincideMarca(html, SHA_ESPERADO)) {
+      fail(`marca de build: lo publicado es ${marca ?? 'sin marca'} y se esperaba ${SHA_ESPERADO}`);
+    } else {
+      console.log(`marca de build: ${marca} (este commit)`);
+    }
+
+    const entradaSrc = html.match(/<script[^>]+type="module"[^>]+src="([^"]+)"/)?.[1];
     if (!entradaSrc) {
       fail('pesos: no se encuentra el JS de entrada en index.html');
     } else {
@@ -61,6 +74,12 @@ async function comprobarPublicado(url) {
 /** Comprueba el build local: mismos topes, leídos de `dist/`. */
 function comprobarBuildLocal() {
   const html = readFileSync(join(DIST, 'index.html'), 'utf8');
+
+  // Si el build no escribe la marca, el paso post-deploy no podría distinguir commits.
+  const marca = leerMarca(html);
+  if (!marca) fail('marca de build: falta <meta name="eko-build"> en index.html');
+  else console.log(`marca de build: ${marca}`);
+
   const entradaSrc = html.match(/<script[^>]+type="module"[^>]+src="([^"]+)"/)?.[1];
   if (!entradaSrc) {
     fail('pesos: no se encuentra el JS de entrada en index.html');

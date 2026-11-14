@@ -63,10 +63,29 @@ jobs:
       - name: Instalar Chromium para la prueba de humo
         run: npx playwright install --with-deps chromium
 
-      # El CDN de Pages puede seguir sirviendo el HTML anterior (se cachea 10 min) y
-      # ese HTML apunta a un bundle que ya no existe: se reintenta para no confundir
-      # una caché vieja con un fallo real del despliegue.
+      # El CDN de Pages puede seguir sirviendo el HTML anterior (se cachea 10 min).
+      # Se espera a que aparezca la marca del commit publicado antes de medir nada;
+      # así un fallo aquí es del despliegue y no de una caché lenta.
+      - name: Esperar a que Pages sirva este commit
+        env:
+          SHA: ${{ github.sha }}
+          URL_PUBLICADA: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          for intento in $(seq 1 30); do
+            if curl -fsSL -H 'cache-control: no-cache' "$URL_PUBLICADA" | grep -q "name=\"eko-build\" content=\"$SHA\""; then
+              echo "Pages ya sirve $SHA"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Pages sigue sin servir el commit $SHA tras 5 minutos"
+          exit 1
+
+      # Los reintentos son solo por un fallo de red puntual: la marca del build ya
+      # garantiza que lo medido es este commit y no el HTML anterior.
       - name: Prueba de humo contra la URL publicada
+        env:
+          SMOKE_EXPECTED_SHA: ${{ github.sha }}
         run: |
           for intento in 1 2 3; do
             if node scripts/smoke.mjs "${{ steps.deployment.outputs.page_url }}"; then

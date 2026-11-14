@@ -22,6 +22,9 @@ const CLEAN_BASE = RAW_BASE.replace(/^\/+|\/+$/g, '');
 export const BASE = CLEAN_BASE ? `/${CLEAN_BASE}/` : '/';
 export const DIST = resolve(process.cwd(), 'dist');
 
+/** Commit que debe estar sirviendo Pages; el job de deploy lo pasa en SMOKE_EXPECTED_SHA. */
+export const SHA_ESPERADO = (process.env.SMOKE_EXPECTED_SHA ?? '').trim().toLowerCase();
+
 // Topes de peso: un asset de varios MB o un salto del bundle no debería pasar el CI.
 // Los valores salen de lo que ocupa hoy el build con ~3 % de margen (JS 475 KiB,
 // dist 1654 KiB): ajustados a propósito para que el tope avise antes de una subida
