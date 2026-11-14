@@ -202,6 +202,54 @@ try {
     if (problema) fail(`metadatos: ${nombre} -> ${ruta} ${problema}`);
     else if (nombre === 'og:image') console.log(`${nombre} -> ${ruta} (200, 1200x630)`);
   }
+  // --- Iconos y manifest: sin ellos el navegador pide /favicon.ico, recibe 404 y
+  // el juego deja de poder instalarse en pantalla completa.
+  const manifestUrl = `${origin}${BASE}manifest.webmanifest`;
+  const respuestaManifest = await fetch(manifestUrl);
+  if (respuestaManifest.status !== 200) {
+    fail(`manifest: responde ${respuestaManifest.status} en ${BASE}manifest.webmanifest`);
+  } else {
+    let manifest = null;
+    try {
+      manifest = await respuestaManifest.json();
+    } catch {
+      fail('manifest: no es JSON válido');
+    }
+    if (manifest) {
+      const displays = [manifest.display, ...(Array.isArray(manifest.display_override) ? manifest.display_override : [])];
+      if (!displays.includes('fullscreen') && !displays.includes('standalone')) {
+        fail(`manifest: display ${JSON.stringify(manifest.display)} no permite pantalla completa`);
+      }
+      const iconos = Array.isArray(manifest.icons) ? manifest.icons : [];
+      const grandes = iconos.filter((icono) => icono.sizes === '512x512');
+      if (!iconos.some((icono) => icono.sizes === '192x192')) fail('manifest: falta un icono de 192×192');
+      if (!grandes.length) fail('manifest: falta un icono de 512×512');
+      if (!iconos.some((icono) => icono.purpose === 'maskable')) fail('manifest: falta un icono maskable');
+      for (const icono of iconos) {
+        const ruta = new URL(icono.src, manifestUrl).pathname;
+        const respuesta = await fetch(`${origin}${ruta}`);
+        if (respuesta.status !== 200) {
+          fail(`manifest: ${icono.src} responde ${respuesta.status}`);
+          continue;
+        }
+        const medidas = imageSize(Buffer.from(await respuesta.arrayBuffer()));
+        if (!medidas) fail(`manifest: ${icono.src} no es una imagen legible`);
+        else if (`${medidas.width}x${medidas.height}` !== icono.sizes) {
+          fail(`manifest: ${icono.src} mide ${medidas.width}x${medidas.height}, declara ${icono.sizes}`);
+        }
+      }
+      console.log(`manifest -> ${manifest.display}, ${iconos.length} iconos`);
+    }
+  }
+
+  const favicon = await fetch(`${origin}${BASE}favicon.ico`);
+  if (favicon.status !== 200) fail(`favicon.ico: responde ${favicon.status}`);
+  else {
+    const bytes = Buffer.from(await favicon.arrayBuffer());
+    if (bytes.length < 22 || bytes.readUInt16LE(0) !== 0 || bytes.readUInt16LE(2) !== 1) {
+      fail('favicon.ico: no es un ICO válido');
+    } else console.log(`favicon.ico -> ${bytes.readUInt16LE(4)} tamaños`);
+  }
 } catch (error) {
   fail(`navegación/interacción: ${error.message}`);
 } finally {

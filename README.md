@@ -69,7 +69,7 @@ Una única página web que ejecuta un motor de juego propio sobre `<canvas>`. No
 
 Las teclas de movimiento, acción y visión nocturna se pueden reasignar desde la interfaz; la configuración queda en `localStorage`.
 
-En móvil y tablet aparecen controles en pantalla: un joystick a la izquierda para moverte (empuja hasta el borde para esprintar) y, a la derecha, **FUEGO**, **ACCIÓN**, **RECARGA**, **POSTURA**, **LINTERNA** y **EKO-PAD**. Tocar la escena apunta y dispara hacia ese punto. Conviene jugar en horizontal: en vertical el HUD se reduce a salud, IFAK, radio, EKO-PAD y menú, y los controles, los subtítulos y las órdenes se reparten en franjas que no se pisan. El audio se desbloquea con el primer toque, como exigen Safari iOS y Chrome Android.
+En móvil y tablet aparecen controles en pantalla: un joystick a la izquierda para moverte (empuja hasta el borde para esprintar) y, a la derecha, **FUEGO**, **ACCIÓN**, **RECARGA**, **POSTURA**, **LINTERNA** y **EKO-PAD**. Tocar la escena apunta y dispara hacia ese punto. Conviene jugar en horizontal: en vertical el HUD se reduce a salud, IFAK, radio, EKO-PAD y menú, y los controles, los subtítulos y las órdenes se reparten en franjas que no se pisan. El audio se desbloquea con el primer toque, como exigen Safari iOS y Chrome Android. Con el manifest y los iconos del emblema, en Android y escritorio el juego se instala en pantalla completa desde el propio navegador; en iOS se añade a la pantalla de inicio con `apple-touch-icon`.
 
 ## Cómo ejecutarlo
 
