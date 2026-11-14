@@ -23,13 +23,15 @@ export const BASE = CLEAN_BASE ? `/${CLEAN_BASE}/` : '/';
 export const DIST = resolve(process.cwd(), 'dist');
 
 // Topes de peso: un asset de varios MB o un salto del bundle no debería pasar el CI.
-// Los valores salen de lo que ocupa hoy el build, con ~20 % de margen.
+// Los valores salen de lo que ocupa hoy el build con ~3 % de margen (JS 475 KiB,
+// dist 1654 KiB): ajustados a propósito para que el tope avise antes de una subida
+// real, no solo de un desastre. Si un asset nuevo es legítimo, se sube aquí a mano.
 export const PRESUPUESTO = {
-  entradaJs: 600 * 1024,
+  entradaJs: 490 * 1024,
   entradaJsGzip: 170 * 1024,
   sprite: 450 * 1024,
   tarjetaSocial: 150 * 1024,
-  dist: 2.6 * 1024 * 1024,
+  dist: 1700 * 1024,
 };
 
 /** Tipos que usa el servidor local para imitar a GitHub Pages. */
