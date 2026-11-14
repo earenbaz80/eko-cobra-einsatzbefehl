@@ -23,6 +23,7 @@ import {
   Mic,
   MicOff,
 } from 'lucide-react';
+import { TouchControls } from './components/TouchControls';
 const BlueprintModal = lazy(() =>
   import('./components/BlueprintModal').then((m) => ({ default: m.BlueprintModal }))
 );
@@ -730,6 +731,21 @@ export default function App() {
           gameState === 'PLAYING' && activeModal === 'NONE' ? 'cursor-none' : 'cursor-default'
         }`}
       />
+
+      {isTouchDevice && gameState === 'PLAYING' && activeModal === 'NONE' && (
+        <TouchControls
+          onMove={(x, y) => engineRef.current?.setVirtualStick(x, y)}
+          onAction={(code) => {
+            engineRef.current?.handleKeyDown(code);
+            engineRef.current?.handleKeyUp(code);
+          }}
+          onFire={() => {
+            engineRef.current?.handleMouseDown(0);
+            engineRef.current?.handleMouseUp();
+          }}
+          onOpenPad={() => openModalExclusive('PAD')}
+        />
+      )}
 
       {/* ==================== 1. TITLE SCREEN OVERLAY ==================== */}
       {gameState === 'TITLE' && (

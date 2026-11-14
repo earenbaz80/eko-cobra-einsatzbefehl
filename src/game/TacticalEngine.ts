@@ -365,6 +365,21 @@ public nightMode: boolean = false;
   public touchMoveX: number = 0;
   public touchMoveY: number = 0;
 
+  // Joystick virtual (móvil): vector -1..1 que manda sobre el arrastre táctil.
+  public virtualStickX: number = 0;
+  public virtualStickY: number = 0;
+
+  public setVirtualStick(x: number, y: number) {
+    const magnitud = Math.hypot(x, y);
+    const escala = magnitud > 1 ? 1 / magnitud : 1;
+    this.virtualStickX = x * escala;
+    this.virtualStickY = y * escala;
+  }
+
+  public get virtualStickMagnitude(): number {
+    return Math.hypot(this.virtualStickX, this.virtualStickY);
+  }
+
   public setTouchMoveVector(x: number, y: number) {
     this.touchMoveX = x;
     this.touchMoveY = y;
@@ -5620,7 +5635,10 @@ public keybinds: Record<string, string> = {
     if (this.heldKeys.has(this.keybinds.moveLeft)) moveX -= 1;
     if (this.heldKeys.has(this.keybinds.moveRight)) moveX += 1;
 
-    if (this.touchMoveX !== 0 || this.touchMoveY !== 0) {
+    if (this.virtualStickMagnitude > 0.2) {
+      moveX = this.virtualStickX;
+      moveY = this.virtualStickY;
+    } else if (this.touchMoveX !== 0 || this.touchMoveY !== 0) {
       moveX = this.touchMoveX;
       moveY = this.touchMoveY;
     }
@@ -5635,7 +5653,8 @@ public keybinds: Record<string, string> = {
       !focusedAim &&
       (this.heldKeys.has('ShiftLeft') ||
         this.heldKeys.has('ShiftRight') ||
-        this.sprintModeToggled);
+        this.sprintModeToggled ||
+        this.virtualStickMagnitude > 0.92);
     const canSprint = playerBh.legs >= 35 && this.playerFatigue < 97;
 
     if (moveX !== 0 || moveY !== 0) {
