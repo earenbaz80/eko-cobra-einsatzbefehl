@@ -475,14 +475,15 @@ export default function App() {
     };
 
     const onTouchStart = (e: TouchEvent) => {
-      if ((e.target as HTMLElement)?.tagName === 'CANVAS' && e.touches.length > 0) {
-        const touch = e.touches[0];
+      // changedTouches: con el dedo en el joystick, apunta al dedo que toca la escena.
+      if ((e.target as HTMLElement)?.tagName === 'CANVAS' && e.changedTouches.length > 0) {
+        const touch = e.changedTouches[0];
         engine.handleTouchStart(touch.clientX, touch.clientY);
       }
     };
     const onTouchMove = (e: TouchEvent) => {
-      if ((e.target as HTMLElement)?.tagName === 'CANVAS' && e.touches.length > 0) {
-        const touch = e.touches[0];
+      if ((e.target as HTMLElement)?.tagName === 'CANVAS' && e.changedTouches.length > 0) {
+        const touch = e.changedTouches[0];
         engine.handleTouchMove(touch.clientX, touch.clientY);
       }
     };
