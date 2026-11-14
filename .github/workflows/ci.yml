@@ -48,8 +48,23 @@ jobs:
 
       - run: npm ci
 
+      # Misma clave que el job de deploy: quien pobló la caché primero sirve a los dos,
+      # y solo se descarga el navegador cuando cambia la versión de Playwright.
+      - name: Cachear el navegador de Playwright
+        id: cache-playwright
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: playwright-${{ runner.os }}-
+
       - name: Instalar Chromium para la prueba de humo
-        run: npx playwright install --with-deps chromium
+        run: |
+          echo "caché de Playwright: ${{ steps.cache-playwright.outputs.cache-hit || 'no' }}"
+          # Con la caché restaurada esto verifica que el navegador está (si falta, lo
+          # descarga) y añade las dependencias del sistema; la verificación no cambia.
+          npx playwright install chromium
+          npx playwright install-deps chromium
 
       # Compila con el base de GitHub Pages: así se cazan las rutas de assets mal resueltas.
       - name: Build (base de Pages)
