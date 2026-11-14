@@ -3,14 +3,14 @@
 class TacticalSoundEngine {
   private ctx: AudioContext | null = null;
   public muted: boolean = false;
-  private rainNode: AudioNode | null = null;
+  private rainNode: AudioBufferSourceNode | null = null;
   private rainGain: GainNode | null = null;
   private ambientNodes: AudioNode[] = [];
   private ambientGain: GainNode | null = null;
   private lastHeartbeatTimestamp: number = 0;
 
   private ensureContext(): AudioContext | null {
-    if (this.muted) return null;
+    if (this.muted || typeof window === 'undefined') return null;
     if (!this.ctx) {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (AudioCtx) {
@@ -129,10 +129,10 @@ class TacticalSoundEngine {
     }
   }
 
-  public stopRainAmbience() {
+  private stopRainAmbience() {
     if (this.rainNode) {
       try {
-        (this.rainNode as AudioBufferSourceNode).stop?.();
+        this.rainNode.stop();
       } catch {
         // already stopped
       }

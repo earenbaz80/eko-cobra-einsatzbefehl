@@ -36,8 +36,12 @@ import {
   URBAN_STREET_LAMPS,
 } from './battlemapAssets';
 import { fillAsphaltSurface } from './asphaltTexture';
+import { applyZoneWound, selectHitZone, trainingScoreForZone } from './ballistics';
 import { drawPixelArtActor, drawPixelArtSonarActor } from './pixelSprites';
+import { classifyLethalShot, computeRoeImpact, isLawfulThreat, LETHAL_SHOT_POINTS } from './roe';
 import { soundEngine } from './soundEngine';
+import { computeSquadNavTarget } from './squadAi';
+import { canSurrender, resolveBreachReaction } from './suspectAi';
 import {
   computeMoveSpeedPct,
   computePulseStabilityPct,
@@ -274,9 +278,14 @@ const AUSTRIAN_SHOUTS = [
   'POLIZEI! ERGEBEN SIE SICH!',
 ];
 
+/** World-to-screen zoom shared by rendering, aiming and hit testing. */
+const CAMERA_ZOOM = 1.55;
+
 export class TacticalEngine {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
+  /** Backing-store scale (devicePixelRatio); all drawing happens in CSS pixels. */
+  private renderScale: number = 1;
   private lightCanvas: HTMLCanvasElement;
   private lightCtx: CanvasRenderingContext2D;
   private onHudUpdate: (snapshot: HudSnapshot) => void;
@@ -473,7 +482,7 @@ public keybinds: Record<string, string> = {
 
   // Reload state
   private reloadTimer: number = 0;
-  private reloadMaxDuration: number = 1.8;
+  private readonly reloadMaxDuration: number = 1.8;
   private squadReloadTimer: number = 0;
 
   constructor(
@@ -630,7 +639,6 @@ public keybinds: Record<string, string> = {
     this.ammoInMag = weaponSpec.magSize;
     this.magCount = weaponSpec.totalMags;
     this.reloadTimer = 0;
-    this.reloadMaxDuration = (weaponSpec as any).reloadTime || 1.8;
     this.taserCharges = metrics.totalTaser;
     this.gadgetCount = metrics.totalGadgets;
     this.ifakCount = this.plan.profile === 'BREACHER' ? 3 : 2;
@@ -1507,8 +1515,8 @@ public keybinds: Record<string, string> = {
       this.minimapCenter.y = this.mouseScreen.y - this.minimapDragOffset.y;
       
       // Clamp to screen
-      this.minimapCenter.x = Math.max(60, Math.min(this.canvas.width - 60, this.minimapCenter.x));
-      this.minimapCenter.y = Math.max(60, Math.min(this.canvas.height - 60, this.minimapCenter.y));
+      this.minimapCenter.x = Math.max(60, Math.min(this.viewWidth - 60, this.minimapCenter.x));
+      this.minimapCenter.y = Math.max(60, Math.min(this.viewHeight - 60, this.minimapCenter.y));
     }
   }
 
@@ -1760,12 +1768,13 @@ public keybinds: Record<string, string> = {
   }
 
   private recordRoeEvent(label: string, points: number, lawful: boolean) {
-    this.score += points;
-    if (!lawful) {
+    const impact = computeRoeImpact({ points, lawful });
+    this.score += impact.scoreDelta;
+    if (impact.isViolation) {
       this.roeViolations += 1;
       soundEngine.playRoePenalty();
-    } else if (points > 0) {
-      this.awardOperatorXp(Math.round(points * 0.65), 'ROE');
+    } else if (impact.xpAward > 0) {
+      this.awardOperatorXp(impact.xpAward, 'ROE');
     }
     this.roeEvents = [
       {
@@ -2254,13 +2263,13 @@ public keybinds: Record<string, string> = {
         actor.state === 'ARRESTED' &&
         Math.hypot(actor.x - player.x, actor.y - player.y) <= 65
       ) {
-        if ((actor as any).interrogated) {
+        if (actor.interrogated) {
           this.pushRadio('KOBRA-1', `El sospechoso ${actor.name} ya fue interrogado.`, 'info');
           this.emitHudSnapshot();
           return;
         }
 
-        (actor as any).interrogated = true;
+        actor.interrogated = true;
 
         let revealedCount = 0;
         for (const target of this.actors) {
@@ -2306,12 +2315,7 @@ public keybinds: Record<string, string> = {
   }
 
   private makeSuspectSurrender(suspect: ActorEntity, reason: string) {
-    if (
-      suspect.state === 'SURRENDERED' ||
-      suspect.state === 'ARRESTED' ||
-      suspect.state === 'DEAD'
-    )
-      return;
+    if (!canSurrender(suspect.state)) return;
     suspect.state = 'SURRENDERED';
     suspect.windupProgress = 0;
 
@@ -2643,15 +2647,16 @@ public keybinds: Record<string, string> = {
 
     // Blast radius damage & stun to all actors (suspects, hostages, squadmates) within 160px radius
     for (const actor of this.actors) {
-      if ((actor.state as any) === 'DEAD' || actor.state === 'INCAPACITATED') continue;
+      if (actor.state === 'DEAD' || actor.state === 'INCAPACITATED') continue;
       const distActor = Math.hypot(actor.x - charge.x, actor.y - charge.y);
       if (distActor < 160) {
         const blastDmg = Math.round(75 * (1 - distActor / 160));
         actor.hp = Math.max(0, actor.hp - blastDmg);
         actor.stunTimer = Math.max(actor.stunTimer, 4.0);
         actor.morale = Math.max(0, actor.morale - 85);
-        if (actor.hp <= 0 && (actor.state as any) !== 'DEAD') {
-          actor.state = 'DEAD' as any;
+        // The enclosing loop already skips DEAD actors, so a lethal hit is always new.
+        if (actor.hp <= 0) {
+          actor.state = 'DEAD';
           this.pushRadio('LEITSTELLE', `¡Baja por onda expansiva de C4 en ${charge.targetName}!`, actor.role === 'HOSTAGE' ? 'alert' : 'warn');
         } else {
           actor.alertLevel = 'COMBAT';
@@ -2800,25 +2805,23 @@ public keybinds: Record<string, string> = {
           actor.morale = Math.max(0, actor.morale - moraleHit);
           actor.stunTimer = Math.max(actor.stunTimer, stunDuration);
 
-          if (actor.morale <= 32) {
-            const roll = Math.random();
-            if (roll < 0.48) {
-              this.makeSuspectSurrender(actor, `Gewaltsamer Durchbruch (${mode})`);
-            } else if (roll < 0.78) {
-              actor.state = 'FLEEING';
-              actor.speechBubble = {
-                text: 'Verdammt! Rückzug! Abhauen!',
-                timer: 2.2,
-                type: 'PANIC',
-              };
-            } else {
-              actor.state = 'PANIC';
-              actor.speechBubble = {
-                text: 'Nein! Nicht schießen! Panik!',
-                timer: 2.2,
-                type: 'PANIC',
-              };
-            }
+          const reaction = resolveBreachReaction(actor.morale, Math.random());
+          if (reaction === 'SURRENDER') {
+            this.makeSuspectSurrender(actor, `Gewaltsamer Durchbruch (${mode})`);
+          } else if (reaction === 'FLEEING') {
+            actor.state = 'FLEEING';
+            actor.speechBubble = {
+              text: 'Verdammt! Rückzug! Abhauen!',
+              timer: 2.2,
+              type: 'PANIC',
+            };
+          } else if (reaction === 'PANIC') {
+            actor.state = 'PANIC';
+            actor.speechBubble = {
+              text: 'Nein! Nicht schießen! Panik!',
+              timer: 2.2,
+              type: 'PANIC',
+            };
           } else {
             actor.state = 'HESITATING';
             actor.speechBubble = {
@@ -4905,23 +4908,13 @@ public keybinds: Record<string, string> = {
     hitX: number,
     hitY: number
   ): HitZone {
-    if (shooter.role === 'PLAYER' || shooter.role === 'SQUAD') {
-      if (this.aimZoneMode === 'EXTREMITIES') {
-        // Deliberate limb targeting (legs or weapon-bearing arm)
-        return Math.random() < 0.54 ? 'LEGS' : 'ARMS';
-      }
-      // Geometric offset from target's center of mass
-      const offsetRatio = Math.hypot(hitX - target.x, hitY - target.y) / Math.max(1, target.radius);
-      if (offsetRatio > 0.78) return 'LEGS';
-      if (offsetRatio > 0.48) return 'ARMS';
-      return 'TORSO';
-    }
-
-    // Suspect firing at operator or squadmate
-    const roll = Math.random();
-    if (roll < 0.44) return 'TORSO';
-    if (roll < 0.74) return 'LEGS';
-    return 'ARMS';
+    return selectHitZone({
+      shooterIsPlayerSide: shooter.role === 'PLAYER' || shooter.role === 'SQUAD',
+      aimZoneMode: this.aimZoneMode,
+      // Geometric offset from the target's centre of mass
+      offsetRatio: Math.hypot(hitX - target.x, hitY - target.y) / Math.max(1, target.radius),
+      roll: Math.random(),
+    });
   }
 
   private ensureBodyHealth(actor: ActorEntity): BodyPartHealth {
@@ -4983,7 +4976,7 @@ public keybinds: Record<string, string> = {
               ? 580
               : 510;
       this.lastTrainingEnergy = kineticEnergy;
-      const scorePts = hitZone === 'TORSO' ? 100 : hitZone === 'ARMS' ? 70 : 50;
+      const scorePts = trainingScoreForZone(hitZone);
       this.score += scorePts;
 
       if (target.id.includes('STEEL') || target.id.includes('GONG')) {
@@ -5027,17 +5020,12 @@ public keybinds: Record<string, string> = {
           }
         }
 
-        const isLawfulThreat =
-          target.isArmed &&
-          (target.hasPointedWeaponAtPolice ||
-            target.state === 'AIMING_WINDUP' ||
-            target.state === 'USING_HUMAN_SHIELD' ||
-            target.state === 'FIRING');
+        const verdict = classifyLethalShot(target, hitZone);
 
-        if (!isLawfulThreat || target.state === 'SURRENDERED' || target.state === 'ARRESTED') {
+        if (verdict === 'UNLAWFUL') {
           this.recordRoeEvent(
             `Uso letal desproporcionado (${target.name} no apuntaba con arma)`,
-            -450,
+            LETHAL_SHOT_POINTS.UNLAWFUL,
             false
           );
           this.pushRadio(
@@ -5045,25 +5033,40 @@ public keybinds: Record<string, string> = {
             'WARNUNG: Schusswaffengebrauch ohne unmittelbare Lebensgefahr (§7 WVG)!',
             'alert'
           );
-        } else if (hitZone === 'LEGS' || hitZone === 'ARMS') {
+        } else if (verdict === 'LIMB') {
           this.recordRoeEvent(
             `Disparo incapacitante a extremidad (${hitZone === 'LEGS' ? 'Pierna' : 'Brazo'} · ${target.name})`,
-            120,
+            LETHAL_SHOT_POINTS.LIMB,
             true
           );
         } else {
-          this.recordRoeEvent(`Defensa legítima autorizada (${target.name})`, 50, true);
+          this.recordRoeEvent(
+            `Defensa legítima autorizada (${target.name})`,
+            LETHAL_SHOT_POINTS.TORSO,
+            true
+          );
         }
 
         // Apply localized zone damage to suspect
         targetBh.bleeding = true;
         targetBh.woundsCount += 1;
 
+        const wound = applyZoneWound(
+          hitZone,
+          damage,
+          { torso: targetBh.torso, arms: targetBh.arms, legs: targetBh.legs },
+          target.isArmed
+        );
+        targetBh.torso = wound.next.torso;
+        targetBh.arms = wound.next.arms;
+        targetBh.legs = wound.next.legs;
+        target.hp -= wound.hpDamage;
+        target.morale = Math.max(0, target.morale - wound.moraleLoss);
+        if (wound.stunSeconds > 0) {
+          target.stunTimer = Math.max(target.stunTimer, wound.stunSeconds);
+        }
+
         if (hitZone === 'LEGS') {
-          targetBh.legs = Math.max(0, targetBh.legs - Math.round(damage * 1.45));
-          target.hp -= Math.round(damage * 0.52);
-          target.stunTimer = Math.max(target.stunTimer, 1.3);
-          target.morale = Math.max(0, target.morale - 44);
           target.speechBubble = {
             text: 'Agh! Mein Bein! Ich kann kaum stehen!',
             timer: 2.2,
@@ -5075,12 +5078,9 @@ public keybinds: Record<string, string> = {
             'ok'
           );
         } else if (hitZone === 'ARMS') {
-          targetBh.arms = Math.max(0, targetBh.arms - Math.round(damage * 1.55));
-          target.hp -= Math.round(damage * 0.48);
           target.windupProgress = 0;
-          target.morale = Math.max(0, target.morale - 48);
 
-          if (targetBh.arms <= 50 && target.isArmed) {
+          if (wound.disarmed) {
             // Non-lethal ballistic disarm!
             this.makeSuspectSurrender(target, ' Armtreffer — Schusswaffe entwaffnet');
             this.recordRoeEvent(
@@ -5089,17 +5089,13 @@ public keybinds: Record<string, string> = {
               true
             );
             return;
-          } else {
-            target.speechBubble = {
-              text: 'Verdammt! Mein Waffenarm!',
-              timer: 2.0,
-              type: 'HOSTILE',
-            };
           }
-        } else {
-          targetBh.torso = Math.max(0, targetBh.torso - damage);
-          target.hp -= damage;
-          target.morale = Math.max(0, target.morale - 35);
+
+          target.speechBubble = {
+            text: 'Verdammt! Mein Waffenarm!',
+            timer: 2.0,
+            type: 'HOSTILE',
+          };
         }
 
         if (target.hp <= 0 || targetBh.torso <= 0) {
@@ -5148,7 +5144,7 @@ public keybinds: Record<string, string> = {
 
           this.pushRadio('KOBRA-1', `Täter ${target.name} kampfunfähig / neutralisiert.`, 'warn');
 
-          if (!isLawfulThreat && this.roeViolations >= 2) {
+          if (!isLawfulThreat(target) && this.roeViolations >= 2) {
             this.triggerMissionEnd(
               'ROE_TERMINATED',
               'F',
@@ -5585,11 +5581,10 @@ public keybinds: Record<string, string> = {
       actor.inCover = inCover;
     }
 
-    const viewW = this.canvas.width;
-    const viewH = this.canvas.height;
-    const zoom = 1.55;
-    this.mouseWorld.x = (this.mouseScreen.x - viewW * 0.5) / zoom + this.camX;
-    this.mouseWorld.y = (this.mouseScreen.y - viewH * 0.5) / zoom + this.camY;
+    const viewW = this.viewWidth;
+    const viewH = this.viewHeight;
+    this.mouseWorld.x = (this.mouseScreen.x - viewW * 0.5) / CAMERA_ZOOM + this.camX;
+    this.mouseWorld.y = (this.mouseScreen.y - viewH * 0.5) / CAMERA_ZOOM + this.camY;
 
     // 1. Update Player Movement, Limb Slowdown, Untreated Bleeding & Aim Tremor
     const playerBh = this.ensureBodyHealth(player);
@@ -6702,55 +6697,33 @@ public keybinds: Record<string, string> = {
       } else {
         this.squadCommand = 'FOLLOW';
       }
-    } else if (this.squadCommand === 'HOLD') {
-      navTarget = null;
-    } else if (
-      this.squadCommand === 'BREACH_AND_CLEAR' ||
-      this.squadCommand === 'PIE_DOOR' ||
-      this.squadCommand === 'DEPLOY_CS_GAS' ||
-      this.squadCommand === 'SUPPRESS_TARGET'
-    ) {
-      // Once Kobra-2 completes an intervention or breaches/clears, hold position covering the sector
-      navTarget = null;
-    } else if (this.squadCommand === 'FOLLOW') {
+    } else {
       const rallyMarker = this.tacticalMarkers.find((m) => m.type === 'RALLY_POINT');
       const doorNear = this.findNearestDoor(player.x, player.y, 68);
       const isPlayerReloadingOrHealing = this.reloadTimer > 0 || (player.bodyHealth?.bleeding);
+      const doorBlocking = Boolean(doorNear && !doorNear.isOpen && !doorNear.isDestroyed);
 
-      if (rallyMarker) {
-        navTarget = { x: rallyMarker.x, y: rallyMarker.y };
-      } else if (isPlayerReloadingOrHealing) {
-        // Protective security: when player is reloading or applying medical aid, step up front and provide overwatch
-        navTarget = {
-          x: player.x + Math.cos(player.angle) * 48,
-          y: player.y + Math.sin(player.angle) * 48,
-        };
-        if (!squad.speechBubble && Math.random() < 0.12) {
-          squad.speechBubble = { text: 'Deckung! Ich halte die Tür!', timer: 2.0, type: 'COMMAND' };
-        }
-      } else if (doorNear && !doorNear.isOpen && !doorNear.isDestroyed) {
+      navTarget = computeSquadNavTarget({
+        command: this.squadCommand,
+        player,
+        rallyPoint: rallyMarker ? { x: rallyMarker.x, y: rallyMarker.y } : undefined,
+        playerReloadingOrBleeding: Boolean(isPlayerReloadingOrHealing),
+        doorBlocking,
         // Tactical door stacking: stack along the wall outside the fatal funnel
-        navTarget = this.findTacticalStackPosition(doorNear, player);
-      } else {
-        navTarget = {
-          x: player.x - Math.cos(player.angle) * 85,
-          y: player.y - Math.sin(player.angle) * 85,
-        };
+        stackPosition:
+          doorBlocking && doorNear ? this.findTacticalStackPosition(doorNear, player) : undefined,
+      });
+
+      // Protective security: announce overwatch while covering a reload or medical aid.
+      if (
+        this.squadCommand === 'FOLLOW' &&
+        !rallyMarker &&
+        isPlayerReloadingOrHealing &&
+        !squad.speechBubble &&
+        Math.random() < 0.12
+      ) {
+        squad.speechBubble = { text: 'Deckung! Ich halte die Tür!', timer: 2.0, type: 'COMMAND' };
       }
-    } else if (this.squadCommand === 'FORM_WEDGE') {
-      const angle = player.angle + 2.5; // Rear-left approx
-      navTarget = {
-        x: player.x + Math.cos(angle) * 95,
-        y: player.y + Math.sin(angle) * 95,
-      };
-    } else if (this.squadCommand === 'FORM_STAGGERED') {
-      const angle = player.angle - 2.5; // Rear-right approx
-      navTarget = {
-        x: player.x + Math.cos(angle) * 125,
-        y: player.y + Math.sin(angle) * 125,
-      };
-    } else {
-      navTarget = null;
     }
 
     let movementDirectionAngle: number | null = null;
@@ -7584,8 +7557,10 @@ public keybinds: Record<string, string> = {
 
   public render() {
     const ctx = this.ctx;
-    const width = this.canvas.width;
-    const height = this.canvas.height;
+    // Draw in CSS pixels so the backing store can be scaled by devicePixelRatio.
+    ctx.setTransform(this.renderScale, 0, 0, this.renderScale, 0, 0);
+    const width = this.viewWidth;
+    const height = this.viewHeight;
 
     // Fill canvas background with textured asphalt
     fillAsphaltSurface(ctx, 0, 0, width, height, false);
@@ -7595,9 +7570,8 @@ public keybinds: Record<string, string> = {
     ctx.save();
     const shakeX = (Math.random() - 0.5) * this.shakeIntensity;
     const shakeY = (Math.random() - 0.5) * this.shakeIntensity;
-    const zoom = 1.55;
     ctx.translate(width * 0.5 + shakeX, height * 0.5 + shakeY);
-    ctx.scale(zoom, zoom);
+    ctx.scale(CAMERA_ZOOM, CAMERA_ZOOM);
     ctx.translate(-this.camX, -this.camY);
 
     // 1. Exterior tactical grid & wet asphalt surround
@@ -10089,13 +10063,13 @@ public keybinds: Record<string, string> = {
       const screenPos = this.worldToScreen(ax, ay);
       
       // Horizontal blue anamorphic streak across screen
-      const streakGrad = ctx.createLinearGradient(0, screenPos.y, this.canvas.width, screenPos.y);
+      const streakGrad = ctx.createLinearGradient(0, screenPos.y, this.viewWidth, screenPos.y);
       streakGrad.addColorStop(0, 'rgba(56, 189, 248, 0)');
       streakGrad.addColorStop(0.5, 'rgba(186, 230, 253, 0.28)');
       streakGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
       
       ctx.fillStyle = streakGrad;
-      ctx.fillRect(0, screenPos.y - 1, this.canvas.width, 2);
+      ctx.fillRect(0, screenPos.y - 1, this.viewWidth, 2);
       
       // Central hexagonal "ghost" artifact
       const pulse = 0.8 + 0.2 * Math.sin(this.elapsedSeconds * 4);
@@ -10905,7 +10879,7 @@ public keybinds: Record<string, string> = {
           return `[E] esposar y asegurar a ${actor.name}`;
         }
         if (actor.role === 'SUSPECT' && actor.state === 'ARRESTED') {
-          if (!(actor as any).interrogated) {
+          if (!actor.interrogated) {
             return `[I] Interrogar a ${actor.name} (Revelar mapa C4I)`;
           }
         }
@@ -11462,34 +11436,27 @@ public keybinds: Record<string, string> = {
     }
   }
 
-  /**
-   * Stops the simulation and releases every resource owned by the engine. Call it
-   * on unmount / HMR so AudioContexts and ambient loops do not accumulate.
-   */
+  /** Idempotent teardown: freezes the simulation and releases the audio graph. */
   public destroy() {
     this.gameState = 'TITLE';
     this.heldKeys.clear();
     this.isEmittingHudSnapshot = false;
-    this.onHudUpdate = () => {};
-    this.onStateChange = () => {};
     soundEngine.destroy();
   }
 
   public screenToWorld(clientX: number, clientY: number): { x: number; y: number } {
-    const zoom = 1.55;
-    const cx = this.canvas.width * 0.5;
-    const cy = this.canvas.height * 0.5;
-    const worldX = (clientX - cx) / zoom + this.camX;
-    const worldY = (clientY - cy) / zoom + this.camY;
+    const cx = this.viewWidth * 0.5;
+    const cy = this.viewHeight * 0.5;
+    const worldX = (clientX - cx) / CAMERA_ZOOM + this.camX;
+    const worldY = (clientY - cy) / CAMERA_ZOOM + this.camY;
     return { x: worldX, y: worldY };
   }
 
   public worldToScreen(wx: number, wy: number): { x: number; y: number } {
-    const zoom = 1.55;
-    const cx = this.canvas.width * 0.5;
-    const cy = this.canvas.height * 0.5;
-    const sx = (wx - this.camX) * zoom + cx;
-    const sy = (wy - this.camY) * zoom + cy;
+    const cx = this.viewWidth * 0.5;
+    const cy = this.viewHeight * 0.5;
+    const sx = (wx - this.camX) * CAMERA_ZOOM + cx;
+    const sy = (wy - this.camY) * CAMERA_ZOOM + cy;
     return { x: sx, y: sy };
   }
 
@@ -11506,7 +11473,7 @@ public keybinds: Record<string, string> = {
       }
     }
     for (const w of this.walls) {
-      if ((w as any).isWindow || w.id?.includes('WINDOW') || w.id?.includes('FENSTER')) {
+      if (w.isWindow || w.id?.includes('WINDOW') || w.id?.includes('FENSTER')) {
         const midX = (w.x1 + w.x2) / 2;
         const midY = (w.y1 + w.y2) / 2;
         if (Math.hypot(midX - worldX, midY - worldY) <= 42) {
@@ -11535,6 +11502,23 @@ public keybinds: Record<string, string> = {
       }
     }
     this.issueSquadCommand(cmd);
+  }
+
+  /** Sizes the backing store for CSS dimensions at the given pixel ratio. */
+  public resize(cssWidth: number, cssHeight: number, pixelRatio: number) {
+    const ratio = Number.isFinite(pixelRatio) && pixelRatio > 0 ? pixelRatio : 1;
+    this.renderScale = ratio;
+    this.canvas.width = Math.max(1, Math.round(cssWidth * ratio));
+    this.canvas.height = Math.max(1, Math.round(cssHeight * ratio));
+  }
+
+  /** Canvas size in CSS pixels: the space all drawing and hit testing uses. */
+  private get viewWidth(): number {
+    return this.canvas.width / this.renderScale;
+  }
+
+  private get viewHeight(): number {
+    return this.canvas.height / this.renderScale;
   }
 
   public setHudOpacity(opacityRatio: number) {

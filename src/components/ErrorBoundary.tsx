@@ -1,32 +1,18 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 
-type ErrorBoundaryProps = {
-  children: ReactNode;
-};
+type BoundaryState = { error: Error | null };
 
-type ErrorBoundaryState = {
-  error: Error | null;
-};
+/** Last-resort UI so an engine crash never leaves a blank screen. */
+export class ErrorBoundary extends Component<{ children: ReactNode }, BoundaryState> {
+  state: BoundaryState = { error: null };
 
-/**
- * Keeps a runtime failure inside the tactical engine from leaving a blank screen:
- * shows the failure and offers a clean restart of the simulation.
- */
-export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { error: null };
-
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+  static getDerivedStateFromError(error: Error): BoundaryState {
     return { error };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('Fallo crítico en EKO Cobra:', error, info.componentStack);
+    console.error('EKO Cobra crashed:', error, info.componentStack);
   }
-
-  private handleReload = () => {
-    this.setState({ error: null });
-    window.location.reload();
-  };
 
   render() {
     const { error } = this.state;
@@ -47,7 +33,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           </pre>
           <button
             type="button"
-            onClick={this.handleReload}
+            onClick={() => window.location.reload()}
             className="mt-4 w-full cursor-pointer border border-[#D97706] bg-[#D97706]/15 px-3 py-2 text-xs font-bold text-[#FDE68A] transition-colors hover:bg-[#D97706] hover:text-black"
           >
             REINICIAR OPERACIÓN

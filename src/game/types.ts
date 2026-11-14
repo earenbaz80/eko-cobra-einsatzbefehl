@@ -334,6 +334,7 @@ export interface ActorEntity {
   feignTimer: number;
   inCSGas?: boolean;
   csGasExposure?: number;
+  interrogated?: boolean;
   roomName: string;
   visibleToPlayer: boolean;
   visibleToSquad?: boolean;

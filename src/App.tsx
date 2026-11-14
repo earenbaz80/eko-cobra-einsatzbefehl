@@ -58,6 +58,42 @@ const INITIAL_PLAN: MissionPlan = {
 
 type ActiveModalId = 'NONE' | 'PAD' | 'BLUEPRINT' | 'GDD' | 'CONTROLS' | 'ARMORY' | 'INTEL' | 'CAREER';
 
+// Minimal Web Speech API surface (not in lib.dom) for push-to-talk voice commands.
+type SpeechRecognitionResultLike = { transcript: string };
+type SpeechRecognitionEventLike = { results: ArrayLike<ArrayLike<SpeechRecognitionResultLike>> };
+type SpeechRecognitionErrorEventLike = { error: string };
+
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+  abort(): void;
+};
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
+function getSpeechRecognitionConstructor(): SpeechRecognitionConstructor | undefined {
+  const scope = window as unknown as Record<string, SpeechRecognitionConstructor | undefined>;
+  return scope.SpeechRecognition ?? scope.webkitSpeechRecognition;
+}
+
+/** Keys the browser must not act on (scroll, focus roaming, Alt menu) while playing. */
+const BLOCKED_BROWSER_KEYS = new Set([
+  'Space',
+  'Tab',
+  'AltLeft',
+  'AltRight',
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+]);
+
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const engineRef = useRef<TacticalEngine | null>(null);
@@ -209,11 +245,11 @@ export default function App() {
   }, []);
 
   const [isListening, setIsListening] = useState(false);
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const isListeningRef = useRef(false);
 
   useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const SpeechRecognition = getSpeechRecognitionConstructor();
     if (!SpeechRecognition) return;
 
     const rec = new SpeechRecognition();
@@ -221,7 +257,7 @@ export default function App() {
     rec.interimResults = false;
     rec.lang = 'es-ES'; // Set to Spanish as per user prompt commands
 
-    rec.onresult = (event: any) => {
+    rec.onresult = (event: SpeechRecognitionEventLike) => {
       const last = event.results.length - 1;
       const text = event.results[last][0].transcript;
       if (text && engineRef.current) {
@@ -229,9 +265,8 @@ export default function App() {
       }
     };
 
-    rec.onerror = (event: any) => {
-      // Fatal or transient, the capture is over: clear the flag first so onend
-      // cannot restart the engine in a loop (e.g. microphone permission denied).
+    rec.onerror = (event: SpeechRecognitionErrorEventLike) => {
+      // Clear the flag first, otherwise onend restarts a permanently failing session.
       isListeningRef.current = false;
       setIsListening(false);
       console.error('Speech recognition error', event.error);
@@ -252,7 +287,7 @@ export default function App() {
     recognitionRef.current = rec;
 
     return () => {
-      // Detach handlers before aborting so teardown cannot trigger a restart.
+      // Detach first: aborting must not restart the session or log an error.
       isListeningRef.current = false;
       rec.onresult = null;
       rec.onerror = null;
@@ -260,20 +295,24 @@ export default function App() {
       try {
         rec.abort();
       } catch {
-        // ignore
+        // already stopped
       }
       recognitionRef.current = null;
     };
   }, []);
 
   const startVoiceCapture = () => {
-    if (!recognitionRef.current || isListeningRef.current) return;
+    const recognition = recognitionRef.current;
+    if (!recognition || isListeningRef.current) return;
     isListeningRef.current = true;
     setIsListening(true);
     try {
-      recognitionRef.current.start();
+      recognition.start();
       soundEngine.playTetraStaticBurst(0.6, 0.25);
     } catch (e) {
+      // A failed start must not leave push-to-talk locked in the listening state.
+      isListeningRef.current = false;
+      setIsListening(false);
       console.error(e);
     }
   };
@@ -282,8 +321,10 @@ export default function App() {
     if (!isListeningRef.current) return;
     isListeningRef.current = false;
     setIsListening(false);
+    const recognition = recognitionRef.current;
+    if (!recognition) return;
     try {
-      recognitionRef.current.stop();
+      recognition.stop();
     } catch (e) {}
   };
 
@@ -291,19 +332,18 @@ export default function App() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const handleResize = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    };
-    handleResize();
-    window.addEventListener('resize', handleResize);
-
     const engine = new TacticalEngine(
       canvas,
       INITIAL_PLAN,
       (snapshot) => setHud(snapshot),
       (nextState) => setGameState(nextState)
     );
+
+    // Backing store at devicePixelRatio (capped at 2); the engine draws in CSS pixels.
+    const fitToWindow = () =>
+      engine.resize(canvas.clientWidth, canvas.clientHeight, Math.min(window.devicePixelRatio || 1, 2));
+    fitToWindow();
+    window.addEventListener('resize', fitToWindow);
     engine.setHudOpacity(hudOpacity / 100);
     engine.setNvgKeyCode(nvgKeyCode);
     engineRef.current = engine;
@@ -329,7 +369,9 @@ export default function App() {
     rafId = requestAnimationFrame(loop);
 
     const onKeyDown = (e: KeyboardEvent) => {
-      // Ignore OS auto-repeat: holding Space / G / 1-8 must not loop actions.
+      // Browser defaults are blocked on every event, repeats included.
+      if (BLOCKED_BROWSER_KEYS.has(e.code)) e.preventDefault();
+      // Auto-repeat must not re-trigger actions or UI toggles (Space, G, 1-8, M, Tab, Esc).
       if (e.repeat) return;
       if (isRebindingNvgKeyRef.current) {
         e.preventDefault();
@@ -368,13 +410,6 @@ export default function App() {
         return;
       }
 
-      if (
-        ['Space', 'Tab', 'AltLeft', 'AltRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(
-          e.code
-        )
-      ) {
-        e.preventDefault();
-      }
       if (e.code === 'Escape' && activeModalRef.current !== 'NONE') {
         openModalExclusive('NONE');
         return;
@@ -469,7 +504,7 @@ export default function App() {
       cancelAnimationFrame(rafId);
       engine.destroy();
       engineRef.current = null;
-      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('resize', fitToWindow);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
