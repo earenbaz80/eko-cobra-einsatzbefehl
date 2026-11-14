@@ -10,6 +10,8 @@ import {
   Heart,
   Lock,
   MapPin,
+  Mic,
+  MicOff,
   Radio,
   Shield,
   ShieldAlert,
@@ -41,6 +43,13 @@ interface TacticalPadModalProps {
   onApplyIfak: () => void;
   onTriggerBiometricId: (actorId?: string) => void;
   onOpenBlueprint: () => void;
+  /** Ciclo de paleta térmica (el botón del pie se oculta en móvil y vive aquí). */
+  onCycleThermal: () => void;
+  thermalActive: boolean;
+  /** Comando de voz: se mantiene pulsado, igual que en la barra inferior. */
+  onVoiceStart: () => void;
+  onVoiceStop: () => void;
+  isListening: boolean;
 }
 
 type PadTabId = 'OVERVIEW' | 'MAP' | 'LOG' | 'VITALS_DOSSIERS' | 'ROE_XP' | 'HELP';
@@ -203,6 +212,11 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
   onApplyIfak,
   onTriggerBiometricId,
   onOpenBlueprint,
+  onCycleThermal,
+  thermalActive,
+  onVoiceStart,
+  onVoiceStop,
+  isListening,
 }) => {
   const [activeTab, setActiveTab] = useState<PadTabId>('OVERVIEW');
   const [selectedMarkerType, setSelectedMarkerType] = useState<TacticalMarkerType>('HOSTILE');
@@ -353,6 +367,49 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
               >
                 <span>Blaupause &amp; Equipo</span>
               </button>
+              {/* Térmica y voz: en pantallas estrechas no caben en la barra del HUD. */}
+              <div className="flex w-full items-center gap-1.5 sm:w-auto">
+                <button
+                  onClick={() => {
+                    soundEngine.playUiClick();
+                    onCycleThermal();
+                  }}
+                  disabled={!thermalActive}
+                  title={
+                    thermalActive
+                      ? 'Cambiar paleta térmica: White-Hot, Black-Hot, Ironbow [K]'
+                      : 'Requiere cámara térmica activa [K]'
+                  }
+                  className={`flex-1 sm:flex-none px-2.5 py-1 border font-mono-tabular text-[9.5px] whitespace-nowrap font-bold uppercase tracking-wide flex items-center justify-center gap-1.5 transition-colors ${
+                    thermalActive
+                      ? 'border-pink-500/70 text-pink-400 hover:border-pink-500 hover:bg-pink-500/15 cursor-pointer'
+                      : 'border-[#334155]/50 text-[#64748B] cursor-not-allowed'
+                  }`}
+                >
+                  <Flame className="w-3.5 h-3.5" />
+                  <span>FLIR · {thermalActive ? hud.thermalPaletteMode?.replace('_', ' ') || 'WHITE HOT' : 'SIN TÉRMICA'}</span>
+                </button>
+
+                <button
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    onVoiceStart();
+                  }}
+                  onPointerUp={() => onVoiceStop()}
+                  onPointerLeave={() => onVoiceStop()}
+                  onPointerCancel={() => onVoiceStop()}
+                  title="Mantén pulsado para dictar una orden por voz [Y / CapsLock]"
+                  className={`flex-1 sm:flex-none px-2.5 py-1 border font-mono-tabular text-[10px] font-bold uppercase tracking-wide flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                    isListening
+                      ? 'bg-red-600 border-red-400 text-white animate-pulse'
+                      : 'border-[#EF4444]/70 text-[#EF4444] hover:bg-[#EF4444]/15'
+                  }`}
+                >
+                  {isListening ? <Mic className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5" />}
+                  <span>VOZ · {isListening ? 'ESCANEANDO' : 'MANTENER'}</span>
+                </button>
+              </div>
+
             </div>
           )}
         </div>

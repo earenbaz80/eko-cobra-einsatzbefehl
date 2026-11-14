@@ -1893,7 +1893,7 @@ export default function App() {
                     engineRef.current?.cycleThermalPaletteMode();
                   }}
                   title="Cambiar paleta de colores térmica: White-Hot, Black-Hot, Ironbow [K]"
-                  className="px-2.5 py-1.5 bg-[#080C11]/95 border border-pink-500/70 hover:border-pink-500 text-pink-500 hover:bg-pink-500/20 flex items-center gap-2 font-mono-tabular transition-all cursor-pointer shadow-[0_0_12px_rgba(236,72,153,0.3)]"
+                  className="hidden sm:flex px-2.5 py-1.5 bg-[#080C11]/95 border border-pink-500/70 hover:border-pink-500 text-pink-500 hover:bg-pink-500/20 items-center gap-2 font-mono-tabular transition-all cursor-pointer shadow-[0_0_12px_rgba(236,72,153,0.3)]"
                 >
                   <div className="w-5 h-5 flex items-center justify-center text-xs font-bold">
                     FLIR
@@ -1940,7 +1940,7 @@ export default function App() {
                 onTouchStart={(e) => { e.preventDefault(); startVoiceCapture(); }}
                 onTouchEnd={(e) => { e.preventDefault(); stopVoiceCapture(); }}
                 title="Mantener pulsado para transmitir comandos tácticos por voz [Y / CapsLock]"
-                className={`flex items-center gap-2 px-2.5 py-1.5 border transition-all cursor-pointer shadow-lg font-mono-tabular ${
+                className={`hidden sm:flex items-center gap-2 px-2.5 py-1.5 border transition-all cursor-pointer shadow-lg font-mono-tabular ${
                   isListening
                     ? 'bg-red-600 border-red-400 text-white animate-pulse'
                     : 'bg-[#080C11]/95 border-[#EF4444]/70 text-[#EF4444] hover:bg-[#EF4444]/20 hover:border-[#EF4444]'
@@ -2453,6 +2453,11 @@ export default function App() {
           onOpenBlueprint={() => {
             openModalExclusive('BLUEPRINT');
           }}
+          onCycleThermal={() => engineRef.current?.cycleThermalPaletteMode()}
+          thermalActive={hud.inspectionId === 'THERMAL_CAM' && hud.mirrorActive}
+          onVoiceStart={startVoiceCapture}
+          onVoiceStop={stopVoiceCapture}
+          isListening={isListening}
         />
         </Suspense>
       )}
