@@ -4,19 +4,33 @@
  * Sirve dist/ bajo el mismo base que usa Pages, abre la página con Chromium y comprueba:
  *   1. que el canvas se ha renderizado (no está en blanco),
  *   2. que ninguna petición del propio sitio devuelve 404/5xx,
- *   3. que la Misión 1 arranca y muestra el HUD en juego.
+ *   3. que la Misión 1 arranca y muestra el HUD en juego,
+ *   4. que los metadatos sociales, los iconos y el manifest están completos,
+ *   5. que en viewport móvil con hasTouch aparece el joystick y mueve de verdad al operador,
+ *   6. que el JS de entrada y los assets críticos no superan sus topes de peso.
  *
  * Uso: VITE_BASE_PATH=/eko-cobra-einsatzbefehl/ npm run build && npm run smoke
  */
-import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { chromium } from 'playwright';
 
 const RAW_BASE = process.env.VITE_BASE_PATH ?? '/';
 const CLEAN_BASE = RAW_BASE.replace(/^\/+|\/+$/g, '');
 const BASE = CLEAN_BASE ? `/${CLEAN_BASE}/` : '/';
 const DIST = resolve(process.cwd(), 'dist');
+
+// Topes de peso: un asset de varios MB o un salto del bundle no debería pasar el CI.
+// Los valores salen de lo que ocupa hoy el build, con ~20 % de margen.
+const PRESUPUESTO = {
+  entradaJs: 600 * 1024,
+  entradaJsGzip: 170 * 1024,
+  sprite: 450 * 1024,
+  tarjetaSocial: 150 * 1024,
+  dist: 2.6 * 1024 * 1024,
+};
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -55,6 +69,43 @@ const imageSize = (buffer) => {
 
 const failures = [];
 const fail = (mensaje) => failures.push(mensaje);
+
+const kb = (bytes) => `${(bytes / 1024).toFixed(0)} KB`;
+
+/** Suma recursiva del tamaño de dist/, para vigilar el peso total publicado. */
+const pesoDirectorio = (dir) =>
+  readdirSync(dir, { withFileTypes: true }).reduce((total, entrada) => {
+    const ruta = join(dir, entrada.name);
+    return total + (entrada.isDirectory() ? pesoDirectorio(ruta) : statSync(ruta).size);
+  }, 0);
+
+/** Firma de 32x32 luminancias del canvas: sirve para ver si la escena se mueve. */
+const firmaCanvas = (page) =>
+  page.evaluate(() => {
+    const el = document.querySelector('canvas');
+    const ctx = el?.getContext('2d');
+    if (!el || !ctx) return null;
+    const { data } = ctx.getImageData(0, 0, el.width, el.height);
+    const celdas = 32;
+    const firma = [];
+    for (let cy = 0; cy < celdas; cy += 1) {
+      for (let cx = 0; cx < celdas; cx += 1) {
+        const x = Math.floor(((cx + 0.5) / celdas) * el.width);
+        const y = Math.floor(((cy + 0.5) / celdas) * el.height);
+        const i = (y * el.width + x) * 4;
+        firma.push(data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114);
+      }
+    }
+    return firma;
+  });
+
+/** Porcentaje de celdas cuya luminancia cambia más de `umbral` niveles. */
+const cambioEntreFirmas = (a, b, umbral = 12) => {
+  if (!a || !b || a.length !== b.length) return 1;
+  let distintas = 0;
+  for (let i = 0; i < a.length; i += 1) if (Math.abs(a[i] - b[i]) > umbral) distintas += 1;
+  return distintas / a.length;
+};
 
 if (!existsSync(DIST)) {
   console.error('No existe dist/. Compila antes: VITE_BASE_PATH=... npm run build');
@@ -104,6 +155,49 @@ page.on('console', (message) => {
 });
 
 try {
+  // --- Pesos: JS de entrada, sprite, tarjeta social y total publicado.
+  const html = readFileSync(join(DIST, 'index.html'), 'utf8');
+  const entradaSrc = html.match(/<script[^>]+type="module"[^>]+src="([^"]+)"/)?.[1];
+  if (!entradaSrc) {
+    fail('pesos: no se encuentra el JS de entrada en index.html');
+  } else {
+    const entrada = join(DIST, entradaSrc.replace(BASE, ''));
+    if (!existsSync(entrada)) {
+      fail(`pesos: no existe el JS de entrada (${entradaSrc})`);
+    } else {
+      const crudo = statSync(entrada).size;
+      const gzip = gzipSync(readFileSync(entrada), { level: 6 }).length;
+      if (crudo > PRESUPUESTO.entradaJs) fail(`pesos: el JS de entrada ocupa ${kb(crudo)} (tope ${kb(PRESUPUESTO.entradaJs)})`);
+      if (gzip > PRESUPUESTO.entradaJsGzip) fail(`pesos: el JS de entrada pesa ${kb(gzip)} comprimido (tope ${kb(PRESUPUESTO.entradaJsGzip)})`);
+      console.log(`JS de entrada: ${kb(crudo)} (${kb(gzip)} gzip)`);
+    }
+  }
+
+  const carpetaSprite = join(DIST, 'assets', 'aistudio');
+  const sprite = existsSync(carpetaSprite)
+    ? readdirSync(carpetaSprite).find((nombre) => /^BLOQUE1.*\.webp$/.test(nombre))
+    : undefined;
+  if (!sprite) {
+    fail('pesos: falta el sprite del operador (BLOQUE1_*.webp)');
+  } else {
+    const peso = statSync(join(carpetaSprite, sprite)).size;
+    if (peso > PRESUPUESTO.sprite) fail(`pesos: el sprite ocupa ${kb(peso)} (tope ${kb(PRESUPUESTO.sprite)})`);
+    else console.log(`sprite: ${kb(peso)}`);
+  }
+
+  const tarjeta = join(DIST, 'social-card.jpg');
+  if (!existsSync(tarjeta)) {
+    fail('pesos: falta social-card.jpg');
+  } else {
+    const peso = statSync(tarjeta).size;
+    if (peso > PRESUPUESTO.tarjetaSocial) fail(`pesos: la tarjeta social ocupa ${kb(peso)} (tope ${kb(PRESUPUESTO.tarjetaSocial)})`);
+    else console.log(`tarjeta social: ${kb(peso)}`);
+  }
+
+  const totalDist = pesoDirectorio(DIST);
+  if (totalDist > PRESUPUESTO.dist) fail(`pesos: dist/ ocupa ${kb(totalDist)} (tope ${kb(PRESUPUESTO.dist)})`);
+  else console.log(`dist total: ${kb(totalDist)} (tope ${kb(PRESUPUESTO.dist)})`);
+
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForSelector('canvas', { timeout: 20000 });
 
@@ -250,6 +344,110 @@ try {
       fail('favicon.ico: no es un ICO válido');
     } else console.log(`favicon.ico -> ${bytes.readUInt16LE(4)} tamaños`);
   }
+
+  // --- Móvil: los controles táctiles solo existen con hasTouch, y que el joystick
+  // pinte no significa que mueva al operador: se comprueba contra el canvas.
+  const contextoMovil = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 2,
+    hasTouch: true,
+    isMobile: true,
+  });
+  const movil = await contextoMovil.newPage();
+  movil.on('response', (response) => {
+    const target = response.url();
+    if (!target.startsWith(origin) || target.endsWith('/favicon.ico')) return;
+    if (response.status() >= 400) badRequests.push(`móvil ${response.status()} ${target}`);
+  });
+  movil.on('pageerror', (error) => consoleErrors.push(`móvil excepción: ${error.message}`));
+  movil.on('console', (message) => {
+    if (message.type() === 'error' && !/favicon/i.test(message.text())) consoleErrors.push(`móvil ${message.text()}`);
+  });
+
+  // La pestaña móvil tiene que estar en primer plano: si el navegador la considera
+  // oculta, rAF se estrangula y los fotogramas saltan (ruido enorme al comparar).
+  await movil.bringToFront();
+  await movil.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await movil.waitForSelector('canvas', { timeout: 20000 });
+  await movil.getByRole('button', { name: 'Misión 1: Piso Graz - Lend' }).click();
+  await movil.getByText('K1 OPERATIVO').first().waitFor({ timeout: 20000 });
+  await movil.waitForTimeout(1800);
+
+  const joystick = movil.getByLabel('Joystick de movimiento');
+  if (!(await joystick.isVisible())) fail('móvil: el joystick no aparece con hasTouch');
+  if (!(await movil.getByLabel('Disparar').isVisible())) fail('móvil: falta el botón de fuego con hasTouch');
+
+  // Posición del pomo en píxeles, leída de la matriz ya resuelta (-50 % incluido).
+  const leerPalanca = () =>
+    movil.evaluate(() => {
+      const base = document.querySelector('[aria-label="Joystick de movimiento"]');
+      const knob = base ? [...base.querySelectorAll('div')].find((el) => (el.style.transform ?? '').includes('translate(calc(')) : null;
+      if (!knob) return null;
+      const matriz = getComputedStyle(knob).transform.match(/matrix\(([^)]+)\)/);
+      if (!matriz) return null;
+      const valores = matriz[1].split(',').map(Number);
+      return { x: Math.round(valores[4]), y: Math.round(valores[5]) };
+    });
+  const distanciaAPomo = (a, b) => (a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0);
+
+  const caja = await joystick.boundingBox();
+  if (!caja) {
+    fail('móvil: el joystick no tiene área pulsable');
+  } else {
+    const centroX = caja.x + caja.width / 2;
+    const centroY = caja.y + caja.height / 2;
+    const reposo = await leerPalanca();
+
+    // La palanca tiene que seguir al dedo (captura de puntero), no quedarse quieta.
+    await movil.mouse.move(centroX, centroY);
+    await movil.mouse.down();
+    await movil.mouse.move(centroX, centroY - 70, { steps: 6 });
+    const arrastrada = await leerPalanca();
+    await movil.mouse.up();
+    const recorrido = distanciaAPomo(arrastrada, reposo);
+    if (recorrido < 20) fail(`móvil: la palanca no responde al arrastre (recorrido ${recorrido.toFixed(0)} px)`);
+    await movil.waitForTimeout(400);
+    const suelta = await leerPalanca();
+    if (distanciaAPomo(suelta, reposo) > 1) fail(`móvil: la palanca no vuelve al centro al soltar (${JSON.stringify(suelta)})`);
+
+    // Los primeros segundos de misión todavía tienen la entrada de la cámara y a K2
+    // moviéndose: dejamos que asiente antes de medir el ruido de fondo.
+    await movil.waitForTimeout(3000);
+
+    // Ruido de fondo de la escena quieta (flicker de linterna, partículas).
+    const quietoA = await firmaCanvas(movil);
+    await movil.waitForTimeout(1200);
+    const quietoB = await firmaCanvas(movil);
+    const ruido = cambioEntreFirmas(quietoA, quietoB);
+
+    // Empujamos, soltamos y esperamos a que se pare. Comparar dos fotogramas quietos
+    // evita confundir la animación con el desplazamiento: si se ha movido, la escena
+    // bajo la cámara es otra. Se prueban dos sentidos por si uno choca con una pared.
+    const empujar = async (desplazamiento) => {
+      await movil.mouse.move(centroX, centroY);
+      await movil.mouse.down();
+      await movil.mouse.move(centroX, centroY + desplazamiento, { steps: 6 });
+      await movil.waitForTimeout(900);
+      await movil.mouse.up();
+      await movil.waitForTimeout(600);
+    };
+    await empujar(-70);
+    const trasArriba = await firmaCanvas(movil);
+    await empujar(70);
+    const trasAbajo = await firmaCanvas(movil);
+    const movimiento = Math.max(cambioEntreFirmas(quietoB, trasArriba), cambioEntreFirmas(trasArriba, trasAbajo));
+
+    if (movimiento < 0.15 || movimiento < ruido * 4) {
+      fail(
+        `móvil: el joystick no mueve al operador (desplazamiento ${(movimiento * 100).toFixed(1)} %, ruido en reposo ${(ruido * 100).toFixed(1)} %)`
+      );
+    } else {
+      console.log(
+        `móvil: joystick OK, la escena cambia un ${(movimiento * 100).toFixed(0)} % tras moverse (${(ruido * 100).toFixed(0)} % en reposo)`
+      );
+    }
+  }
+  await contextoMovil.close();
 } catch (error) {
   fail(`navegación/interacción: ${error.message}`);
 } finally {
@@ -263,4 +461,4 @@ if (failures.length) {
   console.error(`\n✗ Prueba de humo fallida:\n- ${failures.join('\n- ')}`);
   process.exit(1);
 }
-console.log('\n✓ Prueba de humo correcta: canvas pintado, sin 404 y Misión 1 en marcha.');
+console.log('\n✓ Prueba de humo correcta: canvas pintado, sin 404, Misión 1 en marcha, móvil con joystick y pesos dentro de tope.');
