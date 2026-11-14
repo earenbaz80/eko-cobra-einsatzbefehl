@@ -60,8 +60,23 @@ jobs:
 
       - run: npm ci
 
+      # El navegador de Playwright (~150 MB) es el mismo entre publicaciones: se cachea
+      # por versión del lockfile, así que solo se descarga cuando cambia Playwright.
+      - name: Cachear el navegador de Playwright
+        id: cache-playwright
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: playwright-${{ runner.os }}-
+
       - name: Instalar Chromium para la prueba de humo
-        run: npx playwright install --with-deps chromium
+        run: |
+          echo "caché de Playwright: ${{ steps.cache-playwright.outputs.cache-hit || 'no' }}"
+          # Con la caché restaurada esto verifica que el navegador está (si falta, lo
+          # descarga) y añade las dependencias del sistema; la verificación no cambia.
+          npx playwright install chromium
+          npx playwright install-deps chromium
 
       # El CDN de Pages puede seguir sirviendo el HTML anterior (se cachea 10 min).
       # Se espera a que aparezca la marca del commit publicado antes de medir nada;
