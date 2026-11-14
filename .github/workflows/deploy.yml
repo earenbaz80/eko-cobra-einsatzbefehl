@@ -48,3 +48,34 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+      # Lo publicado se mide con el mismo script que el CI, pero contra la URL real:
+      # un base o un Content-Type mal servido por Pages no aparece en el build local.
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Instalar Chromium para la prueba de humo
+        run: npx playwright install --with-deps chromium
+
+      # El CDN de Pages puede seguir sirviendo el HTML anterior (se cachea 10 min) y
+      # ese HTML apunta a un bundle que ya no existe: se reintenta para no confundir
+      # una caché vieja con un fallo real del despliegue.
+      - name: Prueba de humo contra la URL publicada
+        run: |
+          for intento in 1 2 3; do
+            if node scripts/smoke.mjs "${{ steps.deployment.outputs.page_url }}"; then
+              exit 0
+            fi
+            if [ "$intento" -lt 3 ]; then
+              echo "::warning::intento $intento fallido; se espera 30 s por si es caché del CDN"
+              sleep 30
+            fi
+          done
+          echo "::error::la URL publicada no pasa la prueba de humo"
+          exit 1
