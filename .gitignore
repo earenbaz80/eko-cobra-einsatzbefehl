@@ -1,0 +1,13 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Herramientas de agentes / AI Studio (no forman parte de la app)
+.aistudio/
+.cortexkit/
+.freebuff/
