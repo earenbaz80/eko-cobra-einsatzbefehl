@@ -61,28 +61,14 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
           restore-keys: playwright-${{ runner.os }}-
 
-      # Los .deb de las deps del sistema se cachean aparte del navegador: un acierto
-      # evita descargarlos y install-deps los instala desde la caché local.
-      - name: Cachear paquetes apt de Playwright
-        id: cache-apt
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ${{ runner.temp }}/apt-archives
-          key: apt-playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-          restore-keys: apt-playwright-${{ runner.os }}-
-
       - name: Instalar Chromium para la prueba de humo
         run: |
           echo "caché de Playwright: ${{ steps.cache-playwright.outputs.cache-hit || 'no' }}"
-          echo "caché de apt: ${{ steps.cache-apt.outputs.cache-hit || 'no' }}"
           # El navegador se verifica/descarga igual que antes (no cambia la comprobación).
           npx playwright install chromium
+          # El dry-run comprueba las deps del sistema sin tocar dpkg: si ya están,
+          # install-deps no se ejecuta; si faltan, apt las instala una vez.
           inicio=$(date +%s)
-          if [ "${{ steps.cache-apt.outputs.cache-hit }}" = "true" ]; then
-            # Restaura los .deb para que install-deps no tenga que descargarlos.
-            sudo mkdir -p /var/cache/apt/archives
-            sudo cp -a "${{ runner.temp }}/apt-archives/." /var/cache/apt/archives/
-          fi
           if npx playwright install-deps chromium --dry-run; then
             echo "dependencias del sistema ya presentes: se omite apt"
           else
@@ -91,11 +77,6 @@ jobs:
           fi
           fin=$(date +%s)
           echo "tiempo dependencias del sistema: $((fin - inicio)) s"
-          if [ "${{ steps.cache-apt.outputs.cache-hit }}" != "true" ]; then
-            # actions/cache sube esta carpeta al final del job.
-            mkdir -p "${{ runner.temp }}/apt-archives"
-            sudo find /var/cache/apt/archives -maxdepth 1 -name '*.deb' -exec cp -t "${{ runner.temp }}/apt-archives" {} +
-          fi
 
       # Compila con el base de GitHub Pages: así se cazan las rutas de assets mal resueltas.
       - name: Build (base de Pages)
