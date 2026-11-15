@@ -3,6 +3,8 @@
 class TacticalSoundEngine {
   private ctx: AudioContext | null = null;
   public muted: boolean = false;
+  /** Pitido y textura TETRA; los mensajes quedan siempre como texto en pantalla. */
+  private radioAudioEnabled: boolean = false;
   private rainNode: AudioBufferSourceNode | null = null;
   private rainGain: GainNode | null = null;
   private ambientNodes: AudioNode[] = [];
@@ -38,6 +40,14 @@ class TacticalSoundEngine {
   /** Estado del AudioContext, para diagnósticos y pruebas de humo. */
   public get audioState(): AudioContextState | 'none' {
     return this.ctx ? this.ctx.state : 'none';
+  }
+
+  public setRadioAudioEnabled(enabled: boolean) {
+    this.radioAudioEnabled = enabled;
+  }
+
+  public isRadioAudioEnabled(): boolean {
+    return this.radioAudioEnabled;
   }
 
   public setMuted(mute: boolean) {
@@ -167,22 +177,14 @@ class TacticalSoundEngine {
   }
 
   /**
-   * Releases every long-lived audio resource (ambient loops, speech queue and the
-   * AudioContext itself). The engine stays usable: the next playback call creates
-   * a fresh AudioContext.
+   * Releases every long-lived audio resource (ambient loops and the AudioContext
+   * itself). The engine stays usable: the next playback call creates a fresh
+   * AudioContext.
    */
   public destroy() {
     this.stopRainAmbience();
     this.stopAmbientDrone();
     this.lastHeartbeatTimestamp = 0;
-
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      try {
-        window.speechSynthesis.cancel();
-      } catch {
-        // ignore
-      }
-    }
 
     const ctx = this.ctx;
     this.ctx = null;
@@ -932,6 +934,24 @@ class TacticalSoundEngine {
     osc.stop(now + 0.04);
   }
 
+  /** Pequeño clic de relé/balancín para los interruptores de luz. */
+  public playLightSwitch(on: boolean) {
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(on ? 760 : 520, now);
+    osc.frequency.exponentialRampToValueAtTime(on ? 1180 : 360, now + 0.028);
+    gain.gain.setValueAtTime(0.045, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.032);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.035);
+  }
+
   public playOpticCam() {
     const ctx = this.ensureContext();
     if (!ctx) return;
@@ -1114,7 +1134,7 @@ class TacticalSoundEngine {
   }
 
   public playRadioEcho() {
-    this.playTetraRadioTransmission('info', 28, 'KOBRA-1');
+    this.playTetraRadioTransmission('info', 28);
   }
 
   /**
@@ -1184,6 +1204,7 @@ class TacticalSoundEngine {
     intensity: number = 0.85,
     customDuration?: number
   ) {
+    if (!this.radioAudioEnabled) return;
     const ctx = this.ensureContext();
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -1265,17 +1286,20 @@ class TacticalSoundEngine {
   }
 
   /**
-   * Synthesizes a full Austrian BOS-TETRA digital radio transmission with:
+   * Synthesizes the radio texture around a TETRA transmission:
    * 1. PTT digital trunking chirp
-   * 2. Distorted narrowband vocoder syllabic cadence
+   * 2. Carrier-only transmission window (no synthetic voice)
    * 3. Random RF static bursts on important tactical alerts ('alert' / 'warn')
    * 4. Classic squelch tail ("Ksshh-krrt")
+   *
+   * No reproduce voces: el contenido hablado se eliminó de la app y queda
+   * únicamente como texto en el ticker/subtítulos.
    */
   public playTetraRadioTransmission(
     tone: 'info' | 'warn' | 'alert' | 'ok' = 'info',
-    textLength: number = 40,
-    speaker: string = 'KOBRA-1'
+    textLength: number = 40
   ) {
+    if (!this.radioAudioEnabled) return;
     const ctx = this.ensureContext();
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -1326,53 +1350,10 @@ class TacticalSoundEngine {
       pttOsc.stop(now + 0.056);
     }
 
-    // 2. Distorted TETRA Vocoder Syllabic Cadence (simulates compressed voice packets over radio)
-    const syllableCount = Math.max(3, Math.min(6, Math.round(textLength / 15)));
-    const basePitch =
-      speaker.includes('LEITSTELLE')
-        ? 142
-        : speaker.includes('KOBRA-2')
-          ? 122
-          : speaker.includes('EKIS') || speaker.includes('SENSOR')
-            ? 158
-            : 130;
-
-    let cursor = now + (isCriticalAlert ? 0.09 : 0.06);
-    for (let s = 0; s < syllableCount; s++) {
-      const sylDur = 0.038 + Math.random() * 0.028;
-      const gap = 0.014 + Math.random() * 0.018;
-
-      const vOsc = ctx.createOscillator();
-      const vFormant = ctx.createBiquadFilter();
-      const vGain = ctx.createGain();
-
-      vOsc.type = s % 2 === 0 ? 'sawtooth' : 'square';
-      const pitchShift = (Math.random() - 0.45) * (isImportantAlert ? 36 : 22);
-      vOsc.frequency.setValueAtTime(basePitch + pitchShift, cursor);
-      vOsc.frequency.linearRampToValueAtTime(
-        basePitch + pitchShift * 0.4,
-        cursor + sylDur
-      );
-
-      vFormant.type = 'bandpass';
-      vFormant.frequency.setValueAtTime(850 + ((s * 330 + Math.random() * 280) % 1100), cursor);
-      vFormant.Q.value = 2.4;
-
-      vGain.gain.setValueAtTime(0.001, cursor);
-      vGain.gain.linearRampToValueAtTime(0.18, cursor + 0.008);
-      vGain.gain.exponentialRampToValueAtTime(0.003, cursor + sylDur);
-
-      vOsc.connect(vFormant);
-      vFormant.connect(vGain);
-      vGain.connect(tetraChain.input);
-
-      vOsc.start(cursor);
-      vOsc.stop(cursor + sylDur + 0.004);
-      cursor += sylDur + gap;
-    }
+    // 2. Carrier-only transmission window. The radio text is visual; this only carries the TETRA burst.
+    const txDuration = Math.max(0.38, Math.min(2.6, textLength * 0.014));
 
     // 3. Continuous low-level TETRA carrier background hiss during the transmission window
-    const txDuration = Math.max(0.16, cursor - now + 0.04);
     const hissSamples = Math.floor(ctx.sampleRate * txDuration);
     const hissBuf = ctx.createBuffer(1, hissSamples, ctx.sampleRate);
     const hissData = hissBuf.getChannelData(0);
@@ -1388,6 +1369,7 @@ class TacticalSoundEngine {
     hissNode.connect(hissGain);
     hissGain.connect(tetraChain.input);
     hissNode.start(now);
+    hissNode.stop(now + txDuration + 0.02);
 
     // 4. Classic TETRA Squelch Tail ("Ksshh-krrt") at transmission release
     const squelchStart = now + txDuration;
@@ -1545,6 +1527,7 @@ class TacticalSoundEngine {
    * Distorted TETRA emergency radio static burst when taking fire and health damage.
    */
   public playDistortedRadioStatic() {
+    if (!this.radioAudioEnabled) return;
     const ctx = this.ensureContext();
     if (!ctx) return;
     const now = ctx.currentTime + 0.035;
@@ -1896,89 +1879,6 @@ class TacticalSoundEngine {
     osc.stop(now + 0.78);
   }
 
-  /**
-   * Spoken voices using Web Speech API (speechSynthesis).
-   * Differentiates pitch and rate for Kobra agents, Suspects, and Hostages.
-   */
-  public speak(text: string, role: 'PLAYER' | 'SQUAD' | 'SUSPECT' | 'HOSTAGE' | 'CIVILIAN') {
-    if (this.muted || !window.speechSynthesis) return;
-
-    // Optional: Only cancel if it's a priority shout
-    // window.speechSynthesis.cancel();
-
-    const utter = new SpeechSynthesisUtterance(text);
-    
-    // Heuristic for language detection (German vs Spanish/English)
-    const hasGermanKeywords = /POLIZEI|WAFFE|HAND|BODEN|GIB|AUF/i.test(text);
-    utter.lang = hasGermanKeywords ? 'de-DE' : 'es-ES';
-
-    if (role === 'PLAYER' || role === 'SQUAD') {
-      utter.pitch = 0.9;
-      utter.rate = 1.0;
-    } else if (role === 'SUSPECT') {
-      utter.pitch = 0.7;
-      utter.rate = 0.9;
-    } else if (role === 'HOSTAGE' || role === 'CIVILIAN') {
-      utter.pitch = 1.2;
-      utter.rate = 1.1;
-    }
-
-    window.speechSynthesis.speak(utter);
-  }
-
-  public playRadioChatterEffect(text: string = '') {
-    const ctx = this.ensureContext();
-    if (!ctx) return;
-    const now = ctx.currentTime;
-
-    // 1. Radio Squelch Click (Start)
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(2200, now);
-    osc.frequency.exponentialRampToValueAtTime(450, now + 0.035);
-    gain.gain.setValueAtTime(0.12, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.045);
-
-    // 2. Subtle Bandpass White Noise (Radio static crackle)
-    const duration = 0.4;
-    const bufferSize = Math.floor(ctx.sampleRate * duration);
-    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.12));
-    }
-
-    const noise = ctx.createBufferSource();
-    noise.buffer = buffer;
-
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.frequency.value = 1450;
-    filter.Q.value = 1.5;
-
-    const noiseGain = ctx.createGain();
-    noiseGain.gain.setValueAtTime(0.08, now);
-    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
-
-    noise.connect(filter);
-    filter.connect(noiseGain);
-    noiseGain.connect(ctx.destination);
-    noise.start(now);
-
-    // 3. Spoken text via SpeechSynthesis with radio voice effect
-    if (text && typeof window !== 'undefined' && window.speechSynthesis) {
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.lang = /POLIZEI|WAFFE|HAND|BODEN|GIB|AUF|ACHTUNG/i.test(text) ? 'de-DE' : 'es-ES';
-      utter.pitch = 0.88;
-      utter.rate = 1.02;
-      window.speechSynthesis.speak(utter);
-    }
-  }
 }
 
 export const soundEngine = new TacticalSoundEngine();

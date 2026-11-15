@@ -10,6 +10,7 @@ import { fail } from '../informe.mjs';
 import { PRESUPUESTO_FRAMES } from '../config.mjs';
 import { MUESTRAS_MINIMAS, estadisticasFrames } from '../rendimiento.mjs';
 import { arrancarMision, vigilarPagina } from '../navegador.mjs';
+import { instalarAzarDeterminista } from '../determinismo.mjs';
 
 const MISION_1 = 'Misión 1: Piso Graz - Lend';
 const MISION_DENSA = 'Misión 3: Laboratorio Químico';
@@ -100,7 +101,7 @@ async function medirMisiones(perfil, page, url, tope) {
 }
 
 /** Sección de rendimiento: escritorio en la pestaña compartida y móvil en un contexto táctil. */
-export async function comprobarRendimiento(page, { url, origin, badRequests, consoleErrors }) {
+export async function comprobarRendimiento(page, { url, origin, badRequests, consoleErrors, semilla }) {
   // En primer plano: una pestaña en segundo plano estrangula rAF y falsea la medición.
   await page.bringToFront();
   await medirMisiones('escritorio', page, url, PRESUPUESTO_FRAMES.escritorio);
@@ -109,6 +110,7 @@ export async function comprobarRendimiento(page, { url, origin, badRequests, con
   if (!navegador) return; // sin navegador no hay móvil que medir; el resto de secciones ya cubre la app
 
   const contextoMovil = await navegador.newContext(PERFIL_MOVIL);
+  await instalarAzarDeterminista(contextoMovil, semilla);
   const movil = await contextoMovil.newPage();
   vigilarPagina(movil, {
     origin,

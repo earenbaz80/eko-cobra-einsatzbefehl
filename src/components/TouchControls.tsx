@@ -1,4 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
+import {
+  Crosshair,
+  Flashlight,
+  Hand,
+  PersonStanding,
+  RotateCw,
+  Tablet,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 interface TouchControlsProps {
   /** Vector normalizado -1..1 del joystick; (0,0) al soltarlo. */
@@ -12,11 +21,16 @@ interface TouchControlsProps {
 const STICK_RADIUS = 44;
 const DEAD_ZONE = 0.2;
 
-const ACTIONS: { code: string; label: string; title: string }[] = [
-  { code: 'KeyE', label: 'ACCIÓN', title: 'Interactuar (E)' },
-  { code: 'KeyR', label: 'RECARGA', title: 'Recargar (R)' },
-  { code: 'KeyZ', label: 'POSTURA', title: 'Agacharse / levantarse (Z)' },
-  { code: 'KeyL', label: 'LINTERNA', title: 'Linterna (L)' },
+const ACTIONS: { code: string; title: string; Icon: LucideIcon; iconClass: string }[] = [
+  { code: 'KeyE', title: 'Interactuar (E)', Icon: Hand, iconClass: 'text-[#BAE6FD]' },
+  { code: 'KeyR', title: 'Recargar (R)', Icon: RotateCw, iconClass: 'text-[#34D399]' },
+  {
+    code: 'KeyZ',
+    title: 'Agacharse / levantarse (Z)',
+    Icon: PersonStanding,
+    iconClass: 'text-[#C4B5FD]',
+  },
+  { code: 'KeyL', title: 'Linterna (L)', Icon: Flashlight, iconClass: 'text-[#FDE68A]' },
 ];
 
 /**
@@ -135,41 +149,57 @@ export function TouchControls({ onMove, onAction, onFire, onOpenPad }: TouchCont
         <button
           type="button"
           aria-label="Disparar"
-          className="h-[52px] w-[52px] rounded-full border-2 border-[#D97706] bg-[#D97706]/25 font-mono-tabular text-[10px] font-bold tracking-wider text-[#FDE68A] active:bg-[#D97706]/50 sm:h-16 sm:w-16 sm:text-[11px]"
+          title="Disparar"
+          className="flex h-[52px] w-[52px] items-center justify-center border-0 bg-transparent p-0 text-[#FDE68A] transition-transform active:scale-90 active:opacity-60 sm:h-16 sm:w-16"
           onPointerDown={(event) => {
             event.preventDefault();
             onFire();
           }}
         >
-          FUEGO
+          <Crosshair
+            aria-hidden="true"
+            strokeWidth={2.4}
+            className="h-9 w-9 drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] sm:h-10 sm:w-10"
+          />
         </button>
 
         <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-2 sm:gap-2">
           {ACTIONS.map((action) => (
+            // El icono es el único contenido visible; el área táctil conserva
+            // 44×44 px (56×56 en tablet) para no perder precisión.
             <button
               key={action.code}
               type="button"
               aria-label={action.title}
               title={action.title}
-              className="h-11 w-11 rounded-full border border-[#38BDF8]/50 bg-[#0B1220]/75 font-mono-tabular text-[8.5px] font-bold tracking-wide text-[#BAE6FD] active:bg-[#38BDF8]/25 sm:h-14 sm:w-14 sm:text-[9px]"
+              className="flex h-11 w-11 items-center justify-center border-0 bg-transparent p-0 transition-transform active:scale-90 active:opacity-60 sm:h-14 sm:w-14"
               onPointerDown={(event) => {
                 event.preventDefault();
                 onAction(action.code);
               }}
             >
-              {action.label}
+              <action.Icon
+                aria-hidden="true"
+                strokeWidth={2.3}
+                className={`h-7 w-7 drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] sm:h-8 sm:w-8 ${action.iconClass}`}
+              />
             </button>
           ))}
           <button
             type="button"
             aria-label="Abrir EKO-Pad"
-            className="h-11 w-11 rounded-full border border-[#38BDF8]/50 bg-[#0B1220]/75 font-mono-tabular text-[8.5px] font-bold tracking-wide text-[#BAE6FD] active:bg-[#38BDF8]/25 sm:h-14 sm:w-14 sm:text-[9px]"
+            title="Abrir EKO-Pad"
+            className="flex h-11 w-11 items-center justify-center border-0 bg-transparent p-0 text-[#38BDF8] transition-transform active:scale-90 active:opacity-60 sm:h-14 sm:w-14"
             onPointerDown={(event) => {
               event.preventDefault();
               onOpenPad();
             }}
           >
-            EKO-PAD
+            <Tablet
+              aria-hidden="true"
+              strokeWidth={2.3}
+              className="h-7 w-7 drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] sm:h-8 sm:w-8"
+            />
           </button>
         </div>
       </div>

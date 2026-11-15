@@ -20,6 +20,7 @@ export const DEFAULT_KEYBINDS: Readonly<Record<string, string>> = {
   biometric: 'KeyB',
   interrogate: 'KeyI',
   reload: 'KeyR',
+  clearBlastArea: 'KeyJ',
   squad1: 'Digit1',
   squad2: 'Digit2',
   squad3: 'Digit3',

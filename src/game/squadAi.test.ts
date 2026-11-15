@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  chooseSquadSteeringAngle,
   computeSquadNavTarget,
   SQUAD_OVERWATCH_LEAD,
   SQUAD_STAGGERED_DISTANCE,
@@ -80,6 +81,22 @@ describe('computeSquadNavTarget', () => {
     expect(staggered!.y).toBeCloseTo(
       player.y + Math.sin(SQUAD_STAGGERED_OFFSET) * SQUAD_STAGGERED_DISTANCE
     );
+  });
+
+  it('keeps the direct bearing when the probe is clear', () => {
+    expect(chooseSquadSteeringAngle(0.4, () => false)).toBe(0.4);
+  });
+
+  it('steers around an obstacle and reuses the preferred side', () => {
+    const blocked = new Set([0, 0.55, -0.55]);
+    const isBlocked = (angle: number) => blocked.has(Number(angle.toFixed(2)));
+
+    expect(chooseSquadSteeringAngle(0, isBlocked)).toBeCloseTo(1.05);
+    expect(chooseSquadSteeringAngle(0, isBlocked, -1)).toBeCloseTo(-1.05);
+  });
+
+  it('returns the desired bearing when every probe is blocked', () => {
+    expect(chooseSquadSteeringAngle(1.2, () => true)).toBe(1.2);
   });
 
   it('holds the sector for hold, breach and support orders', () => {

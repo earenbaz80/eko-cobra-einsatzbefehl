@@ -1,0 +1,700 @@
+/**
+ * Órdenes de Kobra 2: no basta con que la tecla cambie `squadCommand`.
+ * Estas comprobaciones esperan el efecto observable en el mundo real:
+ *   [3] brecha y abre la puerta (patada, ariete o C4 según el estado),
+ *   [4] ejecuta la sonda óptica,
+ *   [2] HOLD cancela el avance pendiente antes de que se produzca la brecha.
+ *
+ * Se ejecutan sobre una misión real de Graz y usan `window.__eko` para leer el
+ * estado del motor, no el texto de la interfaz.
+ */
+import { fail, fallos } from '../informe.mjs';
+import { arrancarMision } from '../navegador.mjs';
+
+const MISION = 'Misión 1: Piso Graz - Lend';
+const MISION_LINZ = 'Misión 3: Laboratorio Químico';
+const PUERTA = 'DOOR_MAIN_A';
+const PUERTA_CONTEXTUAL = 'DOOR_LIVING';
+const PUERTA_RAM = 'DOOR_MAIN_A';
+const PUERTA_C4 = 'DOOR_LINZ_DOCK_B';
+
+const leerEstado = (page) => page.evaluate(() => window.__eko?.snapshot() ?? null);
+
+const leerPuerta = async (page) => {
+  const estado = await leerEstado(page);
+  return estado?.world.doors.find((puerta) => puerta.id === PUERTA) ?? null;
+};
+
+async function iniciar(page, url, { asentarMs = 300 } = {}) {
+  await arrancarMision(page, url, MISION, { asentarMs });
+}
+
+async function comprobarBrecha(page, url) {
+  try {
+    await iniciar(page, url);
+    await page.keyboard.press('Digit3');
+    await page.waitForFunction(
+      (puertaId) =>
+        window.__eko?.snapshot()?.world.doors.find((puerta) => puerta.id === puertaId)
+          ?.isBreached === true,
+      PUERTA,
+      { timeout: 6000 }
+    );
+
+    const puerta = await leerPuerta(page);
+    if (!puerta?.isBreached || !puerta.isOpen || puerta.isLocked) {
+      fail(`órdenes · brecha: la puerta no quedó abierta y brechada (${JSON.stringify(puerta)})`);
+      return;
+    }
+
+    // La hoja abierta ya no se puede atravesar: el binomio debe rodearla y
+    // entrar realmente al compartimento, no quedarse clavado en el umbral.
+    await page.waitForFunction(
+      () => {
+        const escuadra = window.__eko?.snapshot()?.squad;
+        return escuadra?.command === 'HOLD' && escuadra.target === null;
+      },
+      undefined,
+      { timeout: 6000 }
+    );
+    console.log('órdenes · brecha: Kobra 2 llegó, brechó, abrió la puerta y entró');
+  } catch (error) {
+    fail(`órdenes · brecha: ${error.message.split('\n')[0]}`);
+  }
+}
+
+async function comprobarSonda(page, url) {
+  try {
+    await iniciar(page, url);
+    await page.keyboard.press('Digit4');
+    await page.waitForFunction(
+      (puertaId) =>
+        window.__eko?.snapshot()?.world.doors.find((puerta) => puerta.id === puertaId)
+          ?.mirrored === true,
+      PUERTA,
+      { timeout: 6000 }
+    );
+
+    const estado = await leerEstado(page);
+    const puerta = estado?.world.doors.find((item) => item.id === PUERTA);
+    if (!puerta?.mirrored) {
+      fail('órdenes · sonda: la puerta no quedó marcada por la sonda óptica');
+      return;
+    }
+    if (estado?.squad?.command !== 'HOLD' || estado.squad.target !== null) {
+      fail(
+        `órdenes · sonda: la orden no terminó en HOLD sin objetivo (${JSON.stringify(estado?.squad)})`
+      );
+      return;
+    }
+    console.log('órdenes · sonda: Kobra 2 llegó, sondeó la puerta y pasó a HOLD');
+  } catch (error) {
+    fail(`órdenes · sonda: ${error.message.split('\n')[0]}`);
+  }
+}
+
+/** Abre la puerta de entrada para que la puerta interior sea alcanzable. */
+async function abrirPuertaDeEntrada(page) {
+  const inicial = await page.evaluate(() => window.__eko?.snapshot()?.player ?? null);
+  if (!inicial) throw new Error('no hay jugador para abrir la puerta de entrada');
+
+  await page.keyboard.down('KeyD');
+  try {
+    await page.waitForFunction(
+      (x) => (window.__eko?.snapshot()?.player?.x ?? 0) >= x + 20,
+      inicial.x,
+      { timeout: 3000 }
+    );
+  } finally {
+    await page.keyboard.up('KeyD');
+  }
+  // E abre en tres pasos (28 %, 65 %, completa). La primera apertura deja la
+  // hoja en el vano y Kobra 2 no puede atravesarla; hay que abrirla del todo.
+  await page.keyboard.press('KeyE');
+  await page.waitForTimeout(120);
+  await page.keyboard.press('KeyE');
+  await page.waitForTimeout(120);
+  await page.keyboard.press('KeyE');
+  await page.waitForFunction(
+    (id) => window.__eko?.snapshot()?.world.doors.find((door) => door.id === id)?.isOpen === true,
+    PUERTA,
+    { timeout: 3000 }
+  );
+
+  // El jugador tampoco debe quedar parado en el umbral mientras pasa Kobra 2.
+  await page.keyboard.down('KeyA');
+  try {
+    await page.waitForFunction(
+      (x) => (window.__eko?.snapshot()?.player?.x ?? x) <= x,
+      inicial.x + 4,
+      { timeout: 3000 }
+    );
+  } finally {
+    await page.keyboard.up('KeyA');
+  }
+  await page.waitForTimeout(200);
+}
+
+/**
+ * La orden debe nacer del menú contextual y apuntar a la puerta pulsada.
+ * Durante el trayecto no puede cambiar de puerta, desviarse a otra cerrada ni
+ * abrir una distinta antes de abrir la objetivo.
+ */
+async function comprobarContextMenuPuerta(page, url) {
+  try {
+    await iniciar(page, url, { asentarMs: 400 });
+    await abrirPuertaDeEntrada(page);
+
+    const antes = await leerEstado(page);
+    const puertaObjetivo = antes?.world.doors.find((puerta) => puerta.id === PUERTA_CONTEXTUAL);
+    if (!antes?.player || !antes.squad || !puertaObjetivo) {
+      fail('órdenes · contexto: falta el jugador, Kobra-2 o la puerta objetivo');
+      return;
+    }
+    if (puertaObjetivo.isOpen || puertaObjetivo.isBreached) {
+      fail(`órdenes · contexto: ${puertaObjetivo.name} ya estaba abierta antes de la orden`);
+      return;
+    }
+
+    const midX = (puertaObjetivo.x1 + puertaObjetivo.x2) * 0.5;
+    const midY = (puertaObjetivo.y1 + puertaObjetivo.y2) * 0.5;
+    const pantalla = await page.evaluate(
+      ({ x, y }) => window.__eko.worldToScreen(x, y),
+      { x: midX, y: midY }
+    );
+    if (
+      !pantalla ||
+      pantalla.x < 0 ||
+      pantalla.y < 0 ||
+      pantalla.x > 1280 ||
+      pantalla.y > 800
+    ) {
+      fail(`órdenes · contexto: la puerta objetivo no está visible (${JSON.stringify(pantalla)})`);
+      return;
+    }
+
+    // Clic derecho real sobre el canvas: el menú debe identificar esa puerta.
+    await page.mouse.click(pantalla.x, pantalla.y, { button: 'right' });
+    await page.getByText(`PUERTA: ${puertaObjetivo.name}`).waitFor({ timeout: 3000 });
+    await page.getByRole('button', { name: /Brechar y Despejar/ }).click();
+
+    await page.waitForFunction(
+      (id) => {
+        const escuadra = window.__eko?.snapshot()?.squad;
+        return escuadra?.command === 'BREACH_AND_CLEAR' && escuadra.doorTargetId === id;
+      },
+      PUERTA_CONTEXTUAL,
+      { timeout: 3000 }
+    );
+
+    const orden = await leerEstado(page);
+    const objetivo = orden?.squad?.target;
+    if (!objetivo) {
+      fail('órdenes · contexto: la orden no fijó una posición de pila');
+      return;
+    }
+    const distanciaObjetivo = Math.hypot(objetivo.x - midX, objetivo.y - midY);
+    if (distanciaObjetivo > 90) {
+      fail(
+        `órdenes · contexto: la pila quedó a ${distanciaObjetivo.toFixed(1)} px de ${puertaObjetivo.name}`
+      );
+      return;
+    }
+
+    const puertasAbiertasAntes = new Set(
+      antes.world.doors
+        .filter((puerta) => puerta.isOpen || puerta.isBreached || puerta.isDestroyed)
+        .map((puerta) => puerta.id)
+    );
+    let objetivoAbierto = false;
+
+    for (let intento = 0; intento < 140; intento++) {
+      await page.waitForTimeout(100);
+      const actual = await leerEstado(page);
+      if (!actual?.squad) {
+        fail('órdenes · contexto: desapareció Kobra-2 durante el trayecto');
+        return;
+      }
+
+      const puerta = actual.world.doors.find((item) => item.id === PUERTA_CONTEXTUAL);
+      if (puerta?.isOpen || puerta?.isBreached) {
+        objetivoAbierto = true;
+        break;
+      }
+      if (actual.squad.command !== 'BREACH_AND_CLEAR') {
+        fail(`órdenes · contexto: la orden cambió a ${actual.squad.command} antes de llegar`);
+        return;
+      }
+      if (actual.squad.doorTargetId !== PUERTA_CONTEXTUAL) {
+        fail(
+          `órdenes · contexto: la puerta objetivo cambió a ${actual.squad.doorTargetId ?? 'ninguna'}`
+        );
+        return;
+      }
+
+      const otraAbierta = actual.world.doors.find(
+        (item) =>
+          item.id !== PUERTA_CONTEXTUAL &&
+          !puertasAbiertasAntes.has(item.id) &&
+          (item.isOpen || item.isBreached || item.isDestroyed)
+      );
+      if (otraAbierta) {
+        fail(`órdenes · contexto: se abrió otra puerta antes de llegar (${otraAbierta.id})`);
+        return;
+      }
+    }
+
+    if (!objetivoAbierto) {
+      fail(`órdenes · contexto: Kobra-2 no abrió ${puertaObjetivo.name} a tiempo`);
+      return;
+    }
+
+    const final = await leerEstado(page);
+    const puertaFinal = final?.world.doors.find((puerta) => puerta.id === PUERTA_CONTEXTUAL);
+    if (!puertaFinal?.isOpen) {
+      fail(`órdenes · contexto: ${puertaObjetivo.name} no quedó abierta`);
+      return;
+    }
+    const otraFinal = final?.world.doors.find(
+      (puerta) =>
+        puerta.id !== PUERTA_CONTEXTUAL &&
+        !puertasAbiertasAntes.has(puerta.id) &&
+        (puerta.isOpen || puerta.isBreached || puerta.isDestroyed)
+    );
+    if (otraFinal) {
+      fail(`órdenes · contexto: también quedó abierta otra puerta (${otraFinal.id})`);
+      return;
+    }
+    console.log('órdenes · contexto: Kobra 2 respetó la puerta del menú y no abrió otra');
+  } catch (error) {
+    fail(`órdenes · contexto: ${error.message.split('\n')[0]}`);
+  }
+}
+
+/** Arranca Mission 1 después de equipar el ariete desde el plan pre-misión. */
+async function iniciarConAriete(page, url) {
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.waitForSelector('canvas', { timeout: 20000 });
+  await page.getByRole('button', { name: 'Blueprint', exact: true }).click();
+
+  const dialogo = page.getByRole('dialog', { name: /Blaupause/ });
+  await dialogo.waitFor({ timeout: 10000 });
+  await dialogo.getByRole('button', { name: /04\. Equipamiento de Kobra-2/ }).click();
+  await dialogo.getByRole('button', { name: /Türramme/ }).click();
+  await dialogo.getByRole('button', { name: /Iniciar Intervención/ }).click();
+
+  await page.getByText('K1 OPERATIVO').first().waitFor({ timeout: 20000 });
+  await page.waitForFunction(
+    () => {
+      const estado = window.__eko?.snapshot();
+      return estado?.gameState === 'PLAYING' && estado.player !== null;
+    },
+    undefined,
+    { timeout: 20000 }
+  );
+  await page.waitForTimeout(400);
+}
+
+/** Acerca al operador para que la puerta objetivo quede dentro del viewport. */
+async function acercarJugadorDerecha(page, xObjetivo) {
+  await page.keyboard.down('KeyD');
+  try {
+    await page.waitForFunction(
+      (x) => (window.__eko?.snapshot()?.player?.x ?? x) >= x,
+      xObjetivo,
+      { timeout: 6000 }
+    );
+  } finally {
+    await page.keyboard.up('KeyD');
+  }
+  await page.waitForTimeout(300);
+}
+
+/** Pulsa con el botón derecho la puerta indicada y elige la orden de brecha. */
+async function apuntarPuertaYBrechar(page, puertaId) {
+  const estado = await leerEstado(page);
+  const puerta = estado?.world.doors.find((item) => item.id === puertaId);
+  if (!puerta) throw new Error(`no existe la puerta ${puertaId}`);
+  if (puerta.isOpen || puerta.isBreached) throw new Error(`${puerta.name} ya estaba abierta`);
+
+  const midX = (puerta.x1 + puerta.x2) * 0.5;
+  const midY = (puerta.y1 + puerta.y2) * 0.5;
+  const pantalla = await page.evaluate(
+    ({ x, y }) => window.__eko.worldToScreen(x, y),
+    { x: midX, y: midY }
+  );
+  if (!pantalla || pantalla.x < 0 || pantalla.y < 0 || pantalla.x > 1280 || pantalla.y > 800) {
+    throw new Error(`${puerta.name} no está visible (${JSON.stringify(pantalla)})`);
+  }
+
+  await page.mouse.click(pantalla.x, pantalla.y, { button: 'right' });
+  await page.getByText(`PUERTA: ${puerta.name}`).waitFor({ timeout: 3000 });
+  await page.getByRole('button', { name: /Brechar y Despejar/ }).click();
+  await page.waitForFunction(
+    (id) => {
+      const escuadra = window.__eko?.snapshot()?.squad;
+      return escuadra?.command === 'BREACH_AND_CLEAR' && escuadra.doorTargetId === id;
+    },
+    puertaId,
+    { timeout: 3000 }
+  );
+}
+
+/** Espera a que la acción esté en curso con la puerta todavía cerrada. */
+async function esperarAccionEnCurso(page, mode, puertaId) {
+  await page.waitForFunction(
+    ({ modo, id }) => {
+      const estado = window.__eko?.snapshot();
+      const escuadra = estado?.squad;
+      const puerta = estado?.world.doors.find((item) => item.id === id);
+      return (
+        escuadra?.breachMode === modo &&
+        (escuadra.breachProgress ?? 0) > 0 &&
+        (escuadra.breachProgress ?? Infinity) < (escuadra.breachMaxProgress ?? Infinity) &&
+        puerta != null &&
+        !puerta.isOpen &&
+        !puerta.isBreached
+      );
+    },
+    { modo: mode, id: puertaId },
+    { timeout: 12000 }
+  );
+  return leerEstado(page);
+}
+
+/**
+ * Vigila toda la acción: la puerta debe seguir cerrada y el C4 intacto hasta
+ * que la brecha termina. Devuelve la instantánea justo después de abrirse.
+ */
+async function esperarPuertaBrechada(page, puertaId, mode, c4Inicial) {
+  for (let intento = 0; intento < 140; intento++) {
+    await page.waitForTimeout(50);
+    const estado = await leerEstado(page);
+    const puerta = estado?.world.doors.find((item) => item.id === puertaId);
+    if (puerta?.isOpen || puerta?.isBreached) {
+      if (estado?.squad?.breachMode != null) {
+        throw new Error(`se abrió antes de completar la acción (${mode})`);
+      }
+      return estado;
+    }
+    if (estado?.squad?.breachMode !== mode) {
+      throw new Error(`la acción ${mode} terminó sin abrir la puerta`);
+    }
+    if (estado.c4Count !== c4Inicial) {
+      throw new Error(`consumió C4 antes de completar la acción (${c4Inicial} -> ${estado.c4Count})`);
+    }
+  }
+  throw new Error(`la acción ${mode} no abrió la puerta a tiempo`);
+}
+
+async function comprobarArieteKobra2(page, url) {
+  try {
+    await iniciarConAriete(page, url);
+    const antes = await leerEstado(page);
+    if (antes?.squadGear !== 'RAM') {
+      fail(`órdenes · ariete: el plan no quedó con Türramme (${antes?.squadGear})`);
+      return;
+    }
+    const puertaAntes = antes.world.doors.find((puerta) => puerta.id === PUERTA_RAM);
+    if (!puertaAntes?.isLocked || puertaAntes.isOpen) {
+      fail('órdenes · ariete: la puerta de entrada no está cerrada con llave');
+      return;
+    }
+
+    const c4Inicial = antes.c4Count;
+    await apuntarPuertaYBrechar(page, PUERTA_RAM);
+    const enCurso = await esperarAccionEnCurso(page, 'RAM', PUERTA_RAM);
+    if (enCurso?.c4Count !== c4Inicial) {
+      fail(`órdenes · ariete: consumió C4 durante la acción (${c4Inicial} -> ${enCurso?.c4Count})`);
+      return;
+    }
+
+    const final = await esperarPuertaBrechada(page, PUERTA_RAM, 'RAM', c4Inicial);
+    const puertaFinal = final?.world.doors.find((puerta) => puerta.id === PUERTA_RAM);
+    if (!puertaFinal?.isBreached) {
+      fail('órdenes · ariete: la puerta no quedó brechada');
+      return;
+    }
+    if (final?.c4Count !== c4Inicial) {
+      fail(`órdenes · ariete: el ariete consumió C4 (${c4Inicial} -> ${final?.c4Count})`);
+      return;
+    }
+    console.log(
+      `órdenes · ariete: puerta cerrada hasta completar la acción; C4 intacto (${c4Inicial})`
+    );
+  } catch (error) {
+    fail(`órdenes · ariete: ${error.message.split('\n')[0]}`);
+  }
+}
+
+async function comprobarC4Kobra2(page, url) {
+  try {
+    await arrancarMision(page, url, MISION_LINZ, { asentarMs: 400 });
+    const antes = await leerEstado(page);
+    if (antes?.squadGear !== 'SHIELD') {
+      fail(`órdenes · C4: se esperaba el equipo estándar, no ${antes?.squadGear}`);
+      return;
+    }
+    const puertaAntes = antes.world.doors.find((puerta) => puerta.id === PUERTA_C4);
+    if (!puertaAntes?.isLocked || puertaAntes.isOpen) {
+      fail('órdenes · C4: el portón blindado no está cerrado con llave');
+      return;
+    }
+    const c4Inicial = antes.c4Count;
+    if (c4Inicial < 1) {
+      fail('órdenes · C4: no hay cargas disponibles para probar la rama');
+      return;
+    }
+
+    // El portón B está lejos del spawn; el operador debe acercarse para que el
+    // clic derecho caiga dentro del viewport y el menú apunte a esa puerta.
+    await acercarJugadorDerecha(page, 600);
+    await apuntarPuertaYBrechar(page, PUERTA_C4);
+    const enCurso = await esperarAccionEnCurso(page, 'C4', PUERTA_C4);
+    if (enCurso?.c4Count !== c4Inicial) {
+      fail(`órdenes · C4: consumió la carga antes de terminar (${c4Inicial} -> ${enCurso?.c4Count})`);
+      return;
+    }
+
+    const final = await esperarPuertaBrechada(page, PUERTA_C4, 'C4', c4Inicial);
+    const puertaFinal = final?.world.doors.find((puerta) => puerta.id === PUERTA_C4);
+    if (!puertaFinal?.isBreached) {
+      fail('órdenes · C4: el portón no quedó brechado');
+      return;
+    }
+    if (final?.c4Count !== c4Inicial - 1) {
+      fail(`órdenes · C4: consumo incorrecto (${c4Inicial} -> ${final?.c4Count})`);
+      return;
+    }
+    console.log(
+      `órdenes · C4: puerta cerrada hasta completar la acción; carga consumida (${c4Inicial} -> ${final.c4Count})`
+    );
+  } catch (error) {
+    fail(`órdenes · C4: ${error.message.split('\n')[0]}`);
+  }
+}
+
+/** Comprueba burbujas y mensajes de radio del binomio, sin voz sintética. */
+async function comprobarBurbujasBinomio(page, url) {
+  try {
+    await arrancarMision(page, url, MISION, { asentarMs: 800 });
+
+    let burbujaKobra1Vista = false;
+    let burbujaKobra2Vista = false;
+    const capturar = async () => {
+      const estado = await page.evaluate(() => {
+        const snapshot = window.__eko?.snapshot();
+        return {
+          radioFeed: snapshot?.radioFeed ?? [],
+          burbujaKobra1: snapshot?.player?.speechBubble?.text ?? null,
+          burbujaKobra2: snapshot?.squad?.speechBubble?.text ?? null,
+        };
+      });
+      if (estado.burbujaKobra1) burbujaKobra1Vista = true;
+      if (estado.burbujaKobra2) burbujaKobra2Vista = true;
+      return estado;
+    };
+
+    // Comprobación visual de la burbuja de Kobra-2: no alcanza con leer
+    // speechBubble; contamos píxeles ámbar en la banda donde el canvas pinta
+    // el texto, comparando antes y durante la burbuja con Kobra-2 quieto.
+    await page.waitForFunction(
+      () => !window.__eko?.snapshot()?.squad?.speechBubble,
+      undefined,
+      { timeout: 3500 }
+    );
+    const medirBurbujaKobra2EnCanvas = () =>
+      page.evaluate(() => {
+        const canvas = document.querySelector('canvas');
+        const estado = window.__eko?.snapshot();
+        const squad = estado?.squad;
+        if (!canvas || !squad) return null;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return null;
+
+        const rect = canvas.getBoundingClientRect();
+        const dpr = rect.width > 0 ? canvas.width / rect.width : 1;
+        const centro = window.__eko.worldToScreen(squad.x, squad.y);
+        const arriba = window.__eko.worldToScreen(
+          squad.x,
+          squad.y - (squad.radius + 50)
+        );
+        const abajo = window.__eko.worldToScreen(
+          squad.x,
+          squad.y - (squad.radius + 24)
+        );
+
+        const left = Math.max(0, Math.floor((centro.x - 220) * dpr));
+        const right = Math.min(canvas.width, Math.ceil((centro.x + 220) * dpr));
+        const top = Math.max(0, Math.floor(Math.min(arriba.y, abajo.y) * dpr));
+        const bottom = Math.min(canvas.height, Math.ceil(Math.max(arriba.y, abajo.y) * dpr));
+        const width = right - left;
+        const height = bottom - top;
+        if (width <= 0 || height <= 0) return null;
+
+        const data = ctx.getImageData(left, top, width, height).data;
+        let amarillos = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          const dr = data[i] - 251;
+          const dg = data[i + 1] - 191;
+          const db = data[i + 2] - 36;
+          // El texto COMMAND de Kobra-2 se pinta con #FBBF24; el umbral
+          // tolera el antialiasing sin confundirlo con el HUD cian o blanco.
+          if (dr * dr + dg * dg + db * db <= 75 * 75) amarillos += 1;
+        }
+        return {
+          amarillos,
+          texto: squad.speechBubble?.text ?? null,
+          x: squad.x,
+          y: squad.y,
+          region: { left, top, width, height },
+        };
+      });
+
+    const sinBurbuja = await medirBurbujaKobra2EnCanvas();
+    if (!sinBurbuja) {
+      fail('burbujas · binomio: no se pudo leer la región de la burbuja en el canvas');
+      return;
+    }
+
+    await page.keyboard.press('Digit2');
+    await page.waitForFunction(
+      () => window.__eko?.snapshot()?.squad?.speechBubble?.text === 'Sichere diesen Sektor!',
+      undefined,
+      { timeout: 3000 }
+    );
+    const orden = await capturar();
+    if (!orden.burbujaKobra2) {
+      fail('burbujas · binomio: Kobra-2 no mostró burbuja al recibir HOLD');
+      return;
+    }
+    if (!orden.radioFeed.some((item) => item.speaker === 'KOBRA-2' && /Position gehalten/i.test(item.text))) {
+      fail('burbujas · binomio: el HOLD de Kobra-2 no generó su mensaje de radio');
+      return;
+    }
+    const conBurbuja = await medirBurbujaKobra2EnCanvas();
+    if (!conBurbuja) {
+      fail('burbujas · binomio: no se pudo medir la burbuja de Kobra-2 en el canvas');
+      return;
+    }
+    if (!conBurbuja.texto) {
+      fail('burbujas · binomio: la burbuja de Kobra-2 desapareció antes de medirla');
+      return;
+    }
+    if (Math.abs(conBurbuja.x - sinBurbuja.x) > 0.5 || Math.abs(conBurbuja.y - sinBurbuja.y) > 0.5) {
+      fail('burbujas · binomio: Kobra-2 se movió entre las dos mediciones del canvas');
+      return;
+    }
+    const pixelesAmarillosNuevos = conBurbuja.amarillos - sinBurbuja.amarillos;
+    if (conBurbuja.amarillos < 8 || pixelesAmarillosNuevos < 5) {
+      fail(
+        `burbujas · binomio: la burbuja de Kobra-2 no se ve en el canvas (ámbar ${sinBurbuja.amarillos} -> ${conBurbuja.amarillos}; región ${JSON.stringify(conBurbuja.region)})`
+      );
+      return;
+    }
+    console.log(
+      `burbujas · binomio: Kobra-2 visible en canvas (${sinBurbuja.amarillos} -> ${conBurbuja.amarillos} píxeles ámbar)`
+    );
+
+    // Kobra-1: grito policial para su burbuja.
+    await page.keyboard.press('Space');
+    await page.waitForFunction(
+      () => Boolean(window.__eko?.snapshot()?.player?.speechBubble?.text),
+      undefined,
+      { timeout: 3000 }
+    );
+    const kobra1Grito = await capturar();
+    if (!kobra1Grito.burbujaKobra1) {
+      fail('burbujas · binomio: Kobra-1 no mostró burbuja al ejecutar el grito policial');
+      return;
+    }
+
+    // Kobra-1: linterna táctica para un mensaje de radio propio.
+    await page.keyboard.press('KeyL');
+    await page.waitForFunction(
+      () => {
+        const feed = window.__eko?.snapshot()?.radioFeed ?? [];
+        return feed.some(
+          (item) =>
+            item.speaker === 'KOBRA-1' && /eingeschaltet|ausgeschaltet/i.test(item.text)
+        );
+      },
+      undefined,
+      { timeout: 3000 }
+    );
+    const kobra1Radio = await capturar();
+    if (!kobra1Radio.radioFeed.some(
+      (item) => item.speaker === 'KOBRA-1' && /eingeschaltet|ausgeschaltet/i.test(item.text)
+    )) {
+      fail('burbujas · binomio: Kobra-1 no generó su mensaje de radio de linterna');
+      return;
+    }
+    if (!burbujaKobra1Vista || !burbujaKobra2Vista) {
+      fail('burbujas · binomio: faltó la burbuja visible de alguna mitad');
+      return;
+    }
+
+    console.log('burbujas · binomio: burbujas y radio presentes, sin voz sintética');
+  } catch (error) {
+    fail(`burbujas · binomio: ${error.message.split('\n')[0]}`);
+  }
+}
+
+async function comprobarHoldCancelaBrecha(page, url) {
+  try {
+    // Sin espera de asentamiento ni pausa entre ambas teclas: la cancelación
+    // debe ocurrir antes del siguiente frame, no depender de la velocidad del runner.
+    await iniciar(page, url, { asentarMs: 0 });
+    await page.keyboard.press('Digit3');
+
+    // Si la tecla 3 no se procesó, el test no debe pasar por la simple ausencia
+    // de brecha: primero exigimos que el objetivo de brecha esté realmente fijado.
+    const pendiente = await page.evaluate(() => window.__eko?.snapshot()?.squad ?? null);
+    if (pendiente?.command !== 'BREACH_AND_CLEAR' || !pendiente.target) {
+      fail(
+        `órdenes · HOLD: la tecla 3 no fijó un objetivo de brecha antes de cancelar (${JSON.stringify(pendiente)})`
+      );
+      return;
+    }
+
+    await page.keyboard.press('Digit2');
+
+    await page.waitForFunction(
+      () => {
+        const estado = window.__eko?.snapshot();
+        return estado?.squad?.command === 'HOLD' && estado.squad.target === null;
+      },
+      undefined,
+      { timeout: 2000 }
+    );
+
+    // El trayecto a la puerta tarda más que este margen; si HOLD no hubiera
+    // cancelado el destino, la brecha ya se habría producido.
+    await page.waitForTimeout(1400);
+    const puerta = await leerPuerta(page);
+    if (puerta?.isBreached || puerta?.isOpen) {
+      fail(`órdenes · HOLD: la brecha pendiente se ejecutó igualmente (${JSON.stringify(puerta)})`);
+      return;
+    }
+    console.log('órdenes · HOLD: el avance pendiente se canceló antes de la brecha');
+  } catch (error) {
+    fail(`órdenes · HOLD: ${error.message.split('\n')[0]}`);
+  }
+}
+
+/** Comprueba las tres órdenes en misiones limpias. */
+export async function comprobarOrdenesEscuadron(page, { url }) {
+  const fallosAntes = fallos.length;
+  await comprobarBrecha(page, url);
+  await comprobarSonda(page, url);
+  await comprobarHoldCancelaBrecha(page, url);
+  await comprobarContextMenuPuerta(page, url);
+  await comprobarArieteKobra2(page, url);
+  await comprobarC4Kobra2(page, url);
+  await comprobarBurbujasBinomio(page, url);
+  if (fallos.length === fallosAntes) {
+    console.log(
+      'órdenes · brecha, sonda, HOLD, menú contextual, ariete, C4 y burbujas del binomio verificadas'
+    );
+  }
+}

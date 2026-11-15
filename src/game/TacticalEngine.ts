@@ -9,12 +9,17 @@ import {
 } from './grazMap';
 import {
   renderBattlemapFurnitureItem,
+  renderExteriorAnimatedDetails,
   renderExteriorStreetsAndStairwell,
   URBAN_STREET_LAMPS
 } from './battlemapAssets';
 import {
   fillAsphaltSurface
 } from './asphaltTexture';
+
+// Límites del escenario exterior en coordenadas de mundo. Las fachadas norte
+// empiezan en y≈-455 y las sur terminan en y=1250; las este, en x=1720.
+const STATIC_SCENE_BOUNDS = { x: -450, y: -460, width: 2250, height: 1760 } as const;
 import {
   drawPixelArtActor,
   drawPixelArtSonarActor
@@ -22,7 +27,8 @@ import {
 import {
   ActorEntity,
   TacticalMarkerType,
-  Vec2
+  Vec2,
+  WallSconceLight
 } from './types';
 import { CAMERA_ZOOM, TacticalEngineCore } from './TacticalEngineCore';
 
@@ -234,7 +240,7 @@ export class TacticalEngine extends TacticalEngineCore {
     this.renderWallsAndDoors(ctx);
 
     // 5. Render Composite Darkness & Raycasted Vision/Flashlight Light Map
-    this.renderDynamicDarknessAndFlashlights(ctx, player, squad);
+    this.paint(ctx, player, squad, shakeX, shakeY);
 
     // 6. Render Inspection Sensor Cone (Thermal FLIR or Optic Snake Cam)
     if (player && (this.mirrorDoorId || this.thermalActive)) {
@@ -550,21 +556,15 @@ export class TacticalEngine extends TacticalEngineCore {
     width: number,
     height: number
   ) {
-    const active3sC4 = this.activeC4Charges.filter(
-      (c) => c.remainingSeconds <= 3.0 && c.remainingSeconds > 0
+    const unsafeArmedC4 = this.activeC4Charges.filter(
+      (charge) => !this.isBlastAreaClear(charge)
     );
-    if (active3sC4.length === 0) return;
+    if (unsafeArmedC4.length === 0) return;
 
-    const minRem = Math.min(...active3sC4.map((c) => c.remainingSeconds));
-    const urgencyRatio = Math.min(1.0, Math.max(0, (3.0 - minRem) / 3.0));
-
-    // Pulse frequency scales up from 6Hz at 3s to 24Hz at 0s
-    const pulseFreq = 6 + urgencyRatio * 18;
+    // The charge has no automatic fuse: warn steadily until the area is clear.
+    const pulseFreq = 4.5;
     const pulseSine = 0.5 + 0.5 * Math.sin(this.elapsedSeconds * pulseFreq);
-
-    // Intensity scales from 0.35 at 3s to 0.95 at 0s
-    const baseIntensity = 0.35 + urgencyRatio * 0.60;
-    const alpha = Math.min(0.95, baseIntensity * (0.5 + 0.5 * pulseSine));
+    const alpha = Math.min(0.8, 0.32 + pulseSine * 0.30);
 
     ctx.save();
 
@@ -573,8 +573,8 @@ export class TacticalEngine extends TacticalEngineCore {
     ctx.fillRect(0, 0, width, height);
 
     // 2. Heavy radial perimeter vignette (dark red edge encroaching inward)
-    const innerRadius = Math.min(width, height) * Math.max(0.12, 0.38 - urgencyRatio * 0.22);
-    const outerRadius = Math.max(width, height) * (0.75 - urgencyRatio * 0.20);
+    const innerRadius = Math.min(width, height) * 0.28;
+    const outerRadius = Math.max(width, height) * 0.67;
     const grad = ctx.createRadialGradient(
       width * 0.5,
       height * 0.5,
@@ -591,13 +591,12 @@ export class TacticalEngine extends TacticalEngineCore {
 
     // 3. Thick warning border frame on screen edge
     ctx.strokeStyle = `rgba(239, 68, 68, ${(alpha * 0.92).toFixed(3)})`;
-    ctx.lineWidth = 4 + urgencyRatio * 10;
+    ctx.lineWidth = 6;
     ctx.strokeRect(0, 0, width, height);
 
-    // 4. Central top emergency C4 detonation banner
-    const targetName = active3sC4[0].targetName || 'OBJETIVO';
-    const secondsStr = minRem.toFixed(1);
-    const bannerText = `⚠ DETONACIÓN C4 EN ${targetName.toUpperCase()} · ${secondsStr}S ⚠`;
+    // 4. Central top armed-charge banner (no countdown: detonation is deliberate)
+    const targetName = unsafeArmedC4[0].targetName || 'OBJETIVO';
+    const bannerText = `⚠ C4 ARMADA · ${targetName.toUpperCase()} · DESPEJAR ZONA [J] ⚠`;
 
     ctx.font = '900 12px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
@@ -780,8 +779,9 @@ export class TacticalEngine extends TacticalEngineCore {
     // Render urban perimeter streets or train station tracks & platform
     if (this.missionMode === 'STATION') {
       this.renderStationTrackAndTrainDetails(ctx);
-    } else {
-      renderExteriorStreetsAndStairwell(ctx, this.isTrainingMode, this.elapsedSeconds);
+    } else if (!this.isTrainingMode) {
+      ctx.drawImage(this.getStaticScene(), STATIC_SCENE_BOUNDS.x, STATIC_SCENE_BOUNDS.y);
+      renderExteriorAnimatedDetails(ctx, this.elapsedSeconds);
     }
 
     // Render persistent Floor Decals (Blood Splatters, Arterial Pools, Scorch, Rubble & Spent Brass Casings)
@@ -833,6 +833,27 @@ export class TacticalEngine extends TacticalEngineCore {
 
     // Render tactical acoustic noise ripple waves expanding across the map
     this.renderAcousticNoiseRings(ctx);
+  }
+
+  private getStaticScene(): HTMLCanvasElement {
+    if (this.staticScene) return this.staticScene;
+    const scene = document.createElement('canvas');
+    scene.width = STATIC_SCENE_BOUNDS.width;
+    scene.height = STATIC_SCENE_BOUNDS.height;
+    const sceneCtx = scene.getContext('2d');
+    if (sceneCtx) {
+      sceneCtx.translate(-STATIC_SCENE_BOUNDS.x, -STATIC_SCENE_BOUNDS.y);
+      renderExteriorStreetsAndStairwell(sceneCtx);
+    }
+    this.staticScene = scene;
+    // La primera pasada puede ocurrir antes de que carguen las webfonts. Al
+    // terminar, se invalida una vez para que los rótulos usen la tipografía final.
+    if (document.fonts && document.fonts.status !== 'loaded') {
+      void document.fonts.ready.then(() => {
+        if (this.staticScene === scene) this.staticScene = undefined;
+      });
+    }
+    return scene;
   }
 
   private renderStationTrackAndTrainDetails(ctx: CanvasRenderingContext2D) {
@@ -1096,27 +1117,37 @@ export class TacticalEngine extends TacticalEngineCore {
     ctx.restore();
   }
 
-  private renderDynamicDarknessAndFlashlights(
+  private paint(
     ctx: CanvasRenderingContext2D,
     player: ActorEntity | undefined,
-    squad: ActorEntity | undefined
+    squad: ActorEntity | undefined,
+    shakeX: number,
+    shakeY: number
   ) {
-    const lCtx = this.lightCtx;
-    lCtx.clearRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    const width = this.viewWidth;
+    const height = this.viewHeight;
+    const lCtx = this.lc;
 
-    // 1. Base nocturnal darkness over the entire Graz apartment level
+    // 1. Base nocturnal darkness over the entire visible viewport
     // When Night Vision (NVG) is active, residual light amplification drastically reduces shadow opacity in dark rooms
-    lCtx.globalCompositeOperation = 'source-over';
+    lCtx.globalCompositeOperation = 'copy';
     lCtx.fillStyle =
       this.gameState === 'TITLE'
         ? 'rgba(5, 9, 15, 0.62)'
         : this.nvgActive
           ? 'rgba(2, 16, 9, 0.44)'
           : 'rgba(4, 7, 13, 0.86)';
-    lCtx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    // El rectángulo es mayor que el canvas: el recorte lo limita y evita un clearRect extra.
+    lCtx.fillRect(0, 0, 1e4, 1e4);
 
     // 2. Carve out ambient emergency stairwell light & exterior balcony moonlight
     lCtx.globalCompositeOperation = 'destination-out';
+    // La luz se calcula en coordenadas de mundo, pero solo se rasteriza el viewport
+    // visible a media resolución; así no hay que limpiar ni componer 1280×820 por frame.
+    lCtx.setTransform(0.4, 0, 0, 0.4, 0, 0);
+    lCtx.translate(width * 0.5 + shakeX, height * 0.5 + shakeY);
+    lCtx.scale(CAMERA_ZOOM, CAMERA_ZOOM);
+    lCtx.translate(-this.camX, -this.camY);
 
     const stairGrad = lCtx.createRadialGradient(170, 410, 20, 170, 410, 290);
     stairGrad.addColorStop(0, this.nvgActive ? 'rgba(255, 255, 255, 0.82)' : 'rgba(255, 255, 255, 0.55)');
@@ -1145,7 +1176,7 @@ export class TacticalEngine extends TacticalEngineCore {
 
     // 2C. Carve & Render Wall Sconce Lamps (Wandlampen) along corridors and hallways
     for (const sconce of this.wallSconces) {
-      if (sconce.isDestroyed) continue;
+      if (sconce.isDestroyed || sconce.isOn === false) continue;
       const flicker =
         sconce.flickerSpeed && sconce.flickerSpeed > 0
           ? 0.88 + 0.12 * Math.sin(this.elapsedSeconds * sconce.flickerSpeed + sconce.x)
@@ -1334,8 +1365,11 @@ export class TacticalEngine extends TacticalEngineCore {
       );
     }
 
-    // 3. Stamp the composite darkness & shadow layer onto the main canvas
-    ctx.drawImage(this.lightCanvas, 0, 0);
+    // 3. Stamp the screen-aligned light layer without going through the camera transform
+    ctx.save();
+    ctx.setTransform(this.renderScale, 0, 0, this.renderScale, 0, 0);
+    ctx.drawImage(this.l, 0, 0, width, height);
+    ctx.restore();
   }
 
   private renderVolumetricBeamGlow(
@@ -1516,22 +1550,74 @@ export class TacticalEngine extends TacticalEngineCore {
       ctx.lineTo(leafX, leafY);
       ctx.stroke();
 
-      // Render door handle / agarradera
+      // Render a readable recessed lever handle / agarradera de palanca.
+      // The plate and lever rotate with the leaf so the hardware keeps its
+      // orientation while the door opens, closes or is breached.
       const handleX = d.hingeX + Math.cos(d.currentAngle) * len * 0.82;
       const handleY = d.hingeY + Math.sin(d.currentAngle) * len * 0.82;
       ctx.save();
-      ctx.fillStyle = '#F59E0B'; // Brass / metallic handle
-      ctx.strokeStyle = '#451A03';
+      ctx.translate(handleX, handleY);
+      ctx.rotate(d.currentAngle);
+
+      // Drop shadow under the lever.
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.38)';
+      ctx.fillRect(-3, 2.5, 15, 3.5);
+
+      // Steel backplate with a brass rim.
+      ctx.fillStyle = '#0F172A';
+      ctx.fillRect(-6.5, -6, 13, 12);
+      ctx.strokeStyle = '#78350F';
       ctx.lineWidth = 1;
+      ctx.strokeRect(-6.5, -6, 13, 12);
+      ctx.fillStyle = '#B45309';
+      ctx.fillRect(-5.5, -5, 11, 10);
+
+      // Lever bar pointing toward the hinge, with a bright top highlight.
+      ctx.fillStyle = '#92400E';
+      ctx.fillRect(-5, -2.6, 15, 5.2);
+      ctx.fillStyle = '#F59E0B';
+      ctx.fillRect(-4.8, -1.8, 14, 2.1);
+      ctx.fillStyle = '#FDE68A';
+      ctx.fillRect(-4.5, -1.2, 12.5, 0.8);
+
+      // Pivot boss and lock-state pin.
+      ctx.fillStyle = '#FDE68A';
       ctx.beginPath();
-      ctx.arc(handleX, handleY, 3.2, 0, Math.PI * 2);
+      ctx.arc(-4.5, 0, 2.2, 0, Math.PI * 2);
       ctx.fill();
+      ctx.strokeStyle = '#78350F';
+      ctx.lineWidth = 0.9;
       ctx.stroke();
+      ctx.fillStyle = d.isLocked ? '#EF4444' : '#34D399';
+      ctx.beginPath();
+      ctx.arc(6, 0, 1.4, 0, Math.PI * 2);
+      ctx.fill();
       ctx.restore();
     }
 
     // Render Architectural Exterior Windows (with rain streaks, condensation, or shattered wall breach gap)
     this.renderExteriorWindows(ctx);
+
+    // Progreso diegético de la colocación de C4 sobre el objetivo.
+    if (this.c4Planting) {
+      const ratio = Math.min(1, this.c4Planting.progress / this.c4Planting.maxProgress);
+      ctx.save();
+      ctx.translate(this.c4Planting.x, this.c4Planting.y);
+      ctx.strokeStyle = 'rgba(239, 68, 68, 0.35)';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(0, 0, 13, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = '#EF4444';
+      ctx.beginPath();
+      ctx.arc(0, 0, 13, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
+      ctx.stroke();
+      ctx.fillStyle = '#FCA5A5';
+      ctx.font = 'bold 8px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(`C4 ${Math.round(ratio * 100)}%`, 0, -19);
+      ctx.restore();
+    }
 
     // Render Active Placed C4 Charges on doors/windows with flashing LED & countdown badge
     for (const charge of this.activeC4Charges) {
@@ -1547,11 +1633,12 @@ export class TacticalEngine extends TacticalEngineCore {
       ctx.beginPath();
       ctx.arc(0, 0, 4, 0, Math.PI * 2);
       ctx.fill();
-      // Countdown text
-      ctx.fillStyle = '#FCA5A5';
-      ctx.font = 'bold 10px monospace';
+      // Armed state: no automatic countdown, the operator must clear the area.
+      const areaClear = this.isBlastAreaClear(charge);
+      ctx.fillStyle = areaClear ? '#34D399' : '#FCA5A5';
+      ctx.font = 'bold 9px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(`${charge.remainingSeconds.toFixed(1)}s`, 0, -12);
+      ctx.fillText(areaClear ? 'DETONAR' : 'C4 ARMADA', 0, -12);
       ctx.restore();
     }
 
@@ -1561,6 +1648,7 @@ export class TacticalEngine extends TacticalEngineCore {
 
     // Render Wall-Mounted Sconce Lamp Fixtures (Wandlampen) along corridors
     this.renderWallSconceFixtures(ctx);
+    this.renderLightSwitches(ctx);
   }
 
   private renderExteriorWindows(ctx: CanvasRenderingContext2D) {
@@ -1690,6 +1778,32 @@ export class TacticalEngine extends TacticalEngineCore {
       ctx.translate(sconce.x, sconce.y);
       ctx.rotate(sconce.normalAngle);
 
+      const isPowered = !sconce.isDestroyed && sconce.isOn !== false;
+      if (!isPowered) {
+        // A broken or switched-off fixture stays visible as dark hardware without
+        // the bloom that made it look like it was still illuminating the room.
+        ctx.fillStyle = '#1E293B';
+        ctx.fillRect(-3.5, -7, 4, 14);
+        ctx.strokeStyle = '#475569';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(-3.5, -7, 4, 14);
+        ctx.fillStyle = sconce.isDestroyed ? '#7F1D1D' : '#334155';
+        ctx.beginPath();
+        ctx.arc(1.2, 0, 4.2, -Math.PI * 0.5, Math.PI * 0.5);
+        ctx.fill();
+        if (sconce.isDestroyed) {
+          ctx.strokeStyle = '#FCA5A5';
+          ctx.lineWidth = 0.8;
+          ctx.beginPath();
+          ctx.moveTo(0.5, -3);
+          ctx.lineTo(2.5, 0);
+          ctx.lineTo(1, 3.5);
+          ctx.stroke();
+        }
+        ctx.restore();
+        continue;
+      }
+
       // 1. Soft radial bloom halo immediately around the wall lamp glass diffuser
       const haloGrad = ctx.createRadialGradient(2, 0, 1, 2, 0, 24);
       haloGrad.addColorStop(0, sconce.coreColor);
@@ -1740,6 +1854,65 @@ export class TacticalEngine extends TacticalEngineCore {
       }
 
       ctx.restore();
+    }
+  }
+
+  private renderLightSwitches(ctx: CanvasRenderingContext2D) {
+    const player = this.getPlayer();
+    // La misma función que usa E decide qué interruptor puede mostrar su cartel.
+    const activeSwitch = player ? this.getInteractableLightSwitch(player.x, player.y) : null;
+    for (const lightSwitch of this.lightSwitches) {
+      if (Math.hypot(lightSwitch.x - this.camX, lightSwitch.y - this.camY) > 750) continue;
+      const sconces = (lightSwitch.sconceIds?.length ? lightSwitch.sconceIds : [lightSwitch.sconceId])
+        .map((id) => this.wallSconces.find((item) => item.id === id))
+        .filter((sconce): sconce is WallSconceLight => sconce !== undefined);
+      const sconce = sconces[0];
+      if (!sconce) continue;
+
+      const isOn = sconces.some((item) => !item.isDestroyed && item.isOn !== false);
+      const allDestroyed = sconces.every((item) => item.isDestroyed);
+      ctx.save();
+      ctx.translate(lightSwitch.x, lightSwitch.y);
+      ctx.rotate(lightSwitch.normalAngle ?? sconce.normalAngle);
+
+      // Wall plate with a small rocker and status LED.
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
+      ctx.fillRect(-2.5, -5, 8, 11);
+      ctx.fillStyle = '#0F172A';
+      ctx.fillRect(-4, -6.5, 8, 13);
+      ctx.strokeStyle = '#64748B';
+      ctx.lineWidth = 0.8;
+      ctx.strokeRect(-4, -6.5, 8, 13);
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(-2.8, -4.8, 5.6, 9.6);
+      ctx.fillStyle = isOn ? '#F59E0B' : '#64748B';
+      if (isOn) ctx.fillRect(-2.4, -4.2, 4.8, 3.2);
+      else ctx.fillRect(-2.4, 1, 4.8, 3.2);
+      ctx.fillStyle = allDestroyed ? '#EF4444' : isOn ? '#34D399' : '#94A3B8';
+      ctx.beginPath();
+      ctx.arc(2.6, 5.2, 1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      if (activeSwitch && activeSwitch.id === lightSwitch.id) {
+        const label = allDestroyed
+          ? '[E] LUZ ROTA'
+          : isOn
+            ? '[E] APAGAR LUZ'
+            : '[E] ENCENDER LUZ';
+        ctx.save();
+        ctx.font = '700 8px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        const width = ctx.measureText(label).width + 8;
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+        ctx.fillRect(lightSwitch.x - width * 0.5, lightSwitch.y - 25, width, 13);
+        ctx.strokeStyle = isOn ? '#F59E0B' : '#64748B';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(lightSwitch.x - width * 0.5, lightSwitch.y - 25, width, 13);
+        ctx.fillStyle = isOn ? '#FDE68A' : '#CBD5E1';
+        ctx.fillText(label, lightSwitch.x, lightSwitch.y - 16);
+        ctx.restore();
+      }
     }
   }
 
@@ -2098,6 +2271,12 @@ export class TacticalEngine extends TacticalEngineCore {
             bgStyle = 'rgba(16, 185, 129, 0.9)';
             borderStyle = '#10B981';
             textStyle = '#FFFFFF';
+          } else if (cmd === 'CLEAR_BLAST_AREA') {
+            badgeText = isMovingToTarget ? 'DESPEJANDO ZONA C4' : 'ZONA C4 DESPEJADA';
+            badgeIcon = '⚠';
+            bgStyle = 'rgba(180, 83, 9, 0.92)';
+            borderStyle = '#F59E0B';
+            textStyle = '#FEF3C7';
           }
         }
 
@@ -2976,6 +3155,7 @@ export class TacticalEngine extends TacticalEngineCore {
       }
 
       for (const sc of this.wallSconces) {
+        if (sc.isDestroyed || sc.isOn === false) continue;
         const d = Math.hypot(m.x - sc.x, m.y - sc.y);
         if (d < sc.radius * 0.85) {
           lightBoost = Math.max(lightBoost, (1 - d / (sc.radius * 0.85)) * 1.35);

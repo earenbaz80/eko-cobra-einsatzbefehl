@@ -118,6 +118,7 @@ export type SquadCommand =
   | 'RESTRAIN_AND_SECURE'
   | 'SUPPRESS_TARGET'
   | 'REGROUP_HEAL'
+  | 'CLEAR_BLAST_AREA'
   | 'FORM_WEDGE'
   | 'FORM_STAGGERED';
 
@@ -248,6 +249,20 @@ export interface WallSconceLight {
   style: 'WARM_SCONCE' | 'EMERGENCY_LED' | 'EXTERIOR_LANTERN';
   flickerSpeed?: number;
   isDestroyed?: boolean;
+  /** undefined/true = encendida; false = apagada desde el interruptor. */
+  isOn?: boolean;
+}
+
+export interface LightSwitchEntity {
+  id: string;
+  /** Lámpara principal, para compatibilidad y para el estado visual. */
+  sconceId: string;
+  /** Lámparas de la misma estancia que acciona este interruptor. */
+  sconceIds?: string[];
+  x: number;
+  y: number;
+  /** Normal del muro, orientada hacia el interior de la estancia. */
+  normalAngle?: number;
 }
 
 export interface RoomZone {
@@ -381,7 +396,6 @@ export interface ActorEntity {
   negotiationProgress?: number; // 0..100
   blindFireTimer?: number;
   feignTrapTriggered?: boolean;
-  lastSpokenText?: string;
 }
 
 export type StationAlertLevel = 'CALM' | 'SUSPICIOUS' | 'ALERTED' | 'LOCKDOWN';
@@ -661,11 +675,15 @@ export interface ActiveC4Charge {
   targetName: string;
   x: number;
   y: number;
+  /** Tiempo restante de la espoleta; 0 mientras espera la orden de despeje. */
   remainingSeconds: number;
   maxSeconds: number;
   doorId?: string;
   windowId?: string;
   isWindow: boolean;
+  phase: 'ARMED' | 'DETONATING';
+  /** El motor calcula este valor para la HUD al emitir el snapshot. */
+  safeToDetonate: boolean;
 }
 
 export interface RadioFeedItem {
@@ -675,10 +693,17 @@ export interface RadioFeedItem {
   time: string;
   tone: 'info' | 'warn' | 'alert' | 'ok';
   hasStaticBurst?: boolean;
+  /** Mensaje rutinario: se registra en el feed, pero no se locuta. */
+  silent?: boolean;
 }
 
 export interface HudSnapshot {
   activeC4Charges?: ActiveC4Charge[];
+  c4Planting?: {
+    targetName: string;
+    progressPct: number;
+    executionTime: string;
+  };
   profileName: string;
   health: number;
   armor: number;

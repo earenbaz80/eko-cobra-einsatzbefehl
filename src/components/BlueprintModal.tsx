@@ -770,7 +770,7 @@ export const BlueprintModal: React.FC<BlueprintModalProps> = ({
                           : 'border-[#334155] bg-[#080C11] text-[#94A3B8]'
                       }`}
                     >
-                      Doctrina Dinámica (Ariete al Iniciar)
+                      Doctrina Dinámica (Brecha Rápida)
                     </button>
                   </div>
                 </div>

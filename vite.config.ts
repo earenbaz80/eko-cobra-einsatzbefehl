@@ -69,6 +69,8 @@ export default defineConfig(() => {
           manualChunks(id) {
             if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) return 'vendor';
             if (id.includes('node_modules/lucide-react') || id.includes('node_modules/motion')) return 'ui';
+            // Sin separar este módulo, el JS de entrada supera el tope de 490 KiB.
+            if (id.includes('battlemapAssets')) return 'battlemap';
             return undefined;
           },
         },

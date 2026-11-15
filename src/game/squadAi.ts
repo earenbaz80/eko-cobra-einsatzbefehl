@@ -62,3 +62,22 @@ export function computeSquadNavTarget(input: SquadNavInput): Point2 | null {
 
   return null;
 }
+
+/**
+ * Local steering for Kobra-2. The operator order gives the desired bearing, but a
+ * binomio cannot walk through walls or furniture: probe a few deviations and take
+ * the closest clear one. Keeping the choice deterministic avoids side-to-side
+ * jitter when a corner blocks the direct line.
+ */
+export function chooseSquadSteeringAngle(
+  desiredAngle: number,
+  isBlocked: (angle: number) => boolean,
+  preferredSide: 1 | -1 = 1
+): number {
+  const deviations = [0, 0.55, -0.55, 1.05, -1.05, 1.55, -1.55];
+  for (const deviation of deviations) {
+    const candidate = desiredAngle + deviation * preferredSide;
+    if (!isBlocked(candidate)) return candidate;
+  }
+  return desiredAngle;
+}

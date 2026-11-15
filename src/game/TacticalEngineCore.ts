@@ -52,6 +52,7 @@ import {
   soundEngine
 } from './soundEngine';
 import {
+  chooseSquadSteeringAngle,
   computeSquadNavTarget
 } from './squadAi';
 import {
@@ -64,6 +65,7 @@ import {
   crearPartidaDesdeMundo,
   deslizarConColision,
   distanciaASegmento,
+  segmentoHojaPuerta,
   PASO_MAXIMO,
   type Partida,
   type SnapshotSimulacion
@@ -99,10 +101,20 @@ import {
   TacticalMapMarker,
   TacticalMarkerType,
   Vec2,
+  LightSwitchEntity,
   WallSconceLight,
   WallSegment,
   computePlayerMissionRank
 } from './types';
+
+type SquadBreachMode = 'SHOOT_LOCK' | 'KICK' | 'RAM' | 'C4';
+type SquadCommandTarget = {
+  type: 'DOOR' | 'WINDOW' | 'POINT';
+  id?: string;
+  name: string;
+  x: number;
+  y: number;
+};
 
 export interface BulletTrace {
   x1: number;
@@ -303,16 +315,119 @@ export const AUSTRIAN_SHOUTS = [
   'POLIZEI! ERGEBEN SIE SICH!',
 ];
 
+/** Tiempo visible de colocación de la carga antes de armarla. */
+const C4_PLANT_SECONDS = 1.7;
+/** Radio de seguridad para detonar sin alcanzar a los propios agentes. */
+const C4_SAFE_RADIUS = 190;
+
 /** World-to-screen zoom shared by rendering, aiming and hit testing. */
 export const CAMERA_ZOOM = 1.55;
+
+/** Contrato de introspección de solo lectura para las pruebas E2E. */
+export interface EkoE2ESegment {
+  readonly id: string;
+  readonly x1: number;
+  readonly y1: number;
+  readonly x2: number;
+  readonly y2: number;
+}
+
+export interface EkoE2EWall extends EkoE2ESegment {
+  readonly isWindow: boolean;
+}
+
+export interface EkoE2EDoor extends EkoE2ESegment {
+  readonly name: string;
+  readonly isOpen: boolean;
+  readonly isLocked: boolean;
+  readonly isBreached: boolean;
+  readonly isDestroyed: boolean;
+  readonly mirrored: boolean;
+}
+
+export interface EkoE2EFurniture {
+  readonly id: string;
+  readonly label: string;
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+  readonly blocksMovement: boolean;
+  readonly blocksSight: boolean;
+  readonly isDestroyed: boolean;
+}
+
+export interface EkoE2EWorld {
+  readonly mission: string;
+  readonly walls: readonly EkoE2EWall[];
+  readonly doors: readonly EkoE2EDoor[];
+  readonly furniture: readonly EkoE2EFurniture[];
+}
+
+export interface EkoE2ESpeechBubble {
+  readonly text: string;
+  readonly timer: number;
+  readonly type: 'COMMAND' | 'HOSTILE' | 'SURRENDER' | 'PANIC';
+}
+
+export interface EkoE2ESquad {
+  readonly x: number;
+  readonly y: number;
+  /** Radio de la silueta, para calcular su proyección visual en el canvas. */
+  readonly radius: number;
+  readonly command: SquadCommand;
+  readonly target: Vec2 | null;
+  /** Puerta fijada por la orden actual, para comprobar que no se sustituye. */
+  readonly doorTargetId: string | null;
+  /** Acción de brecha en curso, para observar el modo y su progreso. */
+  readonly breachMode: SquadBreachMode | null;
+  readonly breachProgress: number | null;
+  readonly breachMaxProgress: number | null;
+  /** Burbuja de texto situacional de Kobra-2; no es una locución. */
+  readonly speechBubble: EkoE2ESpeechBubble | null;
+}
+
+export interface EkoE2EState {
+  readonly gameState: GameState;
+  readonly player: {
+    readonly x: number;
+    readonly y: number;
+    readonly angle: number;
+    /** Burbuja de texto situacional de Kobra-1; no es una locución. */
+    readonly speechBubble: EkoE2ESpeechBubble | null;
+  } | null;
+  readonly squad: EkoE2ESquad | null;
+  readonly tick: number;
+  readonly world: EkoE2EWorld;
+  /** Recursos y equipo del operador/binomio para comprobar consumos. */
+  readonly c4Count: number;
+  readonly squadGear: MissionPlan['squadGear'];
+  /** Últimos mensajes de radio, con su hablante, para comprobar el texto en pantalla. */
+  readonly radioFeed: readonly { readonly speaker: string; readonly text: string }[];
+}
+
+export interface EkoE2EHook extends EkoE2EState {
+  /** Lee todos los campos en el mismo instante de simulación. */
+  snapshot(): EkoE2EState;
+  /** Coordenadas CSS para pulsar una posición del mundo desde Playwright. */
+  worldToScreen(x: number, y: number): { x: number; y: number };
+}
 
 export class TacticalEngineCore {
   protected canvas: HTMLCanvasElement;
   protected ctx: CanvasRenderingContext2D;
   /** Backing-store scale (devicePixelRatio); all drawing happens in CSS pixels. */
   protected renderScale: number = 1;
-  protected lightCanvas: HTMLCanvasElement;
-  protected lightCtx: CanvasRenderingContext2D;
+  /**
+   * La capa de luz solo necesita cubrir el viewport y es suave por naturaleza.
+   * Renderizarla a media resolución recorta el área a rellenar y a componer sin
+   * afectar a la geometría de visión, que sigue calculándose en coordenadas de mundo.
+   */
+  /** Capa auxiliar de iluminación, a baja resolución y ajustada al viewport. */
+  protected l: HTMLCanvasElement;
+  protected lc: CanvasRenderingContext2D;
+  /** Calles, aceras y decoración fija pre-renderizadas en coordenadas de mundo. */
+  protected staticScene?: HTMLCanvasElement;
   protected onHudUpdate: (snapshot: HudSnapshot) => void;
   protected onStateChange: (newState: GameState) => void;
 
@@ -326,6 +441,7 @@ export class TacticalEngineCore {
   protected doors: DoorEntity[] = [];
   protected furniture: FurnitureItem[] = [];
   protected wallSconces: WallSconceLight[] = [];
+  protected lightSwitches: LightSwitchEntity[] = [];
   /** Ruta de movimiento del jugador compartida con simulation.ts. */
   protected simulacion: Partida | null = null;
   protected actors: ActorEntity[] = [];
@@ -437,6 +553,17 @@ public nightMode: boolean = false;
   protected ifakCount: number = 2;
   protected c4Count: number = 2;
   public activeC4Charges: ActiveC4Charge[] = [];
+  /** Colocación en curso: la carga todavía no existe en el mundo. */
+  protected c4Planting?: {
+    targetName: string;
+    x: number;
+    y: number;
+    doorId?: string;
+    windowId?: string;
+    isWindow: boolean;
+    progress: number;
+    maxProgress: number;
+  };
   protected c4WarningBeepTimer: number = 0;
   protected aimZoneMode: 'TORSO' | 'EXTREMITIES' = 'TORSO';
   protected modeSwitchPulseTimer: number = 0;
@@ -458,6 +585,17 @@ public nightMode: boolean = false;
   protected squadScanningTimer: number = 0;
   protected squadHoldAnchorAngle: number = 0;
   protected squadLastWoundReportTimer: number = 0;
+  protected squadDoorCooldown: number = 0;
+  protected squadDoorWarnCooldown: number = 0;
+  /** Puerta fijada por la orden actual: no se vuelve a elegir por cercanía. */
+  protected squadDoorTargetId?: string;
+  protected squadBreachAction?: {
+    doorId: string;
+    mode: SquadBreachMode;
+    progress: number;
+    maxProgress: number;
+  };
+  protected squadSteerSide: 1 | -1 = 1;
   protected minimapCenter: Vec2 = { x: 74, y: 74 };
   protected isDraggingMinimap: boolean = false;
   protected minimapDragOffset: Vec2 = { x: 0, y: 0 };
@@ -506,12 +644,10 @@ public nightMode: boolean = false;
     this.ctx = context;
 
     // Offscreen Darkness & Dynamic Shadow Compositor
-    this.lightCanvas = document.createElement('canvas');
-    this.lightCanvas.width = WORLD_WIDTH;
-    this.lightCanvas.height = WORLD_HEIGHT;
-    const lCtx = this.lightCanvas.getContext('2d');
+    this.l = document.createElement('canvas');
+    const lCtx = this.l.getContext('2d');
     if (!lCtx) throw new Error('Offscreen light canvas context unavailable');
-    this.lightCtx = lCtx;
+    this.lc = lCtx;
 
     this.plan = initialPlan;
     this.onHudUpdate = onHudUpdate;
@@ -550,6 +686,7 @@ public nightMode: boolean = false;
   }
 
   public resetMission(newPlan?: MissionPlan) {
+    this.staticScene = undefined;
     if (newPlan) {
       this.plan = newPlan;
       if (newPlan.operationId) {
@@ -574,6 +711,7 @@ public nightMode: boolean = false;
     this.doors = layout.doors;
     this.furniture = layout.furniture;
     this.wallSconces = layout.wallSconces;
+    this.lightSwitches = this.createLightSwitches(this.wallSconces, this.rooms, this.walls);
     const rawActors =
       this.missionMode === 'STATION'
         ? createStationActors(this.plan)
@@ -632,6 +770,9 @@ public nightMode: boolean = false;
     this.criticalEvents = [];
     this.initExteriorWindowsAndAmbientDust();
     this.breachAction = undefined;
+    this.c4Planting = undefined;
+    this.activeC4Charges = [];
+    this.c4WarningBeepTimer = 0;
     this.playerDarknessTimer = 0;
     this.lastPlayerShotTime = -999;
     this.playerHiddenInShadow = false;
@@ -660,6 +801,11 @@ public nightMode: boolean = false;
     this.squadArmor = 100;
     this.squadFatigue = 0;
     this.squadMovementGait = 'RESTING';
+    this.squadDoorCooldown = 0;
+    this.squadDoorWarnCooldown = 0;
+    this.squadDoorTargetId = undefined;
+    this.squadBreachAction = undefined;
+    this.squadSteerSide = 1;
     this.sessionXp = 0;
     this.tacticalWaypoint = undefined;
     this.tacticalMarkers = [];
@@ -725,17 +871,7 @@ public nightMode: boolean = false;
     this.aplicarEstado('START');
     soundEngine.startRainAmbience();
     soundEngine.startAmbientDrone();
-    const stationCall =
-      this.missionMode === 'STATION'
-        ? 'EKO COBRA · EINSATZ GRAZ HAUPTBAHNHOF'
-        : this.missionMode === 'LINZ'
-          ? 'EKO COBRA · SYNTHETIK-LABOR LINZ'
-          : this.missionMode === 'TIROL'
-            ? 'EKO COBRA · ALPEN-CHALET KITZBÜHEL'
-            : this.missionMode === 'SCHWECHAT'
-              ? 'EKO COBRA · FLUGHAFEN WIEN-SCHWECHAT'
-              : 'LEITSTELLE GRAZ - LEND';
-    soundEngine.playTetraRadioTransmission('info', 46, stationCall);
+    soundEngine.playTetraRadioTransmission('info', 46);
     this.radioTxTimer = 2.1;
 
     if (this.missionMode === 'TIROL') {
@@ -752,32 +888,8 @@ public nightMode: boolean = false;
       );
     }
 
-    if (this.plan.doctrine === 'DYNAMIC') {
-      const targetDoorId =
-        this.missionMode === 'STATION'
-          ? this.plan.entryPoint === 'HAUPTEINGANG_A'
-            ? 'DOOR_PLATFORM_HALL'
-            : 'DOOR_STATION_VORPLATZ'
-          : this.missionMode === 'LINZ'
-            ? this.plan.entryPoint === 'HAUPTEINGANG_A'
-              ? 'DOOR_LINZ_DOCK_A'
-              : 'DOOR_LINZ_DOCK_B'
-            : this.missionMode === 'TIROL'
-              ? this.plan.entryPoint === 'HAUPTEINGANG_A'
-                ? 'DOOR_TIROL_TERRASSE_A'
-                : 'DOOR_TIROL_BALKON_B'
-              : this.missionMode === 'SCHWECHAT'
-                ? this.plan.entryPoint === 'HAUPTEINGANG_A'
-                  ? 'DOOR_VIE_HANGAR_GATE_A'
-                  : 'DOOR_VIE_LOUNGE_GATE_B'
-                : this.plan.entryPoint === 'HAUPTEINGANG_A'
-                  ? 'DOOR_MAIN_A'
-                  : 'DOOR_BALCONY_B';
-      const entryDoor = this.doors.find((d) => d.id === targetDoorId);
-      if (entryDoor) {
-        this.executeBreach(entryDoor, 'C4');
-      }
-    }
+    // La doctrina dinámica no abre la entrada sola: la puerta sólo se rompe
+    // cuando el operador o Kobra-2 ejecutan realmente una brecha en ella.
     this.onStateChange(this.gameState);
     this.emitHudSnapshot();
   }
@@ -878,17 +990,38 @@ public nightMode: boolean = false;
 
   public triggerTrainingDoorBreach(mode: 'KICK' | 'RAM' | 'C4') {
     const door = this.doors.find((d) => d.id === 'TRAINING_DOOR');
-    if (door && !door.isOpen) {
-      this.initiateBreach(door, mode);
+    if (!door || door.isOpen) return;
+    if (mode === 'C4') {
+      this.beginC4Plant({
+        targetName: door.name,
+        x: (door.x1 + door.x2) / 2,
+        y: (door.y1 + door.y2) / 2,
+        doorId: door.id,
+        isWindow: false,
+      });
+      return;
     }
+    this.initiateBreach(door, mode);
   }
 
   public replayRadioMessage(item: {
     speaker: string;
     text: string;
     tone: 'info' | 'warn' | 'alert' | 'ok';
+    silent?: boolean;
   }) {
-    soundEngine.playTetraRadioTransmission(item.tone, item.text.length, item.speaker);
+    if (item.silent) {
+      soundEngine.playTetraStaticBurst(0.35, 0.12);
+      this.radioTxTimer = 0.35;
+      this.emitHudSnapshot();
+      return;
+    }
+    if (!soundEngine.isRadioAudioEnabled()) {
+      this.emitHudSnapshot();
+      return;
+    }
+    // La repetición reemite sólo la textura TETRA; el mensaje sigue siendo texto.
+    soundEngine.playTetraRadioTransmission(item.tone, item.text.length);
     this.radioTxTimer = 1.95;
     if (item.tone === 'alert' || item.tone === 'warn') {
       this.radioStaticTimer = 0.75;
@@ -904,7 +1037,8 @@ public nightMode: boolean = false;
       this.flashlightOn
         ? 'Taktisches Waffenlicht eingeschaltet (1000 Lumen).'
         : 'Waffenlicht ausgeschaltet (Schleichmodus).',
-      'info'
+      'info',
+      { silent: true }
     );
     this.emitHudSnapshot();
   }
@@ -920,7 +1054,8 @@ public nightMode: boolean = false;
       this.nvgActive
         ? 'Nachtsichtgerät (GPNVG-18 Gen-3 Phosphor) aktiv — Restlichtverstärkung & Kontrast im Dunkeln erhöht.'
         : 'Nachtsichtgerät hochgeklappt (Normaler Sichtmodus).',
-      this.nvgActive ? 'ok' : 'info'
+      this.nvgActive ? 'ok' : 'info',
+      { silent: true }
     );
     this.emitHudSnapshot();
   }
@@ -937,7 +1072,8 @@ public nightMode: boolean = false;
       this.playerStance === 'AGACHADO'
         ? 'Postura: Agachado (Menor perfil balístico, mayor estabilidad)'
         : 'Postura: Parado (Desplazamiento táctico estándar)',
-      'ok'
+      'ok',
+      { silent: true }
     );
     this.emitHudSnapshot();
   }
@@ -1071,6 +1207,8 @@ public nightMode: boolean = false;
       this.triggerSuspectInterrogation();
     } else if (code === this.keybinds.reload) {
       this.reloadWeapon();
+    } else if (code === this.keybinds.clearBlastArea) {
+      this.orderBlastAreaClear();
     } else if (code === this.keybinds.squad1) {
       if (this.isTrainingMode) {
         this.switchTrainingWeapon('AUG_A3');
@@ -1388,7 +1526,8 @@ public nightMode: boolean = false;
       this.aimZoneMode === 'EXTREMITIES'
         ? 'Zielpunkt-Wahl: EXTREMITÄTEN (Beine/Waffenarm — Nicht-tödliche Kampfunfähigkeit §7 WVG).'
         : 'Zielpunkt-Wahl: TORSO (Körpermitte / Plattenträger).',
-      'info'
+      'info',
+      { silent: true }
     );
     this.emitHudSnapshot();
   }
@@ -1624,12 +1763,14 @@ public nightMode: boolean = false;
   protected pushRadio(
     speaker: string,
     text: string,
-    tone: 'info' | 'warn' | 'alert' | 'ok' = 'info'
+    tone: 'info' | 'warn' | 'alert' | 'ok' = 'info',
+    options: { silent?: boolean } = {}
   ) {
     const now = new Date();
     const timeStr = now.toTimeString().slice(0, 8);
+    const isSilent = options.silent === true;
     const isImportantAlert = tone === 'alert' || tone === 'warn';
-    const hasStaticBurst = isImportantAlert || Math.random() < 0.18;
+    const hasStaticBurst = !isSilent && (isImportantAlert || Math.random() < 0.18);
 
     this.radioFeed = [
       {
@@ -1639,11 +1780,20 @@ public nightMode: boolean = false;
         time: timeStr,
         tone,
         hasStaticBurst,
+        silent: isSilent,
       },
       ...this.radioFeed.slice(0, 5),
     ];
 
     if (this.gameState === 'PLAYING') {
+      // Los estados rutinarios van al log y a un squelch corto, sin locución.
+      if (isSilent) {
+        this.radioTxTimer = 0.35;
+        soundEngine.playTetraStaticBurst(0.35, 0.12);
+        this.emitHudSnapshot();
+        return;
+      }
+
       const nowMs = performance.now();
       this.radioTxTimer = tone === 'alert' ? 2.4 : tone === 'warn' ? 2.0 : 1.75;
       if (hasStaticBurst) {
@@ -1652,7 +1802,7 @@ public nightMode: boolean = false;
 
       if (nowMs - this.lastRadioAudioStamp > 110) {
         this.lastRadioAudioStamp = nowMs;
-        soundEngine.playTetraRadioTransmission(tone, text.length, speaker);
+        soundEngine.playTetraRadioTransmission(tone, text.length);
       } else if (isImportantAlert) {
         // Even if two messages arrive nearly simultaneously, ensure tactical alert static crackle is heard
         soundEngine.playTetraStaticBurst(tone === 'alert' ? 0.95 : 0.72);
@@ -1868,7 +2018,7 @@ public nightMode: boolean = false;
 
     // Illumination from Wall Sconces & platform lights
     for (const sc of this.wallSconces) {
-      if (sc.isDestroyed) continue;
+      if (sc.isDestroyed || sc.isOn === false) continue;
       const d = Math.hypot(sc.x - player.x, sc.y - player.y);
       if (d < sc.radius * 0.7) {
         vis = Math.max(vis, 70);
@@ -2244,7 +2394,7 @@ public nightMode: boolean = false;
           }
         }
 
-        soundEngine.playTetraRadioTransmission('info', 30, 'KOBRA-1');
+        soundEngine.playTetraRadioTransmission('info', 30);
         actor.speechBubble = {
           text: '¡Está bien, hablaré! Las posiciones del grupo están transmitidas en vuestro C4I...',
           timer: 3.5,
@@ -2324,6 +2474,273 @@ public nightMode: boolean = false;
     return best;
   }
 
+  /** Puerta cerrada más cercana, ignorando puertas ya abiertas o destruidas. */
+  protected findNearestClosedDoor(x: number, y: number, maxDist = 550): DoorEntity | null {
+    let best: DoorEntity | null = null;
+    let bestDist = maxDist;
+    for (const door of this.doors) {
+      if (door.isOpen || door.isDestroyed) continue;
+      const mx = (door.x1 + door.x2) * 0.5;
+      const my = (door.y1 + door.y2) * 0.5;
+      const dist = Math.hypot(mx - x, my - y);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = door;
+      }
+    }
+    return best;
+  }
+
+  /** Un interruptor por estancia con lámparas, montado sobre uno de sus muros. */
+  protected createLightSwitches(
+    sconces: WallSconceLight[],
+    rooms: RoomZone[] = this.rooms ?? [],
+    walls: WallSegment[] = this.walls ?? [],
+    doors: DoorEntity[] = this.doors ?? []
+  ): LightSwitchEntity[] {
+    if (!rooms.length) {
+      // Fallback para motores de prueba sin layout: la lámpara ya está en el muro.
+      return sconces.map((sconce) => ({
+        id: `switch_${sconce.id}`,
+        sconceId: sconce.id,
+        sconceIds: [sconce.id],
+        x: sconce.x,
+        y: sconce.y,
+        normalAngle: sconce.normalAngle,
+      }));
+    }
+
+    const sconcesByRoom = new Map<string, WallSconceLight[]>();
+    for (const room of rooms) sconcesByRoom.set(room.id, []);
+
+    for (const sconce of sconces) {
+      let bestRoom: RoomZone | undefined;
+      let bestDistance = Infinity;
+      let bestCenterDistance = Infinity;
+      for (const room of rooms) {
+        const dx = Math.max(room.x - sconce.x, 0, sconce.x - (room.x + room.w));
+        const dy = Math.max(room.y - sconce.y, 0, sconce.y - (room.y + room.h));
+        const distance = Math.hypot(dx, dy);
+        const centerDistance = Math.hypot(
+          sconce.x - (room.x + room.w * 0.5),
+          sconce.y - (room.y + room.h * 0.5)
+        );
+        if (
+          distance < bestDistance - 0.01 ||
+          (Math.abs(distance - bestDistance) <= 0.01 && centerDistance < bestCenterDistance)
+        ) {
+          bestRoom = room;
+          bestDistance = distance;
+          bestCenterDistance = centerDistance;
+        }
+      }
+      if (bestRoom && bestDistance <= 8) sconcesByRoom.get(bestRoom.id)?.push(sconce);
+    }
+
+    const switches: LightSwitchEntity[] = [];
+    for (const room of rooms) {
+      const roomSconces = sconcesByRoom.get(room.id) ?? [];
+      if (!roomSconces.length) continue;
+      const centerX = room.x + room.w * 0.5;
+      const centerY = room.y + room.h * 0.5;
+      const primary = roomSconces.reduce((closest, sconce) => {
+        const closestDistance = Math.hypot(closest.x - centerX, closest.y - centerY);
+        const sconceDistance = Math.hypot(sconce.x - centerX, sconce.y - centerY);
+        return sconceDistance < closestDistance ? sconce : closest;
+      });
+      const wallPoint = this.findRoomWallPoint(room, walls, doors);
+      const normalAngle = wallPoint?.normalAngle ?? primary.normalAngle;
+      const offset = wallPoint ? 2 : 0;
+
+      switches.push({
+        id: `switch_${room.id.toLowerCase()}`,
+        sconceId: primary.id,
+        sconceIds: roomSconces.map((sconce) => sconce.id),
+        x: Math.round((wallPoint?.x ?? primary.x) + Math.cos(normalAngle) * offset),
+        y: Math.round((wallPoint?.y ?? primary.y) + Math.sin(normalAngle) * offset),
+        normalAngle,
+      });
+    }
+    return switches;
+  }
+
+  /** Punto de un muro del perímetro de la estancia más cercano a su centro. */
+  protected findRoomWallPoint(
+    room: RoomZone,
+    walls: WallSegment[],
+    doors: DoorEntity[] = this.doors ?? []
+  ): { x: number; y: number; normalAngle: number } | null {
+    const centerX = room.x + room.w * 0.5;
+    const centerY = room.y + room.h * 0.5;
+    const epsilon = 1.5;
+    let bestSafe: { x: number; y: number; normalAngle: number; distance: number } | null = null;
+    let bestAny: { x: number; y: number; normalAngle: number; distance: number } | null = null;
+
+    // La tecla E prioriza puertas a 62 px; el interruptor no debe quedar dentro de ese radio.
+    const doorClear = (x: number, y: number) =>
+      doors.every((door) => distanciaASegmento(x, y, door.x1, door.y1, door.x2, door.y2) >= 72);
+
+    const consider = (x: number, y: number) => {
+      const distance = Math.hypot(x - centerX, y - centerY);
+      const candidate = { x, y, normalAngle: Math.atan2(centerY - y, centerX - x), distance };
+      if (!bestAny || distance < bestAny.distance) bestAny = candidate;
+      if (doorClear(x, y) && (!bestSafe || distance < bestSafe.distance)) bestSafe = candidate;
+    };
+
+    const considerHorizontal = (start: number, end: number, y: number) => {
+      if (end - start < 10) return;
+      for (const x of [Math.min(Math.max(centerX, start), end), start + 8, end - 8, (start + end) * 0.5]) {
+        if (x >= start && x <= end) consider(x, y);
+      }
+    };
+
+    const considerVertical = (x: number, start: number, end: number) => {
+      if (end - start < 10) return;
+      for (const y of [Math.min(Math.max(centerY, start), end), start + 8, end - 8, (start + end) * 0.5]) {
+        if (y >= start && y <= end) consider(x, y);
+      }
+    };
+
+    for (const wall of walls) {
+      if (wall.isWindow) continue;
+      const minX = Math.min(wall.x1, wall.x2);
+      const maxX = Math.max(wall.x1, wall.x2);
+      const minY = Math.min(wall.y1, wall.y2);
+      const maxY = Math.max(wall.y1, wall.y2);
+      if (Math.abs(wall.y1 - wall.y2) <= epsilon) {
+        if (
+          Math.abs(wall.y1 - room.y) <= epsilon ||
+          Math.abs(wall.y1 - (room.y + room.h)) <= epsilon
+        ) {
+          considerHorizontal(Math.max(minX, room.x), Math.min(maxX, room.x + room.w), wall.y1);
+        }
+      } else if (Math.abs(wall.x1 - wall.x2) <= epsilon) {
+        if (
+          Math.abs(wall.x1 - room.x) <= epsilon ||
+          Math.abs(wall.x1 - (room.x + room.w)) <= epsilon
+        ) {
+          considerVertical(wall.x1, Math.max(minY, room.y), Math.min(maxY, room.y + room.h));
+        }
+      }
+    }
+
+    const bestPoint = () => bestSafe ?? bestAny;
+    const boundary = bestPoint();
+    if (boundary) return boundary;
+
+    // Sin un muro exactamente sobre el perímetro, usa el muro más cercano.
+    for (const wall of walls) {
+      if (wall.isWindow) continue;
+      const dx = wall.x2 - wall.x1;
+      const dy = wall.y2 - wall.y1;
+      const lengthSq = dx * dx + dy * dy;
+      if (lengthSq === 0) continue;
+      const t = Math.min(
+        1,
+        Math.max(0, ((centerX - wall.x1) * dx + (centerY - wall.y1) * dy) / lengthSq)
+      );
+      consider(wall.x1 + dx * t, wall.y1 + dy * t);
+    }
+
+    const fallback = bestPoint();
+    return fallback ? { x: fallback.x, y: fallback.y, normalAngle: fallback.normalAngle } : null;
+  }
+
+  protected findNearestLightSwitch(
+    x: number,
+    y: number,
+    maxDist = 44
+  ): LightSwitchEntity | null {
+    let best: LightSwitchEntity | null = null;
+    let bestDist = maxDist;
+    for (const lightSwitch of this.lightSwitches) {
+      const dist = Math.hypot(lightSwitch.x - x, lightSwitch.y - y);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = lightSwitch;
+      }
+    }
+    return best;
+  }
+
+  protected isContextInteractableActor(actor: ActorEntity, x: number, y: number): boolean {
+    if (actor.role === 'PLAYER' || actor.role === 'SQUAD') return false;
+    if (Math.hypot(actor.x - x, actor.y - y) > 52) return false;
+    if (actor.role === 'SUSPECT') {
+      return (
+        actor.state === 'SURRENDERED' ||
+        actor.state === 'INCAPACITATED' ||
+        actor.state === 'FEIGNING_SURRENDER'
+      );
+    }
+    return (
+      (actor.role === 'HOSTAGE' || actor.role === 'CIVILIAN') &&
+      actor.state !== 'ARRESTED' &&
+      actor.state !== 'DEAD'
+    );
+  }
+
+  protected isContextInteractableEvidence(evidence: DroppedEvidence, x: number, y: number): boolean {
+    return !evidence.secured && Math.hypot(evidence.x - x, evidence.y - y) <= 50;
+  }
+
+  /**
+   * Devuelve el interruptor que la tecla E activaría en este instante.
+   * Las interacciones con personas/evidencia y las puertas tienen prioridad;
+   * el cartel y la acción real usan esta misma comprobación.
+   */
+  protected getInteractableLightSwitch(
+    x: number,
+    y: number
+  ): LightSwitchEntity | null {
+    if (this.findNearestDoor(x, y, 62)) return null;
+    if (this.actors.some((actor) => this.isContextInteractableActor(actor, x, y))) return null;
+    if (
+      this.evidenceList.some((evidence) => this.isContextInteractableEvidence(evidence, x, y))
+    ) {
+      return null;
+    }
+    return this.findNearestLightSwitch(x, y, 46);
+  }
+
+  protected toggleLightSwitch(lightSwitch: LightSwitchEntity) {
+    const ids = lightSwitch.sconceIds?.length ? lightSwitch.sconceIds : [lightSwitch.sconceId];
+    const sconces = ids
+      .map((id) => this.wallSconces.find((item) => item.id === id))
+      .filter((sconce): sconce is WallSconceLight => sconce !== undefined);
+    if (!sconces.length) return;
+
+    if (sconces.every((sconce) => sconce.isDestroyed)) {
+      soundEngine.playUiClick();
+      this.impactPopups.push({
+        x: lightSwitch.x,
+        y: lightSwitch.y - 12,
+        vy: -28,
+        text: 'INTERRUPTOR SIN LUZ',
+        color: '#94A3B8',
+        life: 1.1,
+        maxLife: 1.1,
+      });
+      return;
+    }
+
+    const turningOn = !sconces.some((sconce) => !sconce.isDestroyed && sconce.isOn !== false);
+    for (const sconce of sconces) {
+      if (!sconce.isDestroyed) sconce.isOn = turningOn;
+    }
+    soundEngine.playLightSwitch(turningOn);
+    this.impactPopups.push({
+      x: lightSwitch.x,
+      y: lightSwitch.y - 12,
+      vy: -28,
+      text: turningOn ? 'LUZ ENCENDIDA' : 'LUZ APAGADA',
+      color: turningOn ? '#FDE68A' : '#94A3B8',
+      life: 1.1,
+      maxLife: 1.1,
+    });
+    this.emitHudSnapshot();
+  }
+
   public handleContextualInteract() {
     const player = this.getPlayer();
     if (!player || player.state === 'DEAD') return;
@@ -2332,70 +2749,63 @@ public nightMode: boolean = false;
     this.thermalActive = false;
 
     for (const actor of this.actors) {
-      if (actor.role === 'PLAYER' || actor.role === 'SQUAD') continue;
-      const dist = Math.hypot(actor.x - player.x, actor.y - player.y);
-      if (dist <= 52) {
-        if (
-          actor.role === 'SUSPECT' &&
-          (actor.state === 'SURRENDERED' ||
-            actor.state === 'INCAPACITATED' ||
-            actor.state === 'FEIGNING_SURRENDER')
-        ) {
-          actor.state = 'ARRESTED';
-          if (actor.isArmed) {
-            actor.isArmed = false;
-            this.evidenceList.push({
-              id: `EV_${actor.id}`,
-              label: actor.weaponLabel || 'Kurzwaffe',
-              x: actor.x + 18,
-              y: actor.y + 12,
-              secured: false,
-            });
-          }
-          actor.speechBubble = {
-            text: 'Festgenommen (Handfesseln angelegt).',
-            timer: 2.2,
-            type: 'SURRENDER',
-          };
-          soundEngine.playArrestCuffs();
-          this.recordRoeEvent(`Arresto limpio con vida: ${actor.name}`, 250, true);
-          this.pushRadio('KOBRA-1', `Zielperson ${actor.name} gesichert und festgenommen.`, 'ok');
-          this.checkMissionCompletion();
-          this.emitHudSnapshot();
-          return;
-        }
+      if (!this.isContextInteractableActor(actor, player.x, player.y)) continue;
 
-        if (
-          (actor.role === 'HOSTAGE' || actor.role === 'CIVILIAN') &&
-          actor.state !== 'ARRESTED' &&
-          actor.state !== 'DEAD'
-        ) {
-          actor.state = 'ARRESTED';
-          actor.speechBubble = {
-            text: 'Danke! Ich bin in Sicherheit.',
-            timer: 2.5,
-            type: 'SURRENDER',
-          };
-          soundEngine.playArrestCuffs();
-          this.recordRoeEvent(`Rehén/Civil evacuado: ${actor.name}`, 200, true);
-          this.pushRadio('KOBRA-1', `Schutzperson ${actor.name} unverletzt evakuiert!`, 'ok');
-          this.checkMissionCompletion();
-          this.emitHudSnapshot();
-          return;
+      if (actor.role === 'SUSPECT') {
+        actor.state = 'ARRESTED';
+        if (actor.isArmed) {
+          actor.isArmed = false;
+          this.evidenceList.push({
+            id: `EV_${actor.id}`,
+            label: actor.weaponLabel || 'Kurzwaffe',
+            x: actor.x + 18,
+            y: actor.y + 12,
+            secured: false,
+          });
         }
-      }
-    }
-
-    for (const ev of this.evidenceList) {
-      if (!ev.secured && Math.hypot(ev.x - player.x, ev.y - player.y) <= 50) {
-        ev.secured = true;
-        soundEngine.playOpticCam();
-        this.recordRoeEvent(`Evidencia balística asegurada (${ev.label})`, 75, true);
-        this.pushRadio('KOBRA-2', `Beweismittel gesichert: ${ev.label}.`, 'info');
+        actor.speechBubble = {
+          text: 'Festgenommen (Handfesseln angelegt).',
+          timer: 2.2,
+          type: 'SURRENDER',
+        };
+        soundEngine.playArrestCuffs();
+        this.recordRoeEvent(`Arresto limpio con vida: ${actor.name}`, 250, true);
+        this.pushRadio('KOBRA-1', `Zielperson ${actor.name} gesichert und festgenommen.`, 'ok');
         this.checkMissionCompletion();
         this.emitHudSnapshot();
         return;
       }
+
+      actor.state = 'ARRESTED';
+      actor.speechBubble = {
+        text: 'Danke! Ich bin in Sicherheit.',
+        timer: 2.5,
+        type: 'SURRENDER',
+      };
+      soundEngine.playArrestCuffs();
+      this.recordRoeEvent(`Rehén/Civil evacuado: ${actor.name}`, 200, true);
+      this.pushRadio('KOBRA-1', `Schutzperson ${actor.name} unverletzt evakuiert!`, 'ok');
+      this.checkMissionCompletion();
+      this.emitHudSnapshot();
+      return;
+    }
+
+    for (const ev of this.evidenceList) {
+      if (!this.isContextInteractableEvidence(ev, player.x, player.y)) continue;
+
+      ev.secured = true;
+      soundEngine.playOpticCam();
+      this.recordRoeEvent(`Evidencia balística asegurada (${ev.label})`, 75, true);
+      this.pushRadio('KOBRA-2', `Beweismittel gesichert: ${ev.label}.`, 'info');
+      this.checkMissionCompletion();
+      this.emitHudSnapshot();
+      return;
+    }
+
+    const lightSwitch = this.getInteractableLightSwitch(player.x, player.y);
+    if (lightSwitch) {
+      this.toggleLightSwitch(lightSwitch);
+      return;
     }
 
     const door = this.findNearestDoor(player.x, player.y, 62);
@@ -2499,7 +2909,7 @@ public nightMode: boolean = false;
 
   public handleDoorBreachC4() {
     const player = this.getPlayer();
-    if (!player || player.state === 'DEAD' || this.breachAction) return;
+    if (!player || player.state === 'DEAD' || this.breachAction || this.c4Planting) return;
     if (this.c4Count <= 0) {
       this.pushRadio('KOBRA-1', 'Keine Sprengladungen (C4) mehr verfügbar!', 'warn');
       return;
@@ -2507,57 +2917,198 @@ public nightMode: boolean = false;
 
     const door = this.findNearestDoor(player.x, player.y, 65);
     if (door && !door.isOpen) {
-      this.c4Count = Math.max(0, this.c4Count - 1);
-      soundEngine.playBreachPrep('C4');
-      const cx = (door.x1 + door.x2) / 2;
-      const cy = (door.y1 + door.y2) / 2;
-      this.activeC4Charges.push({
-        id: 'c4_' + Math.random().toString(36).substring(2, 9),
+      this.beginC4Plant({
         targetName: door.name,
-        x: cx,
-        y: cy,
-        remainingSeconds: 4.0,
-        maxSeconds: 4.0,
+        x: (door.x1 + door.x2) / 2,
+        y: (door.y1 + door.y2) / 2,
         doorId: door.id,
         isWindow: false,
       });
+      return;
+    }
+
+    const extWin = this.findNearestExteriorWindow(player.x, player.y, 68);
+    if (extWin && !extWin.isBreached) {
+      this.beginC4Plant({
+        targetName: extWin.label || 'Ventana Exterior',
+        x: (extWin.x1 + extWin.x2) / 2,
+        y: (extWin.y1 + extWin.y2) / 2,
+        windowId: extWin.id,
+        isWindow: true,
+      });
+    }
+  }
+
+  /**
+   * Coloca una carga con un tiempo visible. La carga no se arma ni consume
+   * inventario hasta que el proceso termina; si el operador se aleja, se cancela.
+   */
+  protected beginC4Plant(target: {
+    targetName: string;
+    x: number;
+    y: number;
+    doorId?: string;
+    windowId?: string;
+    isWindow: boolean;
+  }): boolean {
+    if (this.c4Planting) return false;
+    if (this.c4Count <= 0) {
+      this.pushRadio('KOBRA-1', 'Keine Sprengladungen (C4) mehr verfügbar!', 'warn');
+      return false;
+    }
+    const alreadyPlaced = this.activeC4Charges.some((charge) =>
+      target.doorId ? charge.doorId === target.doorId : charge.windowId === target.windowId
+    );
+    if (alreadyPlaced) {
+      this.pushRadio('KOBRA-1', `Ya hay una carga activa en ${target.targetName}.`, 'warn');
+      return false;
+    }
+
+    this.c4Planting = {
+      ...target,
+      progress: 0,
+      maxProgress: C4_PLANT_SECONDS,
+    };
+    soundEngine.playBreachPrep('C4');
+    this.pushRadio(
+      'KOBRA-1',
+      `Colocando C4 en ${target.targetName}... mantén la posición [${C4_PLANT_SECONDS.toFixed(1)}s].`,
+      'warn'
+    );
+    this.emitHudSnapshot();
+    return true;
+  }
+
+  /** Avanza la colocación y arma la carga sólo al terminar el gesto. */
+  protected updateC4Planting(dt: number): void {
+    const planting = this.c4Planting;
+    if (!planting) return;
+
+    const player = this.getPlayer();
+    if (!player || player.state === 'DEAD') {
+      this.c4Planting = undefined;
+      this.emitHudSnapshot();
+      return;
+    }
+
+    if (planting.doorId) {
+      const door = this.doors.find((item) => item.id === planting.doorId);
+      if (!door || door.isOpen || door.isDestroyed) {
+        this.c4Planting = undefined;
+        this.pushRadio('KOBRA-1', 'C4 cancelada: la puerta dejó de ser un objetivo válido.', 'warn');
+        this.emitHudSnapshot();
+        return;
+      }
+    }
+
+    // En la galería de tiro el control [C] coloca la carga de forma remota para
+    // poder practicar la secuencia completa sin recorrer el pasillo.
+    if (!this.isTrainingMode && Math.hypot(player.x - planting.x, player.y - planting.y) > 100) {
+      this.c4Planting = undefined;
+      this.pushRadio('KOBRA-1', 'C4 cancelada: el operador se alejó antes de terminar la colocación.', 'warn');
+      this.emitHudSnapshot();
+      return;
+    }
+
+    planting.progress += dt;
+    if (planting.progress < planting.maxProgress) return;
+
+    this.c4Planting = undefined;
+    if (!this.isTrainingMode) {
+      this.c4Count = Math.max(0, this.c4Count - 1);
+    }
+    this.activeC4Charges.push({
+      id: 'c4_' + Math.random().toString(36).substring(2, 9),
+      targetName: planting.targetName,
+      x: planting.x,
+      y: planting.y,
+      remainingSeconds: 0,
+      maxSeconds: 0,
+      doorId: planting.doorId,
+      windowId: planting.windowId,
+      isWindow: planting.isWindow,
+      phase: 'ARMED',
+      safeToDetonate: false,
+    });
+    soundEngine.playC4WarningBeep(1.1);
+    this.pushRadio(
+      'KOBRA-1',
+      `C4 ARMADA en ${planting.targetName}. Ordena despejar la zona [J]; la detonación queda bloqueada hasta que el binomio esté a distancia segura.`,
+      'warn'
+    );
+    this.emitHudSnapshot();
+  }
+
+  /** Comprueba que ningún agente propio quede dentro del radio de la explosión. */
+  public isBlastAreaClear(charge: ActiveC4Charge): boolean {
+    const friendlies = this.actors.filter(
+      (actor) =>
+        (actor.role === 'PLAYER' || actor.role === 'SQUAD') &&
+        actor.state !== 'DEAD'
+    );
+    if (friendlies.length === 0) {
+      const player = this.getPlayer();
+      const squad = this.getSquadmate();
+      if (player && player.state !== 'DEAD') friendlies.push(player);
+      if (squad && squad.state !== 'DEAD') friendlies.push(squad);
+    }
+    return friendlies.every(
+      (actor) => Math.hypot(actor.x - charge.x, actor.y - charge.y) >= C4_SAFE_RADIUS
+    );
+  }
+
+  /** Punto de reunión fuera del radio de la carga, evitando paredes y mobiliario. */
+  protected findC4ClearancePoint(charge: ActiveC4Charge, actor: ActorEntity): Vec2 | undefined {
+    const currentDistance = Math.hypot(actor.x - charge.x, actor.y - charge.y);
+    // Si Kobra-2 ya está fuera del radio, que asegure su posición en vez de
+    // acercarse de nuevo a la carga para "despejar".
+    if (currentDistance >= C4_SAFE_RADIUS) return { x: actor.x, y: actor.y };
+
+    const baseAngle = Math.atan2(actor.y - charge.y, actor.x - charge.x);
+    const angleOffsets = [0, 0.45, -0.45, 0.9, -0.9, 1.35, -1.35, Math.PI];
+    const baseDistance = Math.max(C4_SAFE_RADIUS + 35, currentDistance + 60);
+    const distances = [baseDistance, baseDistance + 45, baseDistance + 90];
+
+    for (const distance of distances) {
+      for (const offset of angleOffsets) {
+        const angle = baseAngle + offset;
+        const x = Math.max(90, Math.min(WORLD_WIDTH - 90, charge.x + Math.cos(angle) * distance));
+        const y = Math.max(70, Math.min(WORLD_HEIGHT - 70, charge.y + Math.sin(angle) * distance));
+        if (!this.collidesAt(x, y, 16)) return { x, y };
+      }
+    }
+    return undefined;
+  }
+
+  /** Orden táctica para que Kobra-2 se retire de la zona de la carga. */
+  public orderBlastAreaClear() {
+    if (this.activeC4Charges.length === 0) {
+      this.pushRadio('KOBRA-1', 'No hay ninguna carga C4 activa que despejar.', 'info');
+      return;
+    }
+    this.issueSquadCommand('CLEAR_BLAST_AREA');
+  }
+
+  public detonateActiveC4() {
+    if (this.c4Planting) {
+      this.pushRadio('KOBRA-1', 'La carga todavía se está colocando; espera a que quede armada.', 'warn');
+      return;
+    }
+    if (this.activeC4Charges.length === 0) return;
+
+    const unsafeCharge = this.activeC4Charges.find((charge) => !this.isBlastAreaClear(charge));
+    if (unsafeCharge) {
       this.pushRadio(
         'KOBRA-1',
-        `Sprengladung (C4) an ${door.name} platziert! 4s bis zur Detonation. ¡Deckung suchen!`,
+        `Detonación bloqueada: el binomio sigue dentro del radio de seguridad de ${unsafeCharge.targetName}. Usa [J] para despejar la zona y aléjate.`,
         'warn'
       );
       this.emitHudSnapshot();
       return;
     }
 
-    const extWin = this.findNearestExteriorWindow(player.x, player.y, 68);
-    if (extWin && !extWin.isBreached) {
-      this.c4Count = Math.max(0, this.c4Count - 1);
-      soundEngine.playBreachPrep('C4');
-      const cx = (extWin.x1 + extWin.x2) / 2;
-      const cy = (extWin.y1 + extWin.y2) / 2;
-      this.activeC4Charges.push({
-        id: 'c4_' + Math.random().toString(36).substring(2, 9),
-        targetName: extWin.label || 'Ventana Exterior',
-        x: cx,
-        y: cy,
-        remainingSeconds: 4.0,
-        maxSeconds: 4.0,
-        windowId: extWin.id,
-        isWindow: true,
-      });
-      this.pushRadio(
-        'KOBRA-1',
-        `Sprengladung (C4) an ${extWin.label || 'Ventana'} platziert! 4s bis zur Detonation. ¡Deckung suchen!`,
-        'warn'
-      );
-      this.emitHudSnapshot();
-    }
-  }
-
-  public detonateActiveC4() {
-    if (this.activeC4Charges.length === 0) return;
     for (const charge of [...this.activeC4Charges]) {
+      charge.phase = 'DETONATING';
       this.triggerC4Explosion(charge);
     }
     this.activeC4Charges = [];
@@ -2651,7 +3202,11 @@ public nightMode: boolean = false;
     this.emitHudSnapshot();
   }
 
-  protected executeBreach(door: DoorEntity, mode: 'KICK' | 'RAM' | 'C4') {
+  protected executeBreach(
+    door: DoorEntity,
+    mode: 'KICK' | 'RAM' | 'C4',
+    source: 'KOBRA-1' | 'KOBRA-2' = 'KOBRA-1'
+  ) {
     door.isLocked = false;
     door.isOpen = true;
     door.isBreached = true;
@@ -2692,11 +3247,11 @@ public nightMode: boolean = false;
     if (mode === 'KICK') {
       this.shakeIntensity = 7;
       this.hitstopTimer = 0.035;
-      this.pushRadio('KOBRA-1', `Dynamischer Tritt (Holzsplitter-Durchbruch) an ${door.name}!`, 'info');
+      this.pushRadio(source, `Dynamischer Tritt (Holzsplitter-Durchbruch) an ${door.name}!`, 'info');
     } else if (mode === 'RAM') {
       this.shakeIntensity = 13;
       this.hitstopTimer = 0.05;
-      this.pushRadio('KOBRA-1', `Türramme (Schwerer Metallschlag & Rahmenbruch) an ${door.name}!`, 'warn');
+      this.pushRadio(source, `Türramme (Schwerer Metallschlag & Rahmenbruch) an ${door.name}!`, 'warn');
     } else if (mode === 'C4') {
       this.shakeIntensity = 20;
       this.hitstopTimer = 0.07;
@@ -2709,7 +3264,7 @@ public nightMode: boolean = false;
         life: 0.35,
         maxLife: 0.35,
       });
-      this.pushRadio('KOBRA-1', `Sprengladung (C4 Breaching Charge) gezündet an ${door.name}!`, 'alert');
+      this.pushRadio(source, `Sprengladung (C4 Breaching Charge) gezündet an ${door.name}!`, 'alert');
     }
 
     const count = mode === 'C4' ? 42 : mode === 'RAM' ? 28 : 16;
@@ -3461,18 +4016,29 @@ public nightMode: boolean = false;
     this.emitHudSnapshot();
   }
 
-  public issueSquadCommand(cmd: SquadCommand) {
-    this.squadCommand = cmd;
+  public issueSquadCommand(cmd: SquadCommand, target?: SquadCommandTarget) {
     const squad = this.getSquadmate();
     const player = this.getPlayer();
     if (!squad || !player || squad.state === 'DEAD') return;
+    if (cmd === 'CLEAR_BLAST_AREA' && this.activeC4Charges.length === 0) {
+      this.pushRadio('KOBRA-1', 'No hay ninguna carga C4 activa que despejar.', 'info');
+      return;
+    }
+
+    this.squadCommand = cmd;
+    // Toda orden nueva cancela el destino anterior. Antes, HOLD y las
+    // formaciones seguían arrastrando una brecha o un marcador viejo.
+    squad.investigateTarget = undefined;
+    squad.targetFacingAngle = undefined;
+    this.squadDoorTargetId = undefined;
+    this.squadBreachAction = undefined;
+    this.tacticalWaypoint = undefined;
     squad.commandNodTimer = 0.48;
     this.commandPulseTimer = 1.2;
     soundEngine.playOpticCam();
     if (cmd === 'FOLLOW') {
       squad.gestureKind = 'ADVANCE';
       squad.gestureTimer = 0.65;
-      squad.investigateTarget = undefined;
       squad.speechBubble = { text: 'Verstanden, schließe auf!', timer: 1.8, type: 'COMMAND' };
       this.pushRadio('KOBRA-2', '[1] Folge Einsatzleiter (Binomio en formación).', 'info');
     } else if (cmd === 'HOLD') {
@@ -3485,60 +4051,49 @@ public nightMode: boolean = false;
       squad.gestureTimer = 0.65;
       squad.speechBubble = { text: 'Rücke vor zum Zugriff!', timer: 2.2, type: 'COMMAND' };
       this.pushRadio('KOBRA-2', '[3] Avanzando para brechar y despejar el sector.', 'info');
-      if (!squad.investigateTarget) {
-        const breachMarker = this.tacticalMarkers.find((m) => m.type === 'BREACH_ZONE');
-        const refX = breachMarker ? breachMarker.x : player.x;
-        const refY = breachMarker ? breachMarker.y : player.y;
-        const door =
-          this.findNearestDoor(refX, refY, 550) || this.findNearestDoor(squad.x, squad.y, 550);
-        if (door) {
-          const mx = (door.x1 + door.x2) * 0.5;
-          const my = (door.y1 + door.y2) * 0.5;
-          squad.investigateTarget = { x: mx, y: my };
-        } else {
-          squad.investigateTarget = {
-            x: player.x + Math.cos(player.angle) * 160,
-            y: player.y + Math.sin(player.angle) * 160,
-          };
-        }
+      const door = this.findSquadDoorTarget(player, squad, target);
+      this.squadDoorTargetId = door?.id;
+      const stack = door ? this.findTacticalStackPosition(door, player) : undefined;
+      squad.investigateTarget = stack ?? {
+        x: player.x + Math.cos(player.angle) * 160,
+        y: player.y + Math.sin(player.angle) * 160,
+      };
+      if (door && stack) {
+        squad.targetFacingAngle = Math.atan2(
+          (door.y1 + door.y2) * 0.5 - stack.y,
+          (door.x1 + door.x2) * 0.5 - stack.x
+        );
       }
     } else if (cmd === 'PIE_DOOR') {
       squad.gestureKind = 'POINT';
       squad.gestureTimer = 0.65;
       squad.speechBubble = { text: 'Sonde & Winkel schneiden!', timer: 2.2, type: 'COMMAND' };
       this.pushRadio('KOBRA-2', '[4] Posicionando para sonda óptica y corte de ángulo.', 'info');
-      if (!squad.investigateTarget) {
-        const door =
-          this.findNearestDoor(player.x, player.y, 550) ||
-          this.findNearestDoor(squad.x, squad.y, 550);
-        if (door) {
-          const mx = (door.x1 + door.x2) * 0.5;
-          const my = (door.y1 + door.y2) * 0.5;
-          squad.investigateTarget = { x: mx, y: my };
-        } else {
-          squad.investigateTarget = {
-            x: player.x + Math.cos(player.angle) * 130,
-            y: player.y + Math.sin(player.angle) * 130,
-          };
-        }
+      const door = this.findSquadDoorTarget(player, squad, target);
+      this.squadDoorTargetId = door?.id;
+      const stack = door ? this.findTacticalStackPosition(door, player) : undefined;
+      squad.investigateTarget = stack ?? {
+        x: player.x + Math.cos(player.angle) * 130,
+        y: player.y + Math.sin(player.angle) * 130,
+      };
+      if (door && stack) {
+        squad.targetFacingAngle = Math.atan2(
+          (door.y1 + door.y2) * 0.5 - stack.y,
+          (door.x1 + door.x2) * 0.5 - stack.x
+        );
       }
     } else if (cmd === 'DEPLOY_CS_GAS') {
       squad.gestureKind = 'BREACH';
       squad.gestureTimer = 0.65;
       squad.speechBubble = { text: 'CS-Reizgas bereit!', timer: 2.2, type: 'COMMAND' };
       this.pushRadio('KOBRA-2', '[5] Desplazando para lanzar granada CS.', 'info');
-      if (!squad.investigateTarget) {
-        const hostileMarker = this.tacticalMarkers.find(
-          (m) => m.type === 'HOSTILE' || m.type === 'BREACH_ZONE'
-        );
-        const tx = hostileMarker
-          ? hostileMarker.x
-          : player.x + Math.cos(player.angle) * 180;
-        const ty = hostileMarker
-          ? hostileMarker.y
-          : player.y + Math.sin(player.angle) * 180;
-        squad.investigateTarget = { x: tx, y: ty };
-      }
+      const hostileMarker = this.tacticalMarkers.find(
+        (m) => m.type === 'HOSTILE' || m.type === 'BREACH_ZONE'
+      );
+      squad.investigateTarget = {
+        x: hostileMarker ? hostileMarker.x : player.x + Math.cos(player.angle) * 180,
+        y: hostileMarker ? hostileMarker.y : player.y + Math.sin(player.angle) * 180,
+      };
     } else if (cmd === 'RESTRAIN_AND_SECURE') {
       squad.gestureKind = 'SECURE';
       squad.gestureTimer = 0.65;
@@ -3561,18 +4116,30 @@ public nightMode: boolean = false;
         '[7] ¡Intimidación policial y supresión táctica ejecutada sobre el sector!',
         'warn'
       );
-      if (!squad.investigateTarget) {
-        const suspect = this.actors.find(
-          (a) => a.role === 'SUSPECT' && a.state !== 'DEAD' && a.state !== 'ARRESTED'
-        );
-        const tx = suspect ? suspect.x : player.x + Math.cos(player.angle) * 160;
-        const ty = suspect ? suspect.y : player.y + Math.sin(player.angle) * 160;
-        squad.investigateTarget = { x: tx, y: ty };
-      }
+      // Suppress a threat the operator can actually see; if the suspects are
+      // behind a closed door, advance to the operator's sector instead of
+      // walking Kobra-2 straight into an unreachable target behind a wall.
+      const suspect = this.actors
+        .filter(
+          (a) =>
+            a.role === 'SUSPECT' &&
+            a.state !== 'DEAD' &&
+            a.state !== 'ARRESTED' &&
+            Math.hypot(a.x - player.x, a.y - player.y) <= 520 &&
+            !this.raycastWallsAndDoors(player.x, player.y, a.x, a.y)
+        )
+        .sort(
+          (a, b) =>
+            Math.hypot(a.x - squad.x, a.y - squad.y) -
+            Math.hypot(b.x - squad.x, b.y - squad.y)
+        )[0];
+      squad.investigateTarget = {
+        x: suspect ? suspect.x : player.x + Math.cos(player.angle) * 160,
+        y: suspect ? suspect.y : player.y + Math.sin(player.angle) * 160,
+      };
     } else if (cmd === 'REGROUP_HEAL') {
       squad.gestureKind = 'HALT';
       squad.gestureTimer = 0.65;
-      this.tacticalWaypoint = undefined;
       squad.hp = Math.min(squad.maxHp, squad.hp + 22);
       if (squad.bodyHealth) {
         squad.bodyHealth.bleeding = false;
@@ -3597,6 +4164,24 @@ public nightMode: boolean = false;
         'ok'
       );
       this.squadCommand = 'FOLLOW';
+    } else if (cmd === 'CLEAR_BLAST_AREA') {
+      const charge = this.activeC4Charges.find((item) => item.phase === 'ARMED');
+      const safePoint = charge ? this.findC4ClearancePoint(charge, squad) : undefined;
+      if (!charge || !safePoint) {
+        this.squadCommand = 'HOLD';
+        this.pushRadio('KOBRA-2', 'No encuentro una ruta segura fuera del radio de la C4.', 'warn');
+        return;
+      }
+      squad.gestureKind = 'ADVANCE';
+      squad.gestureTimer = 0.65;
+      squad.speechBubble = { text: 'Sprengzone räumen!', timer: 2.0, type: 'COMMAND' };
+      squad.investigateTarget = safePoint;
+      squad.targetFacingAngle = Math.atan2(charge.y - safePoint.y, charge.x - safePoint.x);
+      this.pushRadio(
+        'KOBRA-2',
+        `[J] Despejando la zona de ${charge.targetName}: punto seguro a ${Math.round(Math.hypot(safePoint.x - charge.x, safePoint.y - charge.y))} px.`,
+        'warn'
+      );
     } else if (cmd === 'FORM_WEDGE') {
       squad.gestureKind = 'POINT';
       squad.gestureTimer = 0.55;
@@ -3609,20 +4194,27 @@ public nightMode: boolean = false;
       this.pushRadio('KOBRA-2', '[0] Pasando a formación escalonada para avance táctico.', 'ok');
     }
 
-    // Anchor Kobra-2's base sector angle so he never spins when holding or executing an order
-    if (squad.investigateTarget) {
-      this.squadHoldAnchorAngle = Math.atan2(
-        squad.investigateTarget.y - squad.y,
-        squad.investigateTarget.x - squad.x
-      );
-    } else if (this.tacticalWaypoint) {
-      this.squadHoldAnchorAngle = Math.atan2(
-        this.tacticalWaypoint.y - squad.y,
-        this.tacticalWaypoint.x - squad.x
-      );
-    } else {
-      this.squadHoldAnchorAngle = player.angle;
+    // La confirmación de Kobra-2 es sólo la burbuja de texto situacional;
+    // el binomio no locuta cada orden para no narrar constantemente sus acciones.
+
+    // Las órdenes apuntadas desde el menú contextual conservan su punto exacto.
+    // Brecha y sonda ya fijaron su puerta y su posición de pila arriba.
+    if (target && cmd !== 'BREACH_AND_CLEAR' && cmd !== 'PIE_DOOR') {
+      squad.investigateTarget = { x: target.x, y: target.y };
+      squad.targetFacingAngle = Math.atan2(target.y - squad.y, target.x - squad.x);
+      this.tacticalWaypoint = {
+        x: Math.round(target.x),
+        y: Math.round(target.y),
+        label: target.name,
+      };
     }
+
+    // Anchor Kobra-2's base sector angle so he never spins when holding or executing an order.
+    // Toda orden limpia el waypoint anterior, así que el destino sólo puede ser el target.
+    const anchorTarget = squad.investigateTarget as Vec2 | undefined;
+    this.squadHoldAnchorAngle = anchorTarget
+      ? Math.atan2(anchorTarget.y - squad.y, anchorTarget.x - squad.x)
+      : player.angle;
 
     // Dynamic visual confirmation signal centered over Agent Kobra-2 on Canvas
     this.impactRings.push({
@@ -3966,6 +4558,7 @@ public nightMode: boolean = false;
         if (hDist !== null && hDist < closestDist) {
           closestDist = hDist;
           sconce.isDestroyed = true;
+          sconce.isOn = false;
           endX = startX + Math.cos(angle) * hDist;
           endY = startY + Math.sin(angle) * hDist;
           this.impactPopups.push({
@@ -5253,28 +5846,17 @@ public nightMode: boolean = false;
     this.flashScreenAlpha = Math.max(0, this.flashScreenAlpha - 1.4 * dt);
     this.nvgWarmupTimer = Math.max(0, this.nvgWarmupTimer - dt);
 
-    // Update active placed C4 charges countdowns & auto-detonation with proximity blast damage check
-    for (let i = this.activeC4Charges.length - 1; i >= 0; i--) {
-      const charge = this.activeC4Charges[i];
-      charge.remainingSeconds -= dt;
-      if (charge.remainingSeconds <= 0) {
-        this.triggerC4Explosion(charge);
-        this.activeC4Charges.splice(i, 1);
-      }
-    }
+    // La C4 se coloca primero y queda armada. No hay detonación automática.
+    this.updateC4Planting(dt);
 
-    // Audio warning beep & tactical vibration pulse during final 3 seconds
-    const active3sC4 = this.activeC4Charges.filter((c) => c.remainingSeconds <= 3.0 && c.remainingSeconds > 0);
-    if (active3sC4.length > 0) {
-      const minRem = Math.min(...active3sC4.map((c) => c.remainingSeconds));
-      const urgencyRatio = Math.min(1.0, Math.max(0, (3.0 - minRem) / 3.0));
-      const beepInterval = Math.max(0.08, 0.42 - urgencyRatio * 0.32);
+    // Aviso acústico moderado mientras el binomio siga dentro del radio seguro.
+    const unsafeArmedC4 = this.activeC4Charges.filter((charge) => !this.isBlastAreaClear(charge));
+    if (unsafeArmedC4.length > 0) {
       this.c4WarningBeepTimer += dt;
-      if (this.c4WarningBeepTimer >= beepInterval) {
+      if (this.c4WarningBeepTimer >= 1.25) {
         this.c4WarningBeepTimer = 0;
-        soundEngine.playC4WarningBeep(1.0 + urgencyRatio * 0.75);
+        soundEngine.playC4WarningBeep(1.0);
       }
-      this.shakeIntensity = Math.max(this.shakeIntensity, 1.8 + urgencyRatio * 4.5);
     } else {
       this.c4WarningBeepTimer = 0;
     }
@@ -6022,19 +6604,9 @@ public nightMode: boolean = false;
       player.roomName !== 'AUSSENBEREICH';
 
     for (const actor of this.actors) {
-      if (actor.state === 'DEAD') {
-        actor.lastSpokenText = undefined;
-        continue;
-      }
+      if (actor.state === 'DEAD') continue;
 
-      // Procedural Voice Synthesis Trigger
-      if (actor.speechBubble && actor.speechBubble.text !== actor.lastSpokenText) {
-        actor.lastSpokenText = actor.speechBubble.text;
-        soundEngine.speak(actor.speechBubble.text, actor.role);
-      } else if (!actor.speechBubble) {
-        actor.lastSpokenText = undefined;
-      }
-
+      // Las burbujas son exclusivamente visuales: no se convierten en locuciones.
       let alert: AlertLevel = 'CALM';
       if (actor.role === 'PLAYER' || actor.role === 'SQUAD') {
         if (
@@ -6260,7 +6832,239 @@ public nightMode: boolean = false;
     }
   }
 
+  /** Fija la puerta de la orden: puerta apuntada, marcador BREACH_ZONE u operador. */
+  protected findSquadDoorTarget(
+    player: ActorEntity,
+    squad: ActorEntity,
+    target?: SquadCommandTarget
+  ): DoorEntity | null {
+    if (target?.type === 'DOOR' && target.id) {
+      // La puerta apuntada manda incluso si ya fue abierta: así la orden no se
+      // desvía a otra puerta cercana y la llegada puede resolverla sin brecha.
+      return this.doors.find((door) => door.id === target.id) ?? null;
+    }
+    const marker = this.tacticalMarkers.find((m) => m.type === 'BREACH_ZONE');
+    if (marker) {
+      const markedDoor = this.findNearestClosedDoor(marker.x, marker.y, 1200);
+      if (markedDoor) return markedDoor;
+    }
+    if (target) {
+      return this.findNearestClosedDoor(target.x, target.y, 1200);
+    }
+    return (
+      this.findNearestClosedDoor(player.x, player.y, 1200) ||
+      this.findNearestClosedDoor(squad.x, squad.y, 1200)
+    );
+  }
+
+  protected getSquadTargetDoor(): DoorEntity | null {
+    if (!this.squadDoorTargetId) return null;
+    return this.doors.find((door) => door.id === this.squadDoorTargetId) ?? null;
+  }
+
+  /**
+   * Elige el método según el estado real de la puerta y el equipo del binomio:
+   * cerrojo -> disparo de precisión, puerta normal -> patada, blindada -> C4
+   * o ariete si el equipo lo lleva.
+   */
+  protected chooseSquadBreachMode(door: DoorEntity): SquadBreachMode {
+    if (!door.isLocked) return 'KICK';
+
+    const heavyDoor = /blindad|reforz|antiexplos|stellwerk|seguridad|industrial|port[oó]n/i.test(
+      `${door.id} ${door.name}`
+    );
+    if (this.plan.squadGear === 'RAM') return 'RAM';
+    if (heavyDoor && this.c4Count > 0) return 'C4';
+    return 'SHOOT_LOCK';
+  }
+
+  /** La acción empieza sólo cuando Kobra-2 ya está en la posición de pila. */
+  protected beginSquadBreach(door: DoorEntity, squad: ActorEntity): void {
+    if (this.squadBreachAction || door.isOpen || door.isDestroyed) return;
+
+    const mode = this.chooseSquadBreachMode(door);
+    const maxProgress =
+      mode === 'SHOOT_LOCK' ? 0.5 : mode === 'C4' ? 1.3 : mode === 'RAM' ? 0.75 : 0.35;
+
+    this.squadBreachAction = {
+      doorId: door.id,
+      mode,
+      progress: 0,
+      maxProgress,
+    };
+    this.squadDoorTargetId = door.id;
+    squad.gestureKind = 'BREACH';
+    squad.gestureTimer = 0.8;
+    squad.targetFacingAngle = Math.atan2(
+      (door.y1 + door.y2) * 0.5 - squad.y,
+      (door.x1 + door.x2) * 0.5 - squad.x
+    );
+
+    if (mode === 'SHOOT_LOCK') {
+      const listener = this.getPlayer();
+      soundEngine.playGunshotSpatial(
+        'SUPPRESSED',
+        squad.x,
+        squad.y,
+        listener?.x ?? squad.x,
+        listener?.y ?? squad.y
+      );
+      this.traces?.push({
+        x1: squad.x,
+        y1: squad.y,
+        x2: (door.x1 + door.x2) * 0.5,
+        y2: (door.y1 + door.y2) * 0.5,
+        color: '#F59E0B',
+        alpha: 0.85,
+        isTaser: false,
+      });
+      squad.recoilTimer = 0.12;
+      this.pushRadio('KOBRA-2', `[3] Disparo de precisión al cerrojo de ${door.name}.`, 'info');
+      squad.speechBubble = { text: 'Cerrojo neutralizado con disparo.', timer: 1.8, type: 'COMMAND' };
+      this.emitNoise(squad.x, squad.y, 64, 320, 'Disparo al cerrojo', '#F59E0B');
+    } else {
+      soundEngine.playBreachPrep(mode);
+      const method =
+        mode === 'C4' ? 'carga C4' : mode === 'RAM' ? 'ariete' : 'patada';
+      this.pushRadio('KOBRA-2', `[3] Preparando ${method} en ${door.name}.`, 'warn');
+      squad.speechBubble = {
+        text: mode === 'C4' ? '¡C4 lista, atrás!' : mode === 'RAM' ? '¡Ariete listo!' : '¡Patada!',
+        timer: 1.8,
+        type: 'COMMAND',
+      };
+    }
+  }
+
+  /**
+   * Ejecuta la acción de brecha del binomio. La puerta permanece cerrada hasta
+   * que termina el tiempo de preparación; nunca se abre una puerta distinta.
+   */
+  protected updateSquadBreachAction(dt: number, squad: ActorEntity): boolean {
+    const action = this.squadBreachAction;
+    if (!action) return false;
+
+    const door = this.doors.find((d) => d.id === action.doorId);
+    if (!door) {
+      this.squadBreachAction = undefined;
+      this.squadDoorTargetId = undefined;
+      this.squadCommand = 'HOLD';
+      squad.investigateTarget = undefined;
+      return true;
+    }
+
+    if (door.isOpen || door.isDestroyed) {
+      this.squadBreachAction = undefined;
+      this.squadDoorTargetId = undefined;
+      this.moveSquadIntoRoom(squad, door);
+      return true;
+    }
+
+    const doorX = (door.x1 + door.x2) * 0.5;
+    const doorY = (door.y1 + door.y2) * 0.5;
+    squad.angle = Math.atan2(doorY - squad.y, doorX - squad.x);
+    squad.targetFacingAngle = squad.angle;
+    squad.gestureKind = 'BREACH';
+    squad.gestureTimer = 0.65;
+    action.progress += dt;
+
+    if (action.progress < action.maxProgress) return true;
+
+    if (action.mode === 'SHOOT_LOCK') {
+      door.isLocked = false;
+      this.pushRadio('KOBRA-2', `[3] Cerrojo de ${door.name} neutralizado. Preparando entrada.`, 'ok');
+      squad.speechBubble = { text: 'Cerrojo neutralizado. ¡Entrando!', timer: 1.8, type: 'COMMAND' };
+      this.squadBreachAction = {
+        doorId: door.id,
+        mode: 'KICK',
+        progress: 0,
+        maxProgress: 0.35,
+      };
+      return true;
+    }
+
+    if (action.mode === 'C4') {
+      this.c4Count = Math.max(0, this.c4Count - 1);
+    }
+    this.executeBreach(door, action.mode, 'KOBRA-2');
+    this.detonateGadgetAt(doorX, doorY, 'FLASHBANG');
+    this.squadBreachAction = undefined;
+    this.squadDoorTargetId = undefined;
+    squad.speechBubble = { text: 'Zugriff! Raum betreten!', timer: 2.6, type: 'COMMAND' };
+    this.pushRadio('KOBRA-2', `[3] ¡Brecha en ${door.name}! Entrando al compartimento.`, 'ok');
+    this.moveSquadIntoRoom(squad, door);
+    return true;
+  }
+
+  protected moveSquadIntoRoom(squad: ActorEntity, door: DoorEntity): boolean {
+    // Si el binomio viene del rellano, entra al lado interior (roomB); si ya
+    // está dentro, sale al lado exterior (roomA). Con habitación desconocida
+    // preferimos el lado interior, no el rellano.
+    const targetRoomId =
+      squad.roomName === door.roomA
+        ? door.roomB
+        : squad.roomName === door.roomB
+          ? door.roomA
+          : door.roomB;
+    const roomObj =
+      (this.rooms ?? []).find((r) => r.id === targetRoomId) ??
+      (this.rooms ?? []).find((r) => r.id === door.roomB);
+    if (!roomObj) {
+      this.squadCommand = 'HOLD';
+      squad.investigateTarget = undefined;
+      return false;
+    }
+    squad.investigateTarget = {
+      x: roomObj.x + roomObj.w * 0.5,
+      y: roomObj.y + roomObj.h * 0.5,
+    };
+    squad.targetFacingAngle = Math.atan2(
+      roomObj.y + roomObj.h * 0.5 - squad.y,
+      roomObj.x + roomObj.w * 0.5 - squad.x
+    );
+    return true;
+  }
+
+  /**
+   * Kobra-2 can open an unlocked door while conducting a security sweep. He must
+   * not do it while following or stacking: the stack is deliberate. Locked doors
+   * stay closed and are reported once, waiting for a breach order.
+   */
+  protected tryOpenSquadDoor(squad: ActorEntity, desiredAngle: number): boolean {
+    if (this.squadDoorCooldown > 0) return false;
+
+    const probeDistance = 28;
+    const probeX = squad.x + Math.cos(desiredAngle) * probeDistance;
+    const probeY = squad.y + Math.sin(desiredAngle) * probeDistance;
+    const door = this.findNearestClosedDoor(probeX, probeY, 46);
+    if (!door || door.isBreached) return false;
+
+    const doorMidX = (door.x1 + door.x2) * 0.5;
+    const doorMidY = (door.y1 + door.y2) * 0.5;
+    const doorAngle = Math.atan2(doorMidY - squad.y, doorMidX - squad.x);
+    if (Math.abs(this.normalizeAngle(doorAngle - desiredAngle)) > 1.05) return false;
+
+    if (door.isLocked) {
+      if (this.squadDoorWarnCooldown <= 0) {
+        this.squadDoorWarnCooldown = 8;
+        squad.speechBubble = { text: 'Tür verschlossen! Zugriff nötig!', timer: 2.0, type: 'COMMAND' };
+        this.pushRadio('KOBRA-2', `[!] ${door.name} cerrada con llave. Esperando orden de brecha.`, 'warn');
+      }
+      return false;
+    }
+
+    door.isOpen = true;
+    door.currentAngle = door.openAngle;
+    this.squadDoorCooldown = 1.4;
+    soundEngine.playDoorAction(false);
+    squad.speechBubble = { text: 'Tür auf, weiter sichern!', timer: 1.6, type: 'COMMAND' };
+    this.pushRadio('KOBRA-2', `[6] ${door.name} abierta; avanzando al objetivo.`, 'info');
+    return true;
+  }
+
   protected updateSquadmateAI(dt: number, player: ActorEntity) {
+    this.squadDoorCooldown = Math.max(0, this.squadDoorCooldown - dt);
+    this.squadDoorWarnCooldown = Math.max(0, this.squadDoorWarnCooldown - dt);
+
     // Tick down temporary tactical markers placed in EKO-PAD
     if (this.tacticalMarkers.length > 0) {
       for (let i = this.tacticalMarkers.length - 1; i >= 0; i--) {
@@ -6273,6 +7077,11 @@ public nightMode: boolean = false;
 
     const squad = this.getSquadmate();
     if (!squad || squad.state === 'DEAD') return;
+
+    // La brecha se resuelve aquí, después de que la puerta objetivo haya sido
+    // fijada por la orden. Mientras dura, Kobra-2 no vuelve a navegar ni elige
+    // otra puerta por proximidad.
+    if (this.updateSquadBreachAction(dt, squad)) return;
 
     // Health / Help Request logic
     if (squad.bodyHealth) {
@@ -6296,8 +7105,13 @@ public nightMode: boolean = false;
     // Determine navigation target based on active SquadCommand, targeted order, or EKO-PAD Waypoint/Marker
     let navTarget: { x: number; y: number } | null = null;
 
-    // Transit Interruption Check: Detect suspects or civilians in transit
-    if ((squad.investigateTarget || this.tacticalWaypoint) && (squad.state as string) !== 'DEAD') {
+    // Transit Interruption Check: Detect suspects or civilians in transit.
+    // Despejar una zona C4 tiene prioridad absoluta: no detenerse dentro del radio.
+    if (
+      this.squadCommand !== 'CLEAR_BLAST_AREA' &&
+      (squad.investigateTarget || this.tacticalWaypoint) &&
+      (squad.state as string) !== 'DEAD'
+    ) {
       const targetPos = squad.investigateTarget || this.tacticalWaypoint;
       if (targetPos) {
         for (const actor of this.actors) {
@@ -6334,47 +7148,34 @@ public nightMode: boolean = false;
           this.squadHoldAnchorAngle = squad.targetFacingAngle;
         }
         if (this.squadCommand === 'BREACH_AND_CLEAR') {
-          const doorNear = this.findNearestDoor(squad.x, squad.y, 110);
-          if (doorNear && !doorNear.isBreached && !doorNear.isOpen) {
-            this.executeBreach(doorNear, 'RAM');
-            const mx = (doorNear.x1 + doorNear.x2) * 0.5;
-            const my = (doorNear.y1 + doorNear.y2) * 0.5;
-            this.detonateGadgetAt(mx, my, 'FLASHBANG');
-            squad.speechBubble = { text: 'Zugriff! Raum betreten!', timer: 2.6, type: 'COMMAND' };
-            this.pushRadio('KOBRA-2', `[3] ¡Brecha en ${doorNear.name}! Entrando al compartimento.`, 'ok');
-
-            const targetRoomId = squad.roomName === doorNear.roomA ? doorNear.roomB : doorNear.roomA;
-            const roomObj = this.rooms.find((r) => r.id === targetRoomId) || this.rooms.find((r) => r.id === doorNear.roomB);
-            if (roomObj) {
-              squad.investigateTarget = {
-                x: roomObj.x + roomObj.w * 0.5,
-                y: roomObj.y + roomObj.h * 0.5,
-              };
-              squad.targetFacingAngle = Math.atan2(
-                roomObj.y + roomObj.h * 0.5 - squad.y,
-                roomObj.x + roomObj.w * 0.5 - squad.x
-              );
-              return;
-            }
-          } else {
-            // Only finalize if we are actually at the room center (not just at the door)
-            const isAtDoor = doorNear && Math.hypot(squad.x - (doorNear.x1 + doorNear.x2) * 0.5, squad.y - (doorNear.y1 + doorNear.y2) * 0.5) < 20;
-            if (!isAtDoor) {
-              squad.speechBubble = { text: 'Raum betreten, inspiziert und gesichert!', timer: 2.2, type: 'COMMAND' };
-              this.pushRadio('KOBRA-2', '[3] Espacio interior inspeccionado y asegurado con éxito. Sin amenazas.', 'ok');
-              this.squadCommand = 'HOLD';
-              squad.investigateTarget = undefined;
-              return;
-            }
+          const targetDoor = this.getSquadTargetDoor();
+          if (targetDoor && (targetDoor.isOpen || targetDoor.isDestroyed)) {
+            // La puerta ya fue abierta por el operador: entramos, pero no
+            // buscamos otra puerta ni ejecutamos una brecha distinta.
+            this.squadDoorTargetId = undefined;
+            this.pushRadio('KOBRA-2', `[3] ${targetDoor.name} ya está abierta. Entrando.`, 'info');
+            this.moveSquadIntoRoom(squad, targetDoor);
+            return;
           }
+          if (targetDoor && !targetDoor.isBreached) {
+            // Inicia el método elegido sin abrir la puerta todavía.
+            this.beginSquadBreach(targetDoor, squad);
+            return;
+          }
+          // Llegada al centro de la estancia tras la brecha, o orden sin puerta.
+          squad.speechBubble = { text: 'Raum betreten, inspiziert und gesichert!', timer: 2.2, type: 'COMMAND' };
+          this.pushRadio('KOBRA-2', '[3] Espacio interior inspeccionado y asegurado con éxito. Sin amenazas.', 'ok');
+          this.squadCommand = 'HOLD';
+          squad.investigateTarget = undefined;
+          return;
         } else if (this.squadCommand === 'PIE_DOOR') {
-          const doorNear = this.findNearestDoor(squad.x, squad.y, 90);
-          if (doorNear) {
-            doorNear.mirrored = true;
+          const targetDoor = this.getSquadTargetDoor();
+          if (targetDoor) {
+            targetDoor.mirrored = true;
             let spotted = 0;
             for (const actor of this.actors) {
               if (
-                (actor.roomName === doorNear.roomA || actor.roomName === doorNear.roomB) &&
+                (actor.roomName === targetDoor.roomA || actor.roomName === targetDoor.roomB) &&
                 actor.role !== 'PLAYER' &&
                 actor.role !== 'SQUAD'
               ) {
@@ -6383,9 +7184,10 @@ public nightMode: boolean = false;
               }
             }
             squad.speechBubble = { text: `Optik-Sonde: ${spotted} Kontakte!`, timer: 2.2, type: 'COMMAND' };
-            this.pushRadio('KOBRA-2', `[4] Sonda óptica en ${doorNear.name}: ${spotted} contactos detectados.`, 'ok');
+            this.pushRadio('KOBRA-2', `[4] Sonda óptica en ${targetDoor.name}: ${spotted} contactos detectados.`, 'ok');
           }
           this.squadCommand = 'HOLD';
+          this.squadDoorTargetId = undefined;
         } else if (this.squadCommand === 'DEPLOY_CS_GAS') {
           this.gadgets.push({
             x: squad.x,
@@ -6416,6 +7218,10 @@ public nightMode: boolean = false;
           }
           this.pushRadio('KOBRA-2', '[7] Fuego de supresión e intimidación táctica sobre el sector.', 'warn');
           this.squadCommand = 'HOLD';
+        } else if (this.squadCommand === 'CLEAR_BLAST_AREA') {
+          squad.speechBubble = { text: 'Sprengzone geräumt!', timer: 2.0, type: 'COMMAND' };
+          this.pushRadio('KOBRA-2', '[J] Zona de explosión despejada. A la espera de la detonación.', 'ok');
+          this.squadCommand = 'HOLD';
         }
         squad.investigateTarget = undefined;
       }
@@ -6432,17 +7238,25 @@ public nightMode: boolean = false;
       }
     } else if (this.squadCommand === 'RESTRAIN_AND_SECURE') {
       // Find nearest surrendered suspect, unrescued hostage, or unsecured evidence anywhere in room/apartment
-      const arrestCandidate = this.actors.find(
-        (a) =>
-          ((a.role === 'SUSPECT' && a.state === 'SURRENDERED') ||
-            ((a.role === 'HOSTAGE' || a.role === 'CIVILIAN') &&
-              a.state !== 'ARRESTED' &&
-              a.state !== 'DEAD')) &&
-          Math.hypot(a.x - squad.x, a.y - squad.y) < 1200
-      );
-      const evCandidate = this.evidenceList.find(
-        (e) => !e.secured && Math.hypot(e.x - squad.x, e.y - squad.y) < 1200
-      );
+      const arrestCandidate = this.actors
+        .filter(
+          (a) =>
+            ((a.role === 'SUSPECT' && a.state === 'SURRENDERED') ||
+              ((a.role === 'HOSTAGE' || a.role === 'CIVILIAN') &&
+                a.state !== 'ARRESTED' &&
+                a.state !== 'DEAD')) &&
+            Math.hypot(a.x - squad.x, a.y - squad.y) < 1200
+        )
+        .sort(
+          (a, b) =>
+            Math.hypot(a.x - squad.x, a.y - squad.y) - Math.hypot(b.x - squad.x, b.y - squad.y)
+        )[0];
+      const evCandidate = this.evidenceList
+        .filter((e) => !e.secured && Math.hypot(e.x - squad.x, e.y - squad.y) < 1200)
+        .sort(
+          (a, b) =>
+            Math.hypot(a.x - squad.x, a.y - squad.y) - Math.hypot(b.x - squad.x, b.y - squad.y)
+        )[0];
 
       if (arrestCandidate) {
         navTarget = { x: arrestCandidate.x, y: arrestCandidate.y };
@@ -6455,12 +7269,16 @@ public nightMode: boolean = false;
               200,
               true
             );
+            this.pushRadio('KOBRA-2', `[6] ${arrestCandidate.name} asegurado y esposado.`, 'ok');
+            squad.speechBubble = { text: 'Sospechoso asegurado.', timer: 1.8, type: 'COMMAND' };
           } else {
             this.recordRoeEvent(
               `Kobra-2 evacuó a salvo a ${arrestCandidate.name}`,
               150,
               true
             );
+            this.pushRadio('KOBRA-2', `[6] ${arrestCandidate.name} evacuado a zona segura.`, 'ok');
+            squad.speechBubble = { text: 'Civil a salvo.', timer: 1.8, type: 'COMMAND' };
           }
           this.checkMissionCompletion();
         }
@@ -6474,6 +7292,8 @@ public nightMode: boolean = false;
             50,
             true
           );
+          this.pushRadio('KOBRA-2', `[6] Evidencia asegurada: ${evCandidate.label}.`, 'ok');
+          squad.speechBubble = { text: 'Evidencia asegurada.', timer: 1.8, type: 'COMMAND' };
           this.checkMissionCompletion();
         }
       } else {
@@ -6513,16 +7333,38 @@ public nightMode: boolean = false;
       const dist = Math.hypot(navTarget.x - squad.x, navTarget.y - squad.y);
       if (dist > 6) {
         const ang = Math.atan2(navTarget.y - squad.y, navTarget.x - squad.x);
-        movementDirectionAngle = ang;
         const squadBh = squad.bodyHealth;
         const legMult = squadBh ? 0.35 + 0.65 * (squadBh.legs / 100) : 1.0;
         const dragMult = squadBh && squadBh.legs < 40 ? 0.45 : 1.0;
         const squadSpeed = (dist > 85 ? 175 : 145) * legMult * dragMult;
         const step = Math.min(dist, squadSpeed * dt);
+
+        if (this.squadCommand === 'RESTRAIN_AND_SECURE') {
+          this.tryOpenSquadDoor(squad, ang);
+        }
+
+        // Probe ahead instead of rubbing against the first wall/furniture. The
+        // steering side persists until the direct bearing is clear again.
+        const probeDistance = Math.max(24, step * 2.4);
+        const steeringAngle = chooseSquadSteeringAngle(
+          ang,
+          (candidate) =>
+            this.collidesAt(
+              squad.x + Math.cos(candidate) * probeDistance,
+              squad.y + Math.sin(candidate) * probeDistance,
+              squad.radius
+            ),
+          this.squadSteerSide
+        );
+        const steeringDelta = this.normalizeAngle(steeringAngle - ang);
+        if (Math.abs(steeringDelta) > 0.05) {
+          this.squadSteerSide = steeringDelta > 0 ? 1 : -1;
+        }
+        movementDirectionAngle = steeringAngle;
         this.moveActorWithCollision(
           squad,
-          squad.x + Math.cos(ang) * step,
-          squad.y + Math.sin(ang) * step
+          squad.x + Math.cos(steeringAngle) * step,
+          squad.y + Math.sin(steeringAngle) * step
         );
       }
     }
@@ -7721,9 +8563,10 @@ public nightMode: boolean = false;
       checkSeg(w.x1, w.y1, w.x2, w.y2, 'WALL', '#94A3B8');
     }
     for (const d of this.doors) {
-      if (!d.isOpen && !d.isDestroyed) {
-        checkSeg(d.x1, d.y1, d.x2, d.y2, 'DOOR', '#D97706');
-      }
+      // También la hoja abierta bloquea balas y línea de visión; el hueco de
+      // paso queda libre, pero no se puede disparar ni ver a través del panel.
+      const hoja = segmentoHojaPuerta(d);
+      if (hoja) checkSeg(hoja.x1, hoja.y1, hoja.x2, hoja.y2, 'DOOR', '#D97706');
     }
     for (const f of this.furniture) {
       if (f.blocksSight && !f.isDestroyed) {
@@ -7733,18 +8576,8 @@ public nightMode: boolean = false;
         checkSeg(f.x, f.y + f.h, f.x, f.y, 'FURNITURE', f.color);
       }
     }
-    for (const sc of this.wallSconces) {
-      if (sc.isDestroyed) continue;
-      // Simple circular hit box for lamp
-      const dist = this.distToSegment(sc.x, sc.y, x1, y1, x2, y2);
-      if (dist < 12) {
-        sc.isDestroyed = true;
-        // Mark as hit but continue if multiple things are hit (actually we want to stop here)
-        minT = 0; // Effectively hit
-        closest = { x: sc.x, y: sc.y, kind: 'FURNITURE', color: '#000', ax: sc.x, ay: sc.y, bx: sc.x, by: sc.y };
-      }
-    }
-
+    // Las lámparas no bloquean la visión ni se rompen por un raycast de IA.
+    // El impacto real de bala se resuelve en castProjectile con su propio hitbox.
     return closest;
   }
 
@@ -7776,6 +8609,15 @@ public nightMode: boolean = false;
 
   protected computeContextPrompt(player: ActorEntity | undefined): string | null {
     if (!player) return null;
+
+    const nearbyCharge = this.activeC4Charges.find(
+      (charge) => Math.hypot(charge.x - player.x, charge.y - player.y) <= 170
+    );
+    if (nearbyCharge) {
+      return this.isBlastAreaClear(nearbyCharge)
+        ? `C4 armada en ${nearbyCharge.targetName}: zona despejada · [J] reiterar despeje · detona desde la HUD`
+        : `C4 armada en ${nearbyCharge.targetName}: [J] despejar zona · aléjate >190 px antes de detonar`;
+    }
 
     for (const actor of this.actors) {
       if (actor.role === 'PLAYER' || actor.role === 'SQUAD') continue;
@@ -8142,7 +8984,15 @@ public nightMode: boolean = false;
       activeC4Charges: this.activeC4Charges.map((c) => ({
         ...c,
         remainingSeconds: Math.max(0, c.remainingSeconds),
+        safeToDetonate: this.isBlastAreaClear(c),
       })),
+      c4Planting: this.c4Planting
+        ? {
+            targetName: this.c4Planting.targetName,
+            progressPct: Math.min(100, (this.c4Planting.progress / this.c4Planting.maxProgress) * 100),
+            executionTime: `${Math.max(0, this.c4Planting.maxProgress - this.c4Planting.progress).toFixed(1)}s`,
+          }
+        : undefined,
       profileName: profileSpec.nameDe,
       health: player ? player.hp : 0,
       armor: this.armor,
@@ -8384,6 +9234,107 @@ public nightMode: boolean = false;
     this.emitHudSnapshot();
   }
 
+  /**
+   * Instantánea congelada para E2E. No la usa la lógica del juego: permite afirmar
+   * estado real (estado de partida, jugador, tick y mundo) sin leer píxeles del canvas.
+   */
+  public snapshotE2E(): EkoE2EState {
+    const player = this.getPlayer();
+    const squad = this.getSquadmate();
+    const walls: EkoE2EWall[] = this.walls.map((wall) =>
+      Object.freeze({
+        id: wall.id,
+        x1: wall.x1,
+        y1: wall.y1,
+        x2: wall.x2,
+        y2: wall.y2,
+        isWindow: wall.isWindow ?? false,
+      })
+    );
+    const doors: EkoE2EDoor[] = this.doors.map((door) =>
+      Object.freeze({
+        id: door.id,
+        name: door.name,
+        x1: door.x1,
+        y1: door.y1,
+        x2: door.x2,
+        y2: door.y2,
+        isOpen: door.isOpen,
+        isLocked: door.isLocked,
+        isBreached: door.isBreached,
+        isDestroyed: door.isDestroyed ?? false,
+        mirrored: door.mirrored,
+      })
+    );
+    const furniture: EkoE2EFurniture[] = this.furniture.map((item) =>
+      Object.freeze({
+        id: item.id,
+        label: item.label,
+        x: item.x,
+        y: item.y,
+        w: item.w,
+        h: item.h,
+        blocksMovement: item.blocksMovement,
+        blocksSight: item.blocksSight,
+        isDestroyed: item.isDestroyed ?? false,
+      })
+    );
+
+    return Object.freeze({
+      gameState: this.gameState,
+      player: player
+        ? Object.freeze({
+            x: player.x,
+            y: player.y,
+            angle: player.angle,
+            speechBubble: player.speechBubble
+              ? Object.freeze({
+                  text: player.speechBubble.text,
+                  timer: player.speechBubble.timer,
+                  type: player.speechBubble.type,
+                })
+              : null,
+          })
+        : null,
+      squad: squad
+        ? Object.freeze({
+            x: squad.x,
+            y: squad.y,
+            radius: squad.radius,
+            command: this.squadCommand,
+            target: squad.investigateTarget
+              ? Object.freeze({ x: squad.investigateTarget.x, y: squad.investigateTarget.y })
+              : null,
+            doorTargetId: this.squadDoorTargetId ?? null,
+            breachMode: this.squadBreachAction?.mode ?? null,
+            breachProgress: this.squadBreachAction?.progress ?? null,
+            breachMaxProgress: this.squadBreachAction?.maxProgress ?? null,
+            speechBubble: squad.speechBubble
+              ? Object.freeze({
+                  text: squad.speechBubble.text,
+                  timer: squad.speechBubble.timer,
+                  type: squad.speechBubble.type,
+                })
+              : null,
+          })
+        : null,
+      tick: this.ticks,
+      c4Count: this.c4Count,
+      squadGear: this.plan.squadGear,
+      radioFeed: Object.freeze(
+        this.radioFeed.map((item) =>
+          Object.freeze({ speaker: item.speaker, text: item.text })
+        )
+      ),
+      world: Object.freeze({
+        mission: this.missionMode,
+        walls: Object.freeze(walls),
+        doors: Object.freeze(doors),
+        furniture: Object.freeze(furniture),
+      }),
+    });
+  }
+
   /** Instantánea serializable del jugador, el mundo y las puertas. */
   public capturarSimulacion(): SnapshotSimulacion | null {
     const player = this.getPlayer();
@@ -8464,24 +9415,10 @@ public nightMode: boolean = false;
     return { type: 'POINT', name: 'Sector Táctico', x: worldX, y: worldY };
   }
 
-  public issueSquadCommandTargeted(
-    cmd: SquadCommand,
-    target?: { type: 'DOOR' | 'WINDOW' | 'POINT'; id?: string; name: string; x: number; y: number }
-  ) {
-    if (target) {
-      this.tacticalWaypoint = { x: Math.round(target.x), y: Math.round(target.y), label: target.name };
-      const squad = this.getSquadmate();
-      const player = this.getPlayer();
-      if (squad) {
-        squad.investigateTarget = { x: target.x, y: target.y };
-        if (player) {
-          squad.targetFacingAngle = Math.atan2(player.y - target.y, player.x - target.x);
-        } else {
-          squad.targetFacingAngle = squad.angle;
-        }
-      }
-    }
-    this.issueSquadCommand(cmd);
+  public issueSquadCommandTargeted(cmd: SquadCommand, target?: SquadCommandTarget) {
+    // No fijar el destino antes de emitir la orden: issueSquadCommand limpia
+    // los destinos anteriores y, si la orden es de brecha, calcula la pila.
+    this.issueSquadCommand(cmd, target);
   }
 
   /** Sizes the backing store for CSS dimensions at the given pixel ratio. */
@@ -8490,6 +9427,8 @@ public nightMode: boolean = false;
     this.renderScale = ratio;
     this.canvas.width = Math.max(1, Math.round(cssWidth * ratio));
     this.canvas.height = Math.max(1, Math.round(cssHeight * ratio));
+    this.l.width = cssWidth * 0.4;
+    this.l.height = cssHeight * 0.4;
   }
 
   /** Canvas size in CSS pixels: the space all drawing and hit testing uses. */

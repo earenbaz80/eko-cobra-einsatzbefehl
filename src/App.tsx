@@ -45,6 +45,7 @@ const OperatorCareerModal = lazy(() =>
   import('./components/OperatorCareerModal').then((m) => ({ default: m.OperatorCareerModal }))
 );
 import { soundEngine } from './game/soundEngine';
+import { instalarHookE2E } from './game/e2e';
 import { TacticalEngine } from './game/TacticalEngine';
 import { loadGame, hasSave, saveGame, clearSave } from './game/save';
 import { conflictosDeKeybinds } from './game/keybinds';
@@ -117,6 +118,16 @@ export default function App() {
   const [hud, setHud] = useState<HudSnapshot | null>(null);
   const [activeModal, setActiveModal] = useState<ActiveModalId>('NONE');
   const [muted, setMuted] = useState(false);
+  const [radioAudioEnabled, setRadioAudioEnabled] = useState<boolean>(() => {
+    try {
+      const saved = window.localStorage.getItem('eko_cobra_radio_audio');
+      if (saved !== null) return saved === 'true';
+    } catch {
+      // ignore storage errors
+    }
+    // El pitido TETRA empieza en silencio; los mensajes visuales siguen funcionando.
+    return false;
+  });
   const [hasSavedGame, setHasSavedGame] = useState<boolean>(() => hasSave());
   const [subtitlesEnabled, setSubtitlesEnabled] = useState<boolean>(() => {
     try {
@@ -196,7 +207,7 @@ export default function App() {
       if (topMsg && topMsg.id !== activeTickerMessage?.id) {
         setActiveTickerMessage(topMsg);
         setTickerVisible(true);
-        soundEngine.playRadioChatterEffect(topMsg.text);
+        // Radio y burbujas son siempre visuales: no hay locución sintética.
         const timer = setTimeout(() => {
           setTickerVisible(false);
         }, 5000);
@@ -375,6 +386,7 @@ export default function App() {
     engine.setHudOpacity(hudOpacity / 100);
     engine.setNvgKeyCode(nvgKeyCode);
     engineRef.current = engine;
+    const desinstalarHookE2E = instalarHookE2E(engine);
     setKeybinds({ ...engine.keybinds });
 
     let rafId = 0;
@@ -531,6 +543,7 @@ export default function App() {
 
     return () => {
       cancelAnimationFrame(rafId);
+      desinstalarHookE2E();
       engine.destroy();
       engineRef.current = null;
       window.removeEventListener('resize', fitToWindow);
@@ -762,10 +775,24 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler, true);
   }, [rebindingAction]);
 
+  useEffect(() => {
+    soundEngine.setRadioAudioEnabled(radioAudioEnabled);
+  }, [radioAudioEnabled]);
+
   const handleToggleMute = () => {
     const next = !muted;
     setMuted(next);
     soundEngine.setMuted(next);
+  };
+
+  const handleToggleRadioAudio = () => {
+    const next = !radioAudioEnabled;
+    setRadioAudioEnabled(next);
+    try {
+      window.localStorage.setItem('eko_cobra_radio_audio', String(next));
+    } catch {
+      // ignore storage errors
+    }
   };
 
   const handleToggleSubtitles = () => {
@@ -1041,6 +1068,9 @@ export default function App() {
               <button onClick={handleToggleMute} className="w-full flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-semibold text-[#E2E8F0] bg-[#0F172A] border border-[#334155] hover:bg-[#1E293B] transition-colors cursor-pointer">
                 {muted ? <VolumeX className="w-3.5 h-3.5 text-red-400" /> : <Volume2 className="w-3.5 h-3.5 text-green-400" />} Audio: {muted ? 'Silenciado' : 'Activo'}
               </button>
+              <button onClick={handleToggleRadioAudio} title="Pitido y textura TETRA; no afecta al ticker, subtítulos ni burbujas" className="w-full flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-semibold text-[#E2E8F0] bg-[#0F172A] border border-[#334155] hover:bg-[#1E293B] transition-colors cursor-pointer">
+                <Radio className={`w-3.5 h-3.5 ${radioAudioEnabled ? 'text-[#38BDF8]' : 'text-[#94A3B8]'}`} /> Radio: {radioAudioEnabled ? 'Pitido TETRA' : 'Silenciada'}
+              </button>
               <button onClick={handleToggleSubtitles} className="w-full flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-semibold text-[#E2E8F0] bg-[#0F172A] border border-[#334155] hover:bg-[#1E293B] transition-colors cursor-pointer">
                 Subtítulos: {subtitlesEnabled ? 'Activos' : 'Desactivados'}
               </button>
@@ -1133,6 +1163,7 @@ export default function App() {
                 ['biometric', 'ID biométrico'],
                 ['interrogate', 'Interrogatorio'],
                 ['reload', 'Recargar'],
+                ['clearBlastArea', 'Despejar zona C4'],
               ].map(([action, label]) => {
                 const current = keybinds[action];
                 const conflict = Object.entries(keybinds).some(
@@ -1311,34 +1342,25 @@ export default function App() {
         </div>
       )}
 
-      {/* Full-Screen C4 Detonation Danger Alert Overlay (Final 3s Countdown) */}
+      {/* Full-Screen C4 Armed Warning Overlay: no countdown until the area is clear */}
       {gameState === 'PLAYING' && (() => {
-        const active3sC4 = hud?.activeC4Charges?.filter(
-          (c) => c.remainingSeconds <= 3.0 && c.remainingSeconds > 0
-        );
-        if (!active3sC4 || active3sC4.length === 0) return null;
-        const minRem = Math.min(...active3sC4.map((c) => c.remainingSeconds));
-        const urgencyRatio = Math.min(1.0, Math.max(0, (3.0 - minRem) / 3.0));
+        const unsafeC4 = hud?.activeC4Charges?.filter((c) => !c.safeToDetonate);
+        if (!unsafeC4 || unsafeC4.length === 0) return null;
 
         return (
           <div className="pointer-events-none fixed inset-0 z-40 flex flex-col items-center justify-between p-6 select-none overflow-hidden">
             {/* Pulsing Red Perimeter Vignette */}
-            <div
-              className="absolute inset-0 bg-gradient-to-r from-red-600/50 via-transparent to-red-600/50 border-[10px] border-red-600 animate-pulse shadow-[inset_0_0_100px_rgba(220,38,38,0.9)]"
-              style={{
-                opacity: 0.6 + urgencyRatio * 0.4,
-              }}
-            />
+            <div className="absolute inset-0 bg-gradient-to-r from-red-600/45 via-transparent to-red-600/45 border-[10px] border-red-600 animate-pulse shadow-[inset_0_0_100px_rgba(220,38,38,0.9)] opacity-75" />
 
             {/* Top Emergency Red Banner */}
             <div className="relative z-50 mt-10 bg-[#080C11]/95 border-2 border-red-500 shadow-[0_0_35px_rgba(239,68,68,0.9)] px-6 py-2.5 flex items-center gap-4 text-white font-mono-tabular animate-bounce">
               <AlertTriangle className="w-7 h-7 text-red-500 shrink-0 animate-pulse" />
               <div className="flex flex-col text-center">
                 <span className="text-[10px] font-black text-red-400 tracking-widest uppercase">
-                  ⚠ ALERTA ROJA · PELIGRO DETONACIÓN C4 INMINENTE
+                  ⚠ ALERTA ROJA · C4 ARMADA · ZONA NO DESPEJADA
                 </span>
                 <span className="text-lg md:text-2xl font-black text-white tracking-wider">
-                  {active3sC4[0].targetName.toUpperCase()} · EXPLO EN {minRem.toFixed(1)}s
+                  {unsafeC4[0].targetName.toUpperCase()} · DETONACIÓN BLOQUEADA
                 </span>
               </div>
               <Flame className="w-7 h-7 text-amber-500 shrink-0 animate-pulse" />
@@ -1346,7 +1368,7 @@ export default function App() {
 
             {/* Bottom Caution Strip */}
             <div className="relative z-50 mb-14 px-4 py-1.5 bg-red-950/90 border border-red-500/80 text-red-200 text-xs font-mono-tabular font-bold tracking-widest text-center shadow-xl">
-              [!] MANTENER DISTANCIA MÍNIMA DE SEGURIDAD &gt;12m DE LA ENTRADA
+              [!] PULSA [J] PARA DESPEJAR · ALÉJATE &gt;190 px DE LA CARGA
             </div>
           </div>
         );
@@ -1457,7 +1479,20 @@ export default function App() {
 
           {/* ==================== SINGLE COMPACT CONTEXTUAL PROMPT (TRANSLUCENT) ==================== */}
           <div className="mb-1.5 flex flex-col items-center pointer-events-none px-2">
-            {hud.breachAction ? (
+            {hud.c4Planting ? (
+              <div className="px-4 py-1.5 bg-[#080C11]/80 backdrop-blur-sm border border-[#EF4444]/80 shadow-[0_0_20px_rgba(239,68,68,0.35)] flex items-center gap-3 font-mono-tabular text-[11px] text-white">
+                <span className="font-bold text-[#FCA5A5]">
+                  ⚙ PLANTANDO C4 · {hud.c4Planting.targetName.toUpperCase()}
+                </span>
+                <div className="w-36 bg-[#1E293B]/80 h-1.5 overflow-hidden border border-[#EF4444]/50">
+                  <div
+                    className="bg-[#EF4444] h-full transition-all duration-75"
+                    style={{ width: `${hud.c4Planting.progressPct}%` }}
+                  />
+                </div>
+                <span className="text-[10px] text-[#CBD5E1]">{hud.c4Planting.executionTime} · MANTÉN POSICIÓN</span>
+              </div>
+            ) : hud.breachAction ? (
               <div className="px-4 py-1.5 bg-[#080C11]/55 backdrop-blur-sm border border-[#D97706]/80 shadow-lg flex items-center gap-3 font-mono-tabular text-[11px]">
                 <span className="font-bold text-[#FDE68A]">
                   💥 {hud.breachAction.name.toUpperCase()}
@@ -1481,7 +1516,7 @@ export default function App() {
             ) : null}
           </div>
 
-          {/* ==================== ACTIVE PLACED C4 CHARGES COUNTDOWN BANNER (DOCKED LOWER RIGHT) ==================== */}
+          {/* ==================== ACTIVE PLACED C4 CHARGES: CLEAR AREA, THEN DETONATE ==================== */}
           {hud.activeC4Charges && hud.activeC4Charges.length > 0 && (
             <div className="pointer-events-auto fixed bottom-24 right-4 z-40 flex flex-col gap-2 max-w-xs select-none animate-fadeIn">
               {hud.activeC4Charges.map((charge) => (
@@ -1489,37 +1524,51 @@ export default function App() {
                   <div className="flex items-center justify-between border-b border-[#EF4444]/60 pb-1.5">
                     <div className="flex items-center gap-1.5 text-xs font-black text-[#FCA5A5]">
                       <span>💥</span>
-                      <span>C4 EN PLACA · {charge.targetName}</span>
+                      <span>C4 ARMADA · {charge.targetName}</span>
                     </div>
-                    <div className="text-[9px] text-[#F59E0B] font-bold border border-[#F59E0B]/50 bg-[#F59E0B]/10 px-1.5 py-0.5 animate-pulse">
-                      ¡ALEJATE!
+                    <div
+                      className={`text-[9px] font-bold border px-1.5 py-0.5 ${
+                        charge.safeToDetonate
+                          ? 'text-[#34D399] border-[#34D399]/50 bg-[#34D399]/10'
+                          : 'text-[#F59E0B] border-[#F59E0B]/50 bg-[#F59E0B]/10 animate-pulse'
+                      }`}
+                    >
+                      {charge.safeToDetonate ? 'ZONA DESPEJADA' : '¡DESPEJAR!'}
                     </div>
                   </div>
                   <div className="text-[10px] text-[#CBD5E1] leading-tight">
-                    Carga armada. Detonación automática inminente.
+                    {charge.safeToDetonate
+                      ? 'Binomio fuera del radio. Detonación remota autorizada.'
+                      : '1) Pulsa [J] para ordenar a Kobra-2 despejar. 2) Aléjate de la carga. Después podrás detonar.'}
                   </div>
-                  <div className="bg-[#0F172A] border border-[#EF4444]/70 p-2 text-center">
+                  <div className={`border p-2 text-center ${charge.safeToDetonate ? 'border-[#34D399]/70 bg-[#052E1B]' : 'border-[#EF4444]/70 bg-[#0F172A]'}`}>
                     <div className="text-[8.5px] text-[#94A3B8] font-bold tracking-wider mb-0.5">
-                      DETONACIÓN EN:
+                      ESTADO DE DETONACIÓN:
                     </div>
-                    <div className="text-xl font-black text-[#EF4444] tracking-widest font-mono-tabular animate-pulse">
-                      {charge.remainingSeconds.toFixed(1)}s
+                    <div className={`text-sm font-black tracking-widest ${charge.safeToDetonate ? 'text-[#34D399]' : 'text-[#EF4444]'}`}>
+                      {charge.safeToDetonate ? 'LISTO PARA DETONAR' : 'ESPERANDO DESPEJE'}
                     </div>
-                    <div className="w-full h-1.5 bg-[#1E293B] mt-1 overflow-hidden border border-[#EF4444]/50">
-                      <div
-                        className="h-full bg-[#EF4444] transition-all duration-75"
-                        style={{
-                          width: `${(charge.remainingSeconds / charge.maxSeconds) * 100}%`,
-                        }}
-                      />
-                    </div>
+                    <div className="text-[9px] text-[#94A3B8] mt-1">Radio seguro: &gt;190 px</div>
                   </div>
-                  <button
-                    onClick={() => engineRef.current?.detonateActiveC4()}
-                    className="w-full py-1.5 bg-[#EF4444] hover:bg-[#DC2626] text-white font-bold text-xs tracking-wider border border-red-400 transition-colors shadow-lg active:scale-95 flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <span>⚡ DETONAR C4 REMOTAMENTE</span>
-                  </button>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      onClick={() => engineRef.current?.orderBlastAreaClear()}
+                      className="py-1.5 bg-[#F59E0B] hover:bg-[#D97706] text-black font-bold text-[10px] tracking-wider border border-[#FCD34D] transition-colors active:scale-95 cursor-pointer"
+                    >
+                      [J] DESPEJAR ZONA
+                    </button>
+                    <button
+                      onClick={() => engineRef.current?.detonateActiveC4()}
+                      disabled={!charge.safeToDetonate}
+                      className={`py-1.5 font-bold text-[10px] tracking-wider border transition-colors flex items-center justify-center gap-1 ${
+                        charge.safeToDetonate
+                          ? 'bg-[#EF4444] hover:bg-[#DC2626] text-white border-red-400 active:scale-95 cursor-pointer'
+                          : 'bg-[#1E293B] text-[#64748B] border-[#334155] cursor-not-allowed'
+                      }`}
+                    >
+                      ⚡ DETONAR
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1625,6 +1674,7 @@ export default function App() {
                       ['RESTRAIN_AND_SECURE', '[6] Esposar y Asegurar'],
                       ['SUPPRESS_TARGET', '[7] Fuego de Supresión'],
                       ['REGROUP_HEAL', '[8] Reagrupar y Curar'],
+                      ['CLEAR_BLAST_AREA', '[J] Despejar zona C4'],
                     ] as Array<[SquadCommand, string]>
                   ).map(([cmd, label]) => (
                     <button
@@ -1780,7 +1830,9 @@ export default function App() {
                                 ? '[6] Esposa'
                                 : hud.squadCommand === 'SUPPRESS_TARGET'
                                   ? '[7] Suprime'
-                                  : '[8] Reagrupa'}
+                                  : hud.squadCommand === 'CLEAR_BLAST_AREA'
+                                    ? '[J] Despeja C4'
+                                    : '[8] Reagrupa'}
                   </span>
                 </div>
               </div>
@@ -2321,6 +2373,19 @@ export default function App() {
                     </span>
                     <span className={muted ? 'text-[#EF4444]' : 'text-[#10B981]'}>
                       {muted ? 'SILENCIADO' : 'ACTIVO'}
+                    </span>
+                  </button>
+                  <button
+                    onClick={handleToggleRadioAudio}
+                    title="Solo pitido TETRA; no afecta al ticker ni a las burbujas de Kobra-2"
+                    className="w-full text-left px-2.5 py-1.5 text-[#E2E8F0] hover:bg-[#1E293B]/60 transition-colors cursor-pointer flex items-center justify-between"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Radio className={`w-3.5 h-3.5 ${radioAudioEnabled ? 'text-[#38BDF8]' : 'text-[#64748B]'}`} />
+                      Radio (pitido TETRA)
+                    </span>
+                    <span className={radioAudioEnabled ? 'text-[#10B981]' : 'text-[#EF4444]'}>
+                      {radioAudioEnabled ? 'ACTIVA' : 'SILENCIADA'}
                     </span>
                   </button>
                   <div className="border-t border-[#334155]/50 my-0.5" />

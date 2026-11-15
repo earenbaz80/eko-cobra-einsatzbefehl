@@ -17,6 +17,23 @@ export async function arrancarMision(page, url, nombre, { asentarMs = 1000 } = {
 
   // El HUD en partida solo existe con la simulación arrancada.
   await page.getByText('K1 OPERATIVO').first().waitFor({ timeout: 20000 });
+  // Además del HUD, el E2E espera el estado real del motor: así una misión que
+  // pinta el HUD pero no ha creado al jugador no se da por arrancada.
+  await page.waitForFunction(
+    () => {
+      const estado = window.__eko?.snapshot();
+      return (
+        estado?.gameState === 'PLAYING' &&
+        estado.player !== null &&
+        Array.isArray(estado.world.walls) &&
+        Array.isArray(estado.world.doors) &&
+        Array.isArray(estado.world.furniture) &&
+        Object.isFrozen(estado.world)
+      );
+    },
+    undefined,
+    { timeout: 20000 }
+  );
   if (asentarMs > 0) await page.waitForTimeout(asentarMs); // deja cargar sprites y pintar frames
 }
 

@@ -12,8 +12,40 @@ import { createStationLayout } from './stationMap';
 
 /** Datos mínimos de colisión: un muro, una puerta o un mueble del mapa. */
 export type Pared = Pick<WallSegment, 'x1' | 'y1' | 'x2' | 'y2'>;
-export type Puerta = Pick<DoorEntity, 'x1' | 'y1' | 'x2' | 'y2' | 'isOpen' | 'isDestroyed'>;
+export type Puerta = Pick<DoorEntity, 'x1' | 'y1' | 'x2' | 'y2' | 'isOpen' | 'isDestroyed'> &
+  Partial<Pick<DoorEntity, 'hingeX' | 'hingeY' | 'currentAngle'>>;
 export type Mueble = Pick<FurnitureItem, 'x' | 'y' | 'w' | 'h' | 'blocksMovement' | 'isDestroyed'>;
+
+/** Segmento que ocupa la hoja de una puerta en su ángulo actual. */
+export type HojaPuerta = { x1: number; y1: number; x2: number; y2: number };
+
+/**
+ * La puerta no es un hueco: su hoja sigue ocupando espacio al abrirse.
+ * Cuando el mapa aporta bisagra y ángulo, se usa la hoja girada; si no,
+ * se conserva la semántica antigua para los escenarios mínimos de simulación.
+ */
+export function segmentoHojaPuerta(puerta: Puerta): HojaPuerta | null {
+  if (puerta.isDestroyed) return null;
+
+  const tieneBisagra =
+    Number.isFinite(puerta.hingeX) &&
+    Number.isFinite(puerta.hingeY) &&
+    Number.isFinite(puerta.currentAngle);
+  if (tieneBisagra) {
+    const longitud = Math.hypot(puerta.x2 - puerta.x1, puerta.y2 - puerta.y1);
+    return {
+      x1: puerta.hingeX as number,
+      y1: puerta.hingeY as number,
+      x2: (puerta.hingeX as number) + Math.cos(puerta.currentAngle as number) * longitud,
+      y2: (puerta.hingeY as number) + Math.sin(puerta.currentAngle as number) * longitud,
+    };
+  }
+
+  // Sin datos de giro, una puerta abierta deja libre el hueco; una cerrada
+  // sigue bloqueando el segmento original.
+  if (puerta.isOpen) return null;
+  return { x1: puerta.x1, y1: puerta.y1, x2: puerta.x2, y2: puerta.y2 };
+}
 
 /** Margen extra con el que las paredes frenan al actor, igual que en el motor. */
 export const MARGEN_PARED = 3;
@@ -33,8 +65,9 @@ export function colisiona(x: number, y: number, radio: number, paredes: Pared[],
     if (distanciaASegmento(x, y, pared.x1, pared.y1, pared.x2, pared.y2) < radio + MARGEN_PARED) return true;
   }
   for (const puerta of puertas) {
-    if (!puerta.isOpen && !puerta.isDestroyed) {
-      if (distanciaASegmento(x, y, puerta.x1, puerta.y1, puerta.x2, puerta.y2) < radio + MARGEN_PARED) return true;
+    const hoja = segmentoHojaPuerta(puerta);
+    if (hoja && distanciaASegmento(x, y, hoja.x1, hoja.y1, hoja.x2, hoja.y2) < radio + MARGEN_PARED) {
+      return true;
     }
   }
   for (const mueble of muebles) {
@@ -57,8 +90,19 @@ export function deslizarConColision(
   siguienteY: number,
   colisionaEn: (x: number, y: number) => boolean
 ): void {
-  if (!colisionaEn(siguienteX, actor.y)) actor.x = siguienteX;
-  if (!colisionaEn(actor.x, siguienteY)) actor.y = siguienteY;
+  const dx = siguienteX - actor.x;
+  const dy = siguienteY - actor.y;
+  const distancia = Math.hypot(dx, dy);
+  // Los actores rápidos no deben saltar una puerta o un mueble fino en un
+  // solo frame: se parte el desplazamiento en tramos cortos.
+  const pasos = Math.max(1, Math.ceil(distancia / 8));
+  const pasoX = dx / pasos;
+  const pasoY = dy / pasos;
+
+  for (let i = 0; i < pasos; i++) {
+    if (!colisionaEn(actor.x + pasoX, actor.y)) actor.x += pasoX;
+    if (!colisionaEn(actor.x, actor.y + pasoY)) actor.y += pasoY;
+  }
 }
 
 /** Generador pseudoaleatorio con semilla (mulberry32): misma semilla, misma partida. */

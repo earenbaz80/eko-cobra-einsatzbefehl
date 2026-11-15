@@ -5,6 +5,7 @@ import {
   crearPartida,
   crearPartidaDesdeMundo,
   crearAzar,
+  deslizarConColision,
   distanciaASegmento,
   PASO_MAXIMO,
   type Partida,
@@ -36,10 +37,37 @@ describe('colisiona', () => {
     expect(colisiona(50, 111.9, 9, paredes, [], [])).toBe(true);
   });
 
-  it('la puerta abierta o destruida deja pasar', () => {
+  it('la puerta sin datos de giro deja pasar su hueco al abrirse o destruirse', () => {
     expect(colisiona(200, 50, 9, [], puertas, [])).toBe(true);
     expect(colisiona(200, 50, 9, [], [{ ...puertas[0], isOpen: true }], [])).toBe(false);
     expect(colisiona(200, 50, 9, [], [{ ...puertas[0], isDestroyed: true }], [])).toBe(false);
+  });
+
+  it('la hoja abierta sigue siendo un obstáculo aunque el hueco quede libre', () => {
+    const puertaAbierta = {
+      ...puertas[0],
+      x1: 100,
+      y1: 100,
+      x2: 180,
+      y2: 100,
+      hingeX: 100,
+      hingeY: 100,
+      currentAngle: Math.PI / 2,
+      isOpen: true,
+    };
+
+    // El hueco original queda libre...
+    expect(colisiona(140, 100, 9, [], [puertaAbierta], [])).toBe(false);
+    // ...pero la hoja girada hacia el interior no se puede atravesar.
+    expect(colisiona(100, 140, 9, [], [puertaAbierta], [])).toBe(true);
+    expect(colisiona(180, 100, 9, [], [{ ...puertaAbierta, isDestroyed: true }], [])).toBe(false);
+  });
+
+  it('un paso grande no atraviesa una pared fina', () => {
+    const actor = { x: 0, y: 0 };
+    const pared = [{ x1: 40, y1: -100, x2: 40, y2: 100 }];
+    deslizarConColision(actor, 100, 0, (x, y) => colisiona(x, y, 9, pared, [], []));
+    expect(actor.x).toBeLessThan(28);
   });
 
   it('el mueble bloquea solo si blocksMovement y no está destruido', () => {

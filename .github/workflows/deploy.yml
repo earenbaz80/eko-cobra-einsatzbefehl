@@ -45,12 +45,28 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      # La URL queda disponible para el smoke, que corre en un job aparte para no
+      # arrastrar la imagen de Playwright al camino crítico de la publicación.
+      page_url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
 
-      # Lo publicado se mide con el mismo script que el CI, pero contra la URL real:
-      # un base o un Content-Type mal servido por Pages no aparece en el build local.
+  smoke:
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    # La imagen oficial ya trae Chromium y todas las dependencias del sistema: no se
+    # ejecuta apt/dpkg ni se descarga el navegador en cada run. El tag debe coincidir
+    # con la versión de playwright del package-lock.
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.1-noble
+      # Chromium usa /dev/shm; con el tamaño por defecto puede quedarse sin memoria.
+      options: --ipc=host
+    steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -60,32 +76,11 @@ jobs:
 
       - run: npm ci
 
-      # El navegador de Playwright (~150 MB) es el mismo entre publicaciones: se cachea
-      # por versión del lockfile, así que solo se descarga cuando cambia Playwright.
-      - name: Cachear el navegador de Playwright
-        id: cache-playwright
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-          restore-keys: playwright-${{ runner.os }}-
-
-      - name: Instalar Chromium para la prueba de humo
+      - name: Comprobar la imagen de Playwright
         run: |
-          echo "caché de Playwright: ${{ steps.cache-playwright.outputs.cache-hit || 'no' }}"
-          # El navegador se verifica/descarga igual que antes (no cambia la comprobación).
-          npx playwright install chromium
-          # El dry-run comprueba las deps del sistema sin tocar dpkg: si ya están,
-          # install-deps no se ejecuta; si faltan, apt las instala una vez.
-          inicio=$(date +%s)
-          if npx playwright install-deps chromium --dry-run; then
-            echo "dependencias del sistema ya presentes: se omite apt"
-          else
-            echo "faltan dependencias del sistema: se ejecuta apt"
-            npx playwright install-deps chromium
-          fi
-          fin=$(date +%s)
-          echo "tiempo dependencias del sistema: $((fin - inicio)) s"
+          node --version
+          npx playwright --version
+          test -d "$PLAYWRIGHT_BROWSERS_PATH"
 
       # El CDN de Pages puede seguir sirviendo el HTML anterior (se cachea 10 min).
       # Se espera a que aparezca la marca del commit publicado antes de medir nada;
@@ -94,7 +89,7 @@ jobs:
         id: espera
         env:
           SHA: ${{ github.sha }}
-          URL_PUBLICADA: ${{ steps.deployment.outputs.page_url }}
+          URL_PUBLICADA: ${{ needs.deploy.outputs.page_url }}
         run: |
           for intento in $(seq 1 30); do
             if curl -fsSL -H 'cache-control: no-cache' "$URL_PUBLICADA" | grep -q "name=\"eko-build\" content=\"$SHA\""; then
@@ -112,9 +107,11 @@ jobs:
         id: humo
         env:
           SMOKE_EXPECTED_SHA: ${{ github.sha }}
+          # Publicar exige la cobertura completa, no el subconjunto rápido de PR.
+          SMOKE_PROFILE: full
         run: |
           for intento in 1 2 3; do
-            if node scripts/smoke.mjs "${{ steps.deployment.outputs.page_url }}" > humo.log 2>&1; then
+            if node scripts/smoke.mjs "${{ needs.deploy.outputs.page_url }}" > humo.log 2>&1; then
               cat humo.log
               exit 0
             fi
@@ -144,7 +141,7 @@ jobs:
       - name: Resumen del despliegue con problemas
         if: failure()
         env:
-          URL_PUBLICADA: ${{ steps.deployment.outputs.page_url }}
+          URL_PUBLICADA: ${{ needs.deploy.outputs.page_url }}
           SHA: ${{ github.sha }}
           ESPERA: ${{ steps.espera.outcome }}
           HUMO: ${{ steps.humo.outcome }}
@@ -154,9 +151,9 @@ jobs:
             detalle='Pages no sirvió en 5 minutos la marca de build del commit, así que puede estar sirviendo el HTML anterior.'
           elif [ "$HUMO" = "failure" ]; then
             paso='Prueba de humo contra la URL publicada'
-            detalle='La URL publicada no pasa la prueba de humo: canvas, misiones, móvil, metadatos, pesos, Content-Type o caché.'
+            detalle='La URL publicada no pasa el smoke completo: canvas, misiones, móvil, persistencia, metadatos, pesos, Content-Type o caché.'
           else
-            paso='Preparación del humo (npm ci o Chromium)'
+            paso='Preparación del humo (npm ci o imagen de Playwright)'
             detalle='El sitio se publicó, pero la preparación del humo no llegó a medir la URL publicada.'
           fi
 

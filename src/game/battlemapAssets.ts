@@ -893,12 +893,7 @@ export const URBAN_STREET_LAMPS: UrbanStreetLamp[] = [
  * Comisaría de policía, Panadería tradicional, Supermercado Billa, hotel, quiosco Trafik,
  * fachadas históricas Altbau y azoteas con unidades HVAC e iluminación nocturna).
  */
-export function renderExteriorStreetsAndStairwell(
-  ctx: CanvasRenderingContext2D,
-  isTrainingMode: boolean,
-  elapsedSeconds = 0) {
-  if (isTrainingMode) return;
-
+export function renderExteriorStreetsAndStairwell(ctx: CanvasRenderingContext2D) {
   ctx.save();
 
   // -------------------------------------------------------------
@@ -2277,18 +2272,13 @@ export function renderExteriorStreetsAndStairwell(
   // Industrial roof chillers & antenna with pulsing red light
   drawRoofHVAC(365, -425, 65, 42);
   drawRoofHVAC(580, -425, 65, 42);
-  // Antenna mast with red obstacle strobe
-  const redStrobe = Math.sin(elapsedSeconds * 4) > 0;
+  // Antenna mast; the obstacle strobe is drawn in the animated layer.
   ctx.strokeStyle = '#64748B';
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(490, -430);
   ctx.lineTo(490, -400);
   ctx.stroke();
-  ctx.fillStyle = redStrobe ? '#EF4444' : '#7F1D1D';
-  ctx.beginPath();
-  ctx.arc(490, -430, redStrobe ? 4 : 2.5, 0, Math.PI * 2);
-  ctx.fill();
 
   // Modernist upper windows
   drawWindowRow(355, -320, 6, 56, 30, 20, 'rgba(56, 189, 248, 0.42)');
@@ -2308,17 +2298,7 @@ export function renderExteriorStreetsAndStairwell(
   ctx.font = '700 9px "JetBrains Mono", monospace';
   ctx.fillText('APOTHEKE AM LENDPLATZ · 24H NOTDIENST', 430, -142);
 
-  // Pulsing Neon Green Pharmacy Cross (+)
-  const crossGlow = 0.75 + 0.25 * Math.sin(elapsedSeconds * 3.5);
-  ctx.save();
-  ctx.fillStyle = `rgba(16, 185, 129, ${crossGlow})`;
-  ctx.shadowColor = '#10B981';
-  ctx.shadowBlur = 12;
-  const crossX = 368;
-  const crossY = -145;
-  ctx.fillRect(crossX - 3.5, crossY - 11, 7, 22);
-  ctx.fillRect(crossX - 11, crossY - 3.5, 22, 7);
-  ctx.restore();
+  // Pulsing Neon Green Pharmacy Cross (+) is drawn in the animated layer.
 
   // Building N4: "Bäckerei Sorger / Stadthaus" (x: 700 to 1100, y: -455 to -125)
   // Habsburg ochre stucco facade & terracotta tile roof
@@ -2447,10 +2427,7 @@ export function renderExteriorStreetsAndStairwell(
   ctx.fillRect(-20, 7, 40, 4);
   ctx.fillStyle = '#EF4444'; // Red chevron accent
   ctx.fillRect(14, -8, 5, 16);
-  // Blue LED lightbar on roof
-  const blueFlash = Math.sin(elapsedSeconds * 8) > 0;
-  ctx.fillStyle = blueFlash ? '#38BDF8' : '#1D4ED8';
-  ctx.fillRect(-6, -4, 12, 8);
+  // La barra LED azul se dibuja en la capa animada.
   ctx.restore();
 
   // Building S3: "Tabak-Trafik & Wohnhaus" (x: 450 to 830, y: 885 to 1250)
@@ -2472,11 +2449,8 @@ export function renderExteriorStreetsAndStairwell(
   ctx.font = 'bold 10px "JetBrains Mono", monospace';
   ctx.fillText('TABAK · TRAFIK · ZEITSCHRIFTEN · LOTTO', 505, 918);
 
-  // Upper residential windows with soft TV flicker
-  const tvColor =
-    Math.sin(elapsedSeconds * 5) > 0 ? 'rgba(147, 197, 253, 0.45)' : 'rgba(196, 181, 253, 0.45)';
+  // Upper residential windows: the TV-flicker row is drawn in the animated layer.
   drawWindowRow(480, 960, 5, 65, 28, 20, 'rgba(254, 240, 138, 0.52)');
-  drawWindowRow(480, 1030, 5, 65, 28, 20, tvColor);
 
   // Building S4: "Pension Schlossbergblick" (x: 830 to 1190, y: 885 to 1250)
   ctx.fillStyle = '#2B2625';
@@ -2634,6 +2608,50 @@ export function renderExteriorStreetsAndStairwell(
     }
   }
 
+  ctx.restore();
+}
+
+/** Efectos de las fachadas que sí cambian con el tiempo; no entran en la caché. */
+export function renderExteriorAnimatedDetails(ctx: CanvasRenderingContext2D, elapsedSeconds: number) {
+  ctx.save();
+  // Baliza roja de la antena.
+  const redStrobe = Math.sin(elapsedSeconds * 4) > 0;
+  ctx.fillStyle = redStrobe ? '#EF4444' : '#7F1D1D';
+  ctx.beginPath();
+  ctx.arc(490, -430, redStrobe ? 4 : 2.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Cruz verde de la farmacia.
+  const crossGlow = 0.75 + 0.25 * Math.sin(elapsedSeconds * 3.5);
+  ctx.save();
+  ctx.fillStyle = `rgba(16, 185, 129, ${crossGlow})`;
+  ctx.shadowColor = '#10B981';
+  ctx.shadowBlur = 12;
+  ctx.fillRect(364.5, -156, 7, 22);
+  ctx.fillRect(357, -148.5, 22, 7);
+  ctx.restore();
+
+  // Barra LED del coche de policía.
+  const blueFlash = Math.sin(elapsedSeconds * 8) > 0;
+  ctx.save();
+  ctx.translate(340, 845);
+  ctx.fillStyle = blueFlash ? '#38BDF8' : '#1D4ED8';
+  ctx.fillRect(-6, -4, 12, 8);
+  ctx.restore();
+
+  // Ventanas del edificio de viviendas con parpadeo de TV.
+  const tvColor =
+    Math.sin(elapsedSeconds * 5) > 0 ? 'rgba(147, 197, 253, 0.45)' : 'rgba(196, 181, 253, 0.45)';
+  for (let i = 0; i < 5; i++) {
+    const wx = 480 + i * 65;
+    ctx.fillStyle = '#0F172A';
+    ctx.fillRect(wx - 1, 1029, 30, 22);
+    ctx.fillStyle = tvColor;
+    ctx.fillRect(wx, 1030, 28, 20);
+    ctx.strokeStyle = '#334155';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(wx, 1030, 28, 20);
+  }
   ctx.restore();
 }
 

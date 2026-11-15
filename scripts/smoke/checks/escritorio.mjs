@@ -8,6 +8,7 @@ import { exigirTipo, fail } from '../informe.mjs';
 import { imageSize } from '../archivos.mjs';
 import { BASE, ES_REMOTO } from '../config.mjs';
 import { estadisticasCanvas } from '../canvas.mjs';
+import { comprobarTransiciones } from './transiciones.mjs';
 
 /** Carga la página, arranca la misión y mide el canvas. */
 async function comprobarPartida(page, url) {
@@ -22,6 +23,26 @@ async function comprobarPartida(page, url) {
   await page.getByText('K1 OPERATIVO').first().waitFor({ timeout: 20000 });
   await page.waitForTimeout(1500); // deja cargar sprites y pintar varios frames
 
+  // El canvas puede tener píxeles del menú o de una escena a medio cargar sin que
+  // la misión sea jugable. Antes de medir píxeles, afirmamos el estado real del motor.
+  const estado = await page.evaluate(() => window.__eko?.snapshot() ?? null);
+  if (!estado) {
+    fail('estado: window.__eko no publica snapshot en Misión 1');
+    return;
+  }
+  if (estado.gameState !== 'PLAYING' || !estado.player) {
+    fail(`estado: Misión 1 no está jugable (${estado.gameState})`);
+    return;
+  }
+  if (!Number.isFinite(estado.player.x) || !Number.isFinite(estado.player.y)) {
+    fail(`estado: posición inválida del jugador (${estado.player.x}, ${estado.player.y})`);
+    return;
+  }
+  if (!estado.world.walls.length || !estado.world.doors.some((puerta) => puerta.id === 'DOOR_MAIN_A')) {
+    fail('estado: el mundo de Misión 1 no está cargado (sin paredes o sin DOOR_MAIN_A)');
+    return;
+  }
+
   const canvas = await estadisticasCanvas(page);
   if (!canvas || canvas.error) {
     fail(`canvas: ${canvas ? canvas.error : 'no existe'}`);
@@ -34,6 +55,9 @@ async function comprobarPartida(page, url) {
   console.log(
     `canvas ${canvas.width}x${canvas.height}: ${canvas.tonos} tonos, ${(proporcion * 100).toFixed(1)} % de píxeles visibles`
   );
+
+  // También en el perfil completo: pausa, reanudación y vuelta al título.
+  await comprobarTransiciones(page);
 }
 
 /**

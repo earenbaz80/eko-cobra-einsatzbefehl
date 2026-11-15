@@ -4,9 +4,9 @@
  * joystick, botones, subtítulos y barra inferior no se pisan a 390, 360 y 320 px.
  */
 import { fail, fallos } from '../informe.mjs';
-import { cambioEntreFirmas, firmaCanvas } from '../canvas.mjs';
 import { vigilarPagina } from '../navegador.mjs';
 import { capturarPantalla } from '../diagnostico.mjs';
+import { instalarAzarDeterminista } from '../determinismo.mjs';
 
 /** El AudioContext nace suspendido en iOS/Android: el primer toque tiene que dejarlo en running. */
 async function comprobarAudio(movil) {
@@ -44,7 +44,17 @@ const leerPalanca = (movil) =>
 
 const distanciaAPomo = (a, b) => (a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0);
 
-/** Aparece el joystick con hasTouch, sigue al dedo, vuelve al centro y mueve al operador. */
+const MISION_1 = 'Misión 1: Piso Graz - Lend';
+
+const leerJugador = (movil) => movil.evaluate(() => window.__eko?.player ?? null);
+const leerPuerta = (movil, id) =>
+  movil.evaluate((puertaId) => window.__eko?.world.doors.find((item) => item.id === puertaId) ?? null, id);
+
+/**
+ * Desde el spawn, comprueba movimiento real y la puerta; después, que la palanca
+ * sigue al dedo y vuelve al centro. No reinicia la misión: la primera parte usa
+ * el estado inicial y deja el mundo modificado para el resto del smoke.
+ */
 async function comprobarJoystick(movil) {
   const joystick = movil.getByLabel('Joystick de movimiento');
   if (!(await joystick.isVisible())) fail('móvil: el joystick no aparece con hasTouch');
@@ -58,9 +68,88 @@ async function comprobarJoystick(movil) {
 
   const centroX = caja.x + caja.width / 2;
   const centroY = caja.y + caja.height / 2;
-  const reposo = await leerPalanca(movil);
+
+  const antes = await leerJugador(movil);
+  const puertaAntes = await leerPuerta(movil, 'DOOR_MAIN_A');
+  if (!antes) {
+    fail('móvil: window.__eko no expone al jugador');
+    return;
+  }
+  if (!puertaAntes) {
+    fail('móvil: window.__eko.world no contiene DOOR_MAIN_A');
+    return;
+  }
+  if (puertaAntes.isOpen) {
+    fail('móvil: la puerta ya estaba abierta antes de interactuar');
+    return;
+  }
+
+  // El estado real manda: no soltamos hasta que el jugador se haya desplazado
+  // y esté dentro del radio de interacción de la puerta.
+  await movil.mouse.move(centroX, centroY);
+  await movil.mouse.down();
+  try {
+    await movil.mouse.move(centroX + 70, centroY, { steps: 2 });
+    await movil.waitForFunction(
+      ({ x, y, puertaId }) => {
+        const jugador = window.__eko?.player;
+        const puerta = window.__eko?.world.doors.find((item) => item.id === puertaId);
+        if (!jugador || !puerta) return false;
+        const centro = { x: (puerta.x1 + puerta.x2) / 2, y: (puerta.y1 + puerta.y2) / 2 };
+        return (
+          Math.hypot(jugador.x - x, jugador.y - y) >= 10 &&
+          Math.hypot(jugador.x - centro.x, jugador.y - centro.y) <= 62
+        );
+      },
+      { x: antes.x, y: antes.y, puertaId: 'DOOR_MAIN_A' },
+      { timeout: 3000 }
+    );
+  } catch (error) {
+    fail(
+      `móvil: el joystick no confirmó movimiento y cercanía a DOOR_MAIN_A (${error.message.split('\n')[0]})`
+    );
+    return;
+  } finally {
+    await movil.mouse.up();
+  }
+  await movil.waitForTimeout(300);
+
+  const despues = await leerJugador(movil);
+  if (!despues) {
+    fail('móvil: window.__eko dejó de exponer al jugador');
+    return;
+  }
+  const desplazamiento = Math.hypot(despues.x - antes.x, despues.y - antes.y);
+  if (desplazamiento < 10) {
+    fail(`móvil: el joystick no mueve al operador (delta ${desplazamiento.toFixed(1)} px)`);
+    return;
+  }
+  const centroPuerta = { x: (puertaAntes.x1 + puertaAntes.x2) / 2, y: (puertaAntes.y1 + puertaAntes.y2) / 2 };
+  const distanciaPuerta = Math.hypot(despues.x - centroPuerta.x, despues.y - centroPuerta.y);
+  if (distanciaPuerta > 62) {
+    fail(`móvil: el jugador quedó a ${distanciaPuerta.toFixed(1)} px de DOOR_MAIN_A (máximo 62)`);
+    return;
+  }
+  console.log(
+    `móvil: movimiento OK, el jugador se movió ${desplazamiento.toFixed(1)} px ` +
+      `(${antes.x.toFixed(1)}, ${antes.y.toFixed(1)}) -> (${despues.x.toFixed(1)}, ${despues.y.toFixed(1)})`
+  );
+
+  await movil.getByRole('button', { name: /Interactuar/ }).click();
+  await movil.waitForFunction(
+    (puertaId) => window.__eko?.world.doors.find((item) => item.id === puertaId)?.isOpen === true,
+    'DOOR_MAIN_A',
+    { timeout: 4000 }
+  );
+  const puertaDespues = await leerPuerta(movil, 'DOOR_MAIN_A');
+  if (!puertaDespues?.isOpen) {
+    fail('móvil: la puerta no quedó abierta tras pulsar ACCIÓN');
+  } else {
+    console.log(`móvil: puerta ${puertaDespues.id} abierta (mundo real)`);
+  }
 
   // La palanca tiene que seguir al dedo (captura de puntero), no quedarse quieta.
+  const reposo = await leerPalanca(movil);
   await movil.mouse.move(centroX, centroY);
   await movil.mouse.down();
   await movil.mouse.move(centroX, centroY - 70, { steps: 6 });
@@ -71,43 +160,6 @@ async function comprobarJoystick(movil) {
   await movil.waitForTimeout(400);
   const suelta = await leerPalanca(movil);
   if (distanciaAPomo(suelta, reposo) > 1) fail(`móvil: la palanca no vuelve al centro al soltar (${JSON.stringify(suelta)})`);
-
-  // Los primeros segundos de misión todavía tienen la entrada de la cámara y a K2
-  // moviéndose: dejamos que asiente antes de medir el ruido de fondo.
-  await movil.waitForTimeout(3000);
-
-  // Ruido de fondo de la escena quieta (flicker de linterna, partículas).
-  const quietoA = await firmaCanvas(movil);
-  await movil.waitForTimeout(1200);
-  const quietoB = await firmaCanvas(movil);
-  const ruido = cambioEntreFirmas(quietoA, quietoB);
-
-  // Empujamos, soltamos y esperamos a que se pare. Comparar dos fotogramas quietos
-  // evita confundir la animación con el desplazamiento: si se ha movido, la escena
-  // bajo la cámara es otra. Se prueban dos sentidos por si uno choca con una pared.
-  const empujar = async (desplazamiento) => {
-    await movil.mouse.move(centroX, centroY);
-    await movil.mouse.down();
-    await movil.mouse.move(centroX, centroY + desplazamiento, { steps: 6 });
-    await movil.waitForTimeout(900);
-    await movil.mouse.up();
-    await movil.waitForTimeout(600);
-  };
-  await empujar(-70);
-  const trasArriba = await firmaCanvas(movil);
-  await empujar(70);
-  const trasAbajo = await firmaCanvas(movil);
-  const movimiento = Math.max(cambioEntreFirmas(quietoB, trasArriba), cambioEntreFirmas(trasArriba, trasAbajo));
-
-  if (movimiento < 0.15 || movimiento < ruido * 4) {
-    fail(
-      `móvil: el joystick no mueve al operador (desplazamiento ${(movimiento * 100).toFixed(1)} %, ruido en reposo ${(ruido * 100).toFixed(1)} %)`
-    );
-  } else {
-    console.log(
-      `móvil: joystick OK, la escena cambia un ${(movimiento * 100).toFixed(0)} % tras moverse (${(ruido * 100).toFixed(0)} % en reposo)`
-    );
-  }
 }
 
 /** Franjas del HUD: compara las cajas reales y avisa de solapes o de bloques cortados. */
@@ -184,6 +236,7 @@ export async function comprobarMovil(browser, contexto) {
     hasTouch: true,
     isMobile: true,
   });
+  await instalarAzarDeterminista(contextoMovil, contexto.semilla);
   // Instrumenta el AudioContext: así se puede comprobar que el primer gesto lo deja
   // sonando (en iOS/Android nace suspendido y solo un toque lo reanuda).
   await contextoMovil.addInitScript(() => {
@@ -224,7 +277,7 @@ export async function comprobarMovil(browser, contexto) {
 
     await comprobarAudio(movil);
 
-    await movil.getByRole('button', { name: 'Misión 1: Piso Graz - Lend' }).click();
+    await movil.getByRole('button', { name: MISION_1 }).click();
     await movil.getByText('K1 OPERATIVO').first().waitFor({ timeout: 20000 });
     await movil.waitForTimeout(1800);
 

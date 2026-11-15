@@ -13,6 +13,7 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "smoke": "node scripts/smoke.mjs",
+    "smoke:quick": "node scripts/smoke.mjs --quick",
     "smoke:prod": "node scripts/smoke.mjs https://earenbaz80.github.io/eko-cobra-einsatzbefehl/",
     "verify": "npm run lint && npm run test && npm run build && npm run smoke"
   },

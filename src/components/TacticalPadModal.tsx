@@ -184,6 +184,14 @@ const SQUAD_ORDER_CATALOG: Array<{
     accent: 'border-[#38BDF8]/60 text-[#7DD3FC]',
   },
   {
+    cmd: 'CLEAR_BLAST_AREA',
+    keyNum: 'J',
+    titleDe: 'Sprengzone räumen',
+    titleEs: 'Despejar Zona C4',
+    descEs: 'Retira a Kobra-2 del radio de la carga antes de detonar',
+    accent: 'border-[#F59E0B]/60 text-[#FDE68A]',
+  },
+  {
     cmd: 'FORM_WEDGE',
     keyNum: '9',
     titleDe: 'Keilformation',
@@ -1132,7 +1140,7 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
                     <div className="flex items-center justify-between border-b border-[#334155]/50 pb-1.5">
                       <div className="text-xs font-bold text-[#38BDF8] flex items-center gap-2">
                         <Radio className="w-4 h-4 text-[#38BDF8]" />
-                        <span>PANEL DE ÓRDENES TÁCTICAS CQB (TECLAS [1]–[8])</span>
+                        <span>PANEL DE ÓRDENES TÁCTICAS CQB (TECLAS [1]–[8], [9], [0], [J])</span>
                       </div>
                       <span className="text-[10px] text-[#94A3B8]">Binomio Kobra-2</span>
                     </div>

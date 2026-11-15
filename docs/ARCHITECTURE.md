@@ -77,11 +77,15 @@ Cada escenario tiene su layout en un módulo propio: `grazMap.ts`, `stationMap.t
 | `npm run lint` | Tipos (`tsc --noEmit`). |
 | `npm run test` | Unidad (Vitest). |
 | `npm run build` | Build de producción. |
-| `npm run smoke` | Build servido como en Pages: canvas con escena, sin 404, las misiones arrancan, móvil con joystick, presupuestos de peso y de frame time. |
-| `npm run verify` | Las cuatro anteriores en orden. |
+| `npm run smoke` | Build servido como en Pages: cobertura completa (misiones, móvil, persistencia, pesos y frame time). |
+| `npm run smoke:quick` | Perfil rápido de PR: canvas, Misión 1 y transiciones de estado. |
+| `npm run verify` | Las cuatro anteriores en orden; usa el smoke completo. |
 
 La prueba de humo sale del CI con `VITE_BASE_PATH=/eko-cobra-einsatzbefehl/`; en local
 sirve `dist/` en la raíz y reintenta las rutas absolutas de metadatos sin el base.
+Todos los contextos de Playwright reciben una semilla fija de `mulberry32` antes de
+cargar la app (`SMOKE_SEED`, por defecto `0xE2E0`) para que el mobiliario, las
+partículas y la IA no dependan de `Math.random`.
 
 ## Deuda técnica conocida
 

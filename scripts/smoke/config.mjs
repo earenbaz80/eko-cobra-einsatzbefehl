@@ -39,6 +39,15 @@ export const PRESUPUESTO_FRAMES = {
 /** Commit que debe estar sirviendo Pages; el job de deploy lo pasa en SMOKE_EXPECTED_SHA. */
 export const SHA_ESPERADO = (process.env.SMOKE_EXPECTED_SHA ?? '').trim().toLowerCase();
 
+/** Semilla fija del E2E; `SMOKE_SEED` permite repetir una pasada concreta. */
+const SEMILLA_CRUDA = (process.env.SMOKE_SEED ?? '0xE2E0').trim();
+const SEMILLA_NUMERO = Number(SEMILLA_CRUDA);
+if (!Number.isFinite(SEMILLA_NUMERO)) {
+  throw new Error(`SMOKE_SEED inválida: ${SEMILLA_CRUDA}`);
+}
+export const SEMILLA_E2E = SEMILLA_NUMERO >>> 0;
+export const SEMILLA_E2E_TEXTO = `0x${SEMILLA_E2E.toString(16)}`;
+
 // Topes de peso: un asset de varios MB o un salto del bundle no debería pasar el CI.
 // Los valores salen de lo que ocupa hoy el build con ~3 % de margen (JS 475 KiB,
 // dist 1654 KiB): ajustados a propósito para que el tope avise antes de una subida
