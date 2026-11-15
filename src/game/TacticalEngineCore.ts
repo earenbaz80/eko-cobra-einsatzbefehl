@@ -52,6 +52,9 @@ import {
   soundEngine
 } from './soundEngine';
 import {
+  RadioFeed
+} from './radioFeed';
+import {
   chooseSquadSteeringAngle,
   computeSquadNavTarget
 } from './squadAi';
@@ -467,9 +470,7 @@ export class TacticalEngineCore {
   protected breachWindSources: BreachWindSource[] = [];
   protected exteriorBreachSurgeTimer: number = 0;
   protected exteriorBreachMaxDuration: number = 14.0;
-  protected radioTxTimer: number = 0;
-  protected radioStaticTimer: number = 0;
-  protected lastRadioAudioStamp: number = 0;
+  protected radio: RadioFeed = new RadioFeed();
   protected pointLights: DynamicPointLight[] = [];
   protected acousticIndicators: AcousticEdgeIndicator[] = [];
   protected playerDarknessTimer: number = 0;
@@ -623,7 +624,7 @@ public nightMode: boolean = false;
   protected hudSyncTimer: number = 0;
   protected roeEvents: ROEEvent[] = [];
   protected criticalEvents: CriticalEventLogEntry[] = [];
-  protected radioFeed: HudSnapshot['radioFeed'] = [];
+
   protected missionOutcome: HudSnapshot['missionResult'] | undefined = undefined;
   protected secondaryObjectives: SecondaryObjective[] = [];
 
@@ -839,7 +840,7 @@ public nightMode: boolean = false;
     const profileSpec = EKO_COBRA_PROFILES[this.plan.profile];
     const inspSpec = EKO_COBRA_INSPECTION_DEVICES[this.plan.inspectionDevice];
 
-    this.radioFeed = [
+    this.radio.items = [
       {
         id: 'r0',
         speaker: 'LEITSTELLE GRAZ',
@@ -872,7 +873,7 @@ public nightMode: boolean = false;
     soundEngine.startRainAmbience();
     soundEngine.startAmbientDrone();
     soundEngine.playTetraRadioTransmission('info', 46);
-    this.radioTxTimer = 2.1;
+    this.radio.txTimer = 2.1;
 
     if (this.missionMode === 'TIROL') {
       this.pushRadio(
@@ -1012,7 +1013,7 @@ public nightMode: boolean = false;
   }) {
     if (item.silent) {
       soundEngine.playTetraStaticBurst(0.35, 0.12);
-      this.radioTxTimer = 0.35;
+      this.radio.txTimer = 0.35;
       this.emitHudSnapshot();
       return;
     }
@@ -1022,9 +1023,9 @@ public nightMode: boolean = false;
     }
     // La repetición reemite sólo la textura TETRA; el mensaje sigue siendo texto.
     soundEngine.playTetraRadioTransmission(item.tone, item.text.length);
-    this.radioTxTimer = 1.95;
+    this.radio.txTimer = 1.95;
     if (item.tone === 'alert' || item.tone === 'warn') {
-      this.radioStaticTimer = 0.75;
+      this.radio.staticTimer = 0.75;
     }
     this.emitHudSnapshot();
   }
@@ -1766,49 +1767,10 @@ public nightMode: boolean = false;
     tone: 'info' | 'warn' | 'alert' | 'ok' = 'info',
     options: { silent?: boolean } = {}
   ) {
-    const now = new Date();
-    const timeStr = now.toTimeString().slice(0, 8);
-    const isSilent = options.silent === true;
-    const isImportantAlert = tone === 'alert' || tone === 'warn';
-    const hasStaticBurst = !isSilent && (isImportantAlert || Math.random() < 0.18);
-
-    this.radioFeed = [
-      {
-        id: `${Date.now()}_${Math.random()}`,
-        speaker,
-        text,
-        time: timeStr,
-        tone,
-        hasStaticBurst,
-        silent: isSilent,
-      },
-      ...this.radioFeed.slice(0, 5),
-    ];
-
-    if (this.gameState === 'PLAYING') {
-      // Los estados rutinarios van al log y a un squelch corto, sin locución.
-      if (isSilent) {
-        this.radioTxTimer = 0.35;
-        soundEngine.playTetraStaticBurst(0.35, 0.12);
-        this.emitHudSnapshot();
-        return;
-      }
-
-      const nowMs = performance.now();
-      this.radioTxTimer = tone === 'alert' ? 2.4 : tone === 'warn' ? 2.0 : 1.75;
-      if (hasStaticBurst) {
-        this.radioStaticTimer = tone === 'alert' ? 0.95 : 0.65;
-      }
-
-      if (nowMs - this.lastRadioAudioStamp > 110) {
-        this.lastRadioAudioStamp = nowMs;
-        soundEngine.playTetraRadioTransmission(tone, text.length);
-      } else if (isImportantAlert) {
-        // Even if two messages arrive nearly simultaneously, ensure tactical alert static crackle is heard
-        soundEngine.playTetraStaticBurst(tone === 'alert' ? 0.95 : 0.72);
-      }
-      this.emitHudSnapshot();
-    }
+    this.radio.push(speaker, text, tone, options, {
+      gameState: this.gameState,
+      emitHudSnapshot: () => this.emitHudSnapshot(),
+    });
   }
 
   protected awardOperatorXp(xpAmount: number, reason?: string) {
@@ -6513,8 +6475,7 @@ public nightMode: boolean = false;
     this.suppressionTimer = Math.max(0, this.suppressionTimer - dt);
     this.playerHitFlashTimer = Math.max(0, this.playerHitFlashTimer - dt);
     this.squadReloadTimer = Math.max(0, this.squadReloadTimer - dt);
-    this.radioTxTimer = Math.max(0, this.radioTxTimer - dt);
-    this.radioStaticTimer = Math.max(0, this.radioStaticTimer - dt);
+    this.radio.tick(dt);
 
     for (const ind of this.acousticIndicators) {
       ind.life -= dt;
@@ -9118,10 +9079,10 @@ public nightMode: boolean = false;
         if (hdg < 0) hdg += 360;
         return hdg;
       })(),
-      radioTransmitting: this.radioTxTimer > 0,
-      radioStaticActive: this.radioStaticTimer > 0,
-      radioFeed: this.radioFeed,
-      roeEvents: this.radioFeed ? this.roeEvents : [],
+      radioTransmitting: this.radio.txTimer > 0,
+      radioStaticActive: this.radio.staticTimer > 0,
+      radioFeed: this.radio.items,
+      roeEvents: this.radio.items ? this.roeEvents : [],
       criticalEvents: this.criticalEvents,
       secondaryObjectives: this.secondaryObjectives,
       isTrainingMode: this.isTrainingMode,
@@ -9322,7 +9283,7 @@ public nightMode: boolean = false;
       c4Count: this.c4Count,
       squadGear: this.plan.squadGear,
       radioFeed: Object.freeze(
-        this.radioFeed.map((item) =>
+        this.radio.items.map((item) =>
           Object.freeze({ speaker: item.speaker, text: item.text })
         )
       ),

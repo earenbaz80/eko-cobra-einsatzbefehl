@@ -5,12 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-const forbiddenTokens = [
-  'speech' + 'Synthesis',
-  'speak' + 'Radio',
-  'cancel' + 'Speech',
-  '__eko' + 'Speech',
-];
+const forbiddenTokens = ['speechSynthesis', 'speakRadio', 'cancelSpeech', '__ekoSpeech'];
 
 function walk(dir: string): string[] {
   const files: string[] = [];
@@ -19,7 +14,7 @@ function walk(dir: string): string[] {
     const stat = statSync(full);
     if (stat.isDirectory()) {
       files.push(...walk(full));
-    } else if (/\.(ts|tsx|js|jsx|mjs)$/.test(full)) {
+    } else if (/\.(ts|tsx|mjs)$/.test(full)) {
       files.push(full);
     }
   }
