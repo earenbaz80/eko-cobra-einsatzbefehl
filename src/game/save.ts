@@ -12,14 +12,9 @@
 
 /** Versión actual del esquema de guardado. Cámbiala al modificar la forma del estado. */
 export const SCHEMA_VERSION = 1;
-export const VERSION_ESQUEMA = SCHEMA_VERSION;
-export const SAVE_SCHEMA_VERSION = SCHEMA_VERSION;
-export const VERSION_GUARDADO = SCHEMA_VERSION;
 
 /** Clave usada en `localStorage` para la partida en curso. */
 export const SAVE_KEY = 'eko_cobra_partida_en_curso';
-export const CLAVE_GUARDADO = SAVE_KEY;
-export const SAVE_STORAGE_KEY = SAVE_KEY;
 
 export interface SaveState {
   /** Estado del juego en el momento del guardado. */
@@ -44,35 +39,9 @@ export interface SerializedSave {
   state: SaveState;
 }
 
-export interface SaveResult {
-  ok: boolean;
-  reason?: 'incompatible' | 'invalid' | 'storage' | 'empty';
-}
-
-export interface LoadResult {
-  ok: boolean;
-  version?: number;
-  state?: SaveState;
-  reason?: 'incompatible' | 'invalid' | 'storage' | 'empty';
-}
-
 /** Devuelve true si la versión del dato guardado es compatible con la actual. */
-export function isCompatibleVersion(version: unknown): boolean {
+function isCompatibleVersion(version: unknown): boolean {
   return version === SCHEMA_VERSION;
-}
-
-export function esVersionCompatible(version: unknown): boolean {
-  return isCompatibleVersion(version);
-}
-
-export function esCompatible(datos: unknown): boolean {
-  if (!datos || typeof datos !== 'object') return false;
-  const v = (datos as { version?: unknown }).version;
-  return isCompatibleVersion(v);
-}
-
-export function esEstadoCompatible(datos: unknown): boolean {
-  return esCompatible(datos);
 }
 
 /** Valida y normaliza un objeto guardado; devuelve null si es inválido o incompatible. */
@@ -93,43 +62,9 @@ export function parseSave(raw: unknown): SerializedSave | null {
   return { version: rec.version as number, savedAt, state: rec.state as SaveState };
 }
 
-export function deserializarPartida(raw: unknown): SerializedSave | null {
-  return parseSave(raw);
-}
-
-export function deserializeSave(raw: unknown): SerializedSave | null {
-  return parseSave(raw);
-}
-
-export function leerPartida(raw: unknown): SerializedSave | null {
-  return parseSave(raw);
-}
-
 /** Serializa un estado a cadena JSON con la versión de esquema. */
 export function serializeState(state: SaveState, now: number = Date.now()): string {
-  const payload: SerializedSave = { version: SCHEMA_VERSION, savedAt: now, state };
-  return JSON.stringify(payload);
-}
-
-export function serializarPartida(state: SaveState, now: number = Date.now()): string {
-  return serializeState(state, now);
-}
-
-export function serializarEstado(state: SaveState, now: number = Date.now()): string {
-  return serializeState(state, now);
-}
-
-export function stringifySave(state: SaveState, now: number = Date.now()): string {
-  return serializeState(state, now);
-}
-
-/** Crea el payload (objeto) sin serializar. */
-export function crearPayload(state: SaveState, now: number = Date.now()): SerializedSave {
-  return { version: SCHEMA_VERSION, savedAt: now, state };
-}
-
-export function buildSavePayload(state: SaveState, now: number = Date.now()): SerializedSave {
-  return crearPayload(state, now);
+  return JSON.stringify({ version: SCHEMA_VERSION, savedAt: now, state });
 }
 
 /** Guarda la partida en el storage dado. Devuelve true si se guardó. */
@@ -141,18 +76,6 @@ export function saveGame(state: SaveState, storage: StorageLike | null = default
   } catch {
     return false;
   }
-}
-
-export function guardarPartida(state: SaveState, storage: StorageLike | null = defaultStorage()): boolean {
-  return saveGame(state, storage);
-}
-
-export function guardarPartidaEnCurso(state: SaveState, storage: StorageLike | null = defaultStorage()): boolean {
-  return saveGame(state, storage);
-}
-
-export function persistSave(state: SaveState, storage: StorageLike | null = defaultStorage()): boolean {
-  return saveGame(state, storage);
 }
 
 /** Carga y valida la partida guardada. Devuelve el estado o null si no hay/incompatible. */
@@ -169,49 +92,6 @@ export function loadGame(storage: StorageLike | null = defaultStorage()): SaveSt
   }
 }
 
-export function cargarPartida(storage: StorageLike | null = defaultStorage()): SaveState | null {
-  return loadGame(storage);
-}
-
-export function cargarPartidaEnCurso(storage: StorageLike | null = defaultStorage()): SaveState | null {
-  return loadGame(storage);
-}
-
-export function restoreSave(storage: StorageLike | null = defaultStorage()): SaveState | null {
-  return loadGame(storage);
-}
-
-export function readSave(storage: StorageLike | null = defaultStorage()): SaveState | null {
-  return loadGame(storage);
-}
-
-/** Resultado detallado de la carga. */
-export function loadGameDetailed(storage: StorageLike | null = defaultStorage()): LoadResult {
-  if (!storage) return { ok: false, reason: 'storage' };
-  let raw: string | null;
-  try {
-    raw = storage.getItem(SAVE_KEY);
-  } catch {
-    return { ok: false, reason: 'storage' };
-  }
-  if (raw === null) return { ok: false, reason: 'empty' };
-  const parsed = parseSave(raw);
-  if (!parsed) {
-    // distinguir incompatible vs inválido: re-parsear sin validar versión
-    let obj: unknown;
-    try { obj = JSON.parse(raw); } catch { return { ok: false, reason: 'invalid' }; }
-    if (obj && typeof obj === 'object' && !isCompatibleVersion((obj as { version?: unknown }).version)) {
-      return { ok: false, reason: 'incompatible', version: (obj as { version?: number }).version };
-    }
-    return { ok: false, reason: 'invalid' };
-  }
-  return { ok: true, version: parsed.version, state: parsed.state };
-}
-
-export function cargarPartidaDetallada(storage: StorageLike | null = defaultStorage()): LoadResult {
-  return loadGameDetailed(storage);
-}
-
 /** Borra la partida guardada. */
 export function clearSave(storage: StorageLike | null = defaultStorage()): boolean {
   if (!storage) return false;
@@ -223,29 +103,9 @@ export function clearSave(storage: StorageLike | null = defaultStorage()): boole
   }
 }
 
-export function borrarPartida(storage: StorageLike | null = defaultStorage()): boolean {
-  return clearSave(storage);
-}
-
-export function borrarPartidaEnCurso(storage: StorageLike | null = defaultStorage()): boolean {
-  return clearSave(storage);
-}
-
-export function deleteSave(storage: StorageLike | null = defaultStorage()): boolean {
-  return clearSave(storage);
-}
-
 /** Indica si hay una partida guardada compatible. */
 export function hasSave(storage: StorageLike | null = defaultStorage()): boolean {
   return loadGame(storage) !== null;
-}
-
-export function hayPartidaGuardada(storage: StorageLike | null = defaultStorage()): boolean {
-  return hasSave(storage);
-}
-
-export function tienePartidaGuardada(storage: StorageLike | null = defaultStorage()): boolean {
-  return hasSave(storage);
 }
 
 /** Tipo mínimo de storage para inyección en tests. */
@@ -265,19 +125,15 @@ function defaultStorage(): StorageLike | null {
 }
 
 /** Crea un storage en memoria (útil para tests). */
-export function crearStorageEnMemoria(): StorageLike {
+export function createMemoryStorage(): StorageLike {
   const data = new Map<string, string>();
   return {
     getItem: (k) => (data.has(k) ? data.get(k)! : null),
-    setItem: (k, v) => { data.set(k, v); },
-    removeItem: (k) => { data.delete(k); },
+    setItem: (k, v) => {
+      data.set(k, v);
+    },
+    removeItem: (k) => {
+      data.delete(k);
+    },
   };
-}
-
-export function createMemoryStorage(): StorageLike {
-  return crearStorageEnMemoria();
-}
-
-export function createInMemoryStorage(): StorageLike {
-  return crearStorageEnMemoria();
 }

@@ -73,16 +73,8 @@ export function crearAzar(semilla: number): () => number {
   };
 }
 
-/** Escenarios mínimos que hoy usa la simulación sin renderizado. */
-export type MisionSimulada =
-  | 'pasillo'
-  | 'almacen'
-  | 'graz'
-  | 'grazApartment'
-  | 'graz-apartment'
-  | 'apartment'
-  | 'station'
-  | (string & {});
+/** Misiones que puede montar la simulación sin renderizado. */
+export type MisionSimulada = 'pasillo' | 'almacen' | 'graz' | 'station';
 
 interface Escenario {
   paredes: Pared[];
@@ -115,7 +107,7 @@ const ALMACEN: Escenario = {
   inicio: { x: 80, y: 130 },
 };
 
-const ESCENARIOS: Record<string, Escenario> = { pasillo: PASILLO, almacen: ALMACEN };
+const ESCENARIOS: Record<'pasillo' | 'almacen', Escenario> = { pasillo: PASILLO, almacen: ALMACEN };
 
 export interface JugadorSimulado {
   x: number;
@@ -126,7 +118,7 @@ export interface JugadorSimulado {
 }
 
 export interface Partida {
-  mision: string;
+  mision: MisionSimulada;
   semilla: number;
   tick: number;
   tiempo: number;
@@ -141,95 +133,41 @@ export interface Partida {
 /** Paso máximo por fotograma, igual que el motor: un frame largo no atraviesa paredes. */
 export const PASO_MAXIMO = 0.05;
 
+type LayoutReal = ReturnType<typeof createGrazApartmentLayout>;
+
+/** Convierte un layout real en el mundo mínimo de la simulación. */
+function escenarioDeLayout(layout: LayoutReal, inicio: { x: number; y: number }): Escenario {
+  return {
+    paredes: layout.walls.map(({ x1, y1, x2, y2 }) => ({ x1, y1, x2, y2 })),
+    puertas: layout.doors.map(({ x1, y1, x2, y2, isOpen, isDestroyed }) => ({ x1, y1, x2, y2, isOpen, isDestroyed })),
+    muebles: layout.furniture.map(({ x, y, w, h, blocksMovement, isDestroyed }) => ({
+      x,
+      y,
+      w,
+      h,
+      blocksMovement,
+      isDestroyed,
+    })),
+    inicio,
+  };
+}
+
+const REALES: Record<'graz' | 'station', () => Escenario> = {
+  // Entrada A de cada mapa: el spawn del operador en el motor.
+  graz: () => escenarioDeLayout(createGrazApartmentLayout(), { x: 185, y: 410 }),
+  station: () => escenarioDeLayout(createStationLayout(), { x: 130, y: 115 }),
+};
+
 /**
  * Crea una partida sin renderizado y determinista. La semilla fija la orientación inicial
  * (y queda en `azar` para los eventos aleatorios), así que la misma misión con la misma
  * semilla se comporta igual en cada ejecución.
  */
-const LAYOUTS_REALES: Record<string, () => { walls: any[]; doors: any[]; furniture: any[]; rooms?: any[] }> = {
-  graz: () => createGrazApartmentLayout(),
-  grazApartment: () => createGrazApartmentLayout(),
-  'graz-apartment': () => createGrazApartmentLayout(),
-  apartment: () => createGrazApartmentLayout(),
-  station: () => createStationLayout(),
-};
-
-const SPAWNS_REALES: Record<string, { x: number; y: number }> = {
-  graz: { x: 185, y: 410 },
-  grazApartment: { x: 185, y: 410 },
-  'graz-apartment': { x: 185, y: 410 },
-  apartment: { x: 185, y: 410 },
-  station: { x: 130, y: 115 },
-};
-
-function layoutAEscenario(layout: any, spawn?: { x: number; y: number }): Escenario {
-  const paredes: Pared[] = (layout?.walls ?? layout?.paredes ?? []).map((w: any) => ({
-    x1: w.x1,
-    y1: w.y1,
-    x2: w.x2,
-    y2: w.y2,
-  }));
-  const puertas: Puerta[] = (layout?.doors ?? layout?.puertas ?? []).map((d: any) => ({
-    x1: d.x1,
-    y1: d.y1,
-    x2: d.x2,
-    y2: d.y2,
-    isOpen: !!d.isOpen,
-    isDestroyed: !!d.isDestroyed,
-  }));
-  const muebles: Mueble[] = (layout?.furniture ?? layout?.muebles ?? []).map((f: any) => ({
-    x: f.x,
-    y: f.y,
-    w: f.w,
-    h: f.h,
-    blocksMovement: !!f.blocksMovement,
-    isDestroyed: !!f.isDestroyed,
-  }));
-  let inicio = spawn ?? layout?.inicio ?? layout?.spawn;
-  if (!inicio) {
-    const rooms = layout?.rooms;
-    if (Array.isArray(rooms) && rooms.length) {
-      inicio = { x: rooms[0].x + 20, y: rooms[0].y + 20 };
-    } else {
-      inicio = { x: 60, y: 60 };
-    }
-  }
-  return { paredes, puertas, muebles, inicio };
-}
-
-export function crearPartida(
-  mision: MisionSimulada | any,
-  semillaOrSpawn: number | { x: number; y: number } = 1,
-  spawnOrSemilla?: { x: number; y: number } | number
-): Partida {
-  let semilla = 1;
-  let spawn: { x: number; y: number } | undefined;
-  if (typeof semillaOrSpawn === 'number') semilla = semillaOrSpawn;
-  else if (semillaOrSpawn && typeof semillaOrSpawn === 'object') {
-    spawn = semillaOrSpawn as { x: number; y: number };
-    if (typeof spawnOrSemilla === 'number') semilla = spawnOrSemilla;
-  }
-  if (typeof spawnOrSemilla === 'object' && spawnOrSemilla) {
-    spawn = spawnOrSemilla as { x: number; y: number };
-  }
-
-  let nombreMision = typeof mision === 'string' ? mision : 'mapa-real';
+export function crearPartida(mision: MisionSimulada, semilla: number): Partida {
   let escenario: Escenario;
-  if (typeof mision === 'string') {
-    const factory = LAYOUTS_REALES[mision];
-    if (factory) {
-      const layout = factory();
-      escenario = layoutAEscenario(layout, spawn ?? SPAWNS_REALES[mision]);
-    } else if (ESCENARIOS[mision]) {
-      escenario = ESCENARIOS[mision];
-    } else {
-      throw new Error(`misión desconocida: ${mision}`);
-    }
-  } else if (mision && typeof mision === 'object') {
-    escenario = layoutAEscenario(mision, spawn);
-  } else {
-    throw new Error(`misión desconocida: ${mision}`);
-  }
+  if (mision === 'graz' || mision === 'station') escenario = REALES[mision]();
+  else if (mision === 'pasillo' || mision === 'almacen') escenario = ESCENARIOS[mision];
+  else throw new Error(`misión desconocida: ${mision}`);
 
   const azar = crearAzar(semilla);
   const mundo = {
@@ -245,7 +183,7 @@ export function crearPartida(
     orientacion: azar() * Math.PI * 2,
   };
   const partida: Partida = {
-    mision: nombreMision,
+    mision,
     semilla,
     tick: 0,
     tiempo: 0,

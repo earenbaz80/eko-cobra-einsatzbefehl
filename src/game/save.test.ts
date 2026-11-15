@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   SCHEMA_VERSION,
   SAVE_KEY,
@@ -8,13 +8,12 @@ import {
   loadGame,
   clearSave,
   hasSave,
-  loadGameDetailed,
-  crearStorageEnMemoria,
+  createMemoryStorage,
 } from './save';
 
 describe('guardado: serialización', () => {
   it('serializa con la versión de esquema y la carga de vuelta', () => {
-    const storage = crearStorageEnMemoria();
+    const storage = createMemoryStorage();
     const estado = { gameState: 'PLAYING', score: 42, elapsedSeconds: 12.5 };
     expect(saveGame(estado, storage)).toBe(true);
     const cargado = loadGame(storage);
@@ -42,7 +41,7 @@ describe('guardado: serialización', () => {
   });
 
   it('borra la partida guardada', () => {
-    const storage = crearStorageEnMemoria();
+    const storage = createMemoryStorage();
     saveGame({ gameState: 'PLAYING' }, storage);
     expect(clearSave(storage)).toBe(true);
     expect(loadGame(storage)).toBeNull();
@@ -52,26 +51,20 @@ describe('guardado: serialización', () => {
 
 describe('guardado: estado incompatible', () => {
   it('rechaza un esquema con versión distinta', () => {
-    const storage = crearStorageEnMemoria();
+    const storage = createMemoryStorage();
     const incompatible = JSON.stringify({ version: SCHEMA_VERSION + 99, savedAt: 1, state: { gameState: 'PLAYING' } });
     storage.setItem(SAVE_KEY, incompatible);
     expect(loadGame(storage)).toBeNull();
     expect(hasSave(storage)).toBe(false);
-
-    const detalle = loadGameDetailed(storage);
-    expect(detalle.ok).toBe(false);
-    expect(detalle.reason).toBe('incompatible');
   });
 
   it('rechaza JSON inválido o sin estado', () => {
-    const storage = crearStorageEnMemoria();
+    const storage = createMemoryStorage();
     storage.setItem(SAVE_KEY, '{not json');
     expect(loadGame(storage)).toBeNull();
-    expect(loadGameDetailed(storage).reason).toBe('invalid');
 
     storage.setItem(SAVE_KEY, JSON.stringify({ version: SCHEMA_VERSION }));
     expect(loadGame(storage)).toBeNull();
-    expect(loadGameDetailed(storage).reason).toBe('invalid');
   });
 
   it('parseSave devuelve null para versión incompatible', () => {
