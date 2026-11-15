@@ -36,6 +36,20 @@ async function comprobarPartida(page, url) {
   );
 }
 
+/**
+ * Pide la tarjeta social al servidor del humo. En local `dist/` se sirve en la raíz, pero
+ * los metadatos apuntan a la URL publicada (con el base de Pages delante): si la ruta
+ * directa da 404, se reintenta sin el primer segmento para comprobar la misma tarjeta
+ * contra el build local. En remoto no hay reintento: el base tiene que estar bien.
+ */
+async function pedirTarjeta(origin, ruta) {
+  const respuesta = await fetch(`${origin}${ruta}`);
+  if (respuesta.status === 200 || ES_REMOTO) return respuesta;
+  const sinPrimerSegmento = ruta.replace(/^\/[^/]+\//, '/');
+  if (sinPrimerSegmento === ruta) return respuesta;
+  return fetch(`${origin}${sinPrimerSegmento}`);
+}
+
 /** canonical + og:image/twitter:image, y que la tarjeta responda a 1200×630. */
 async function comprobarMetadatosSociales(page, { origin }) {
   const social = await page.evaluate(() => {
@@ -75,7 +89,7 @@ async function comprobarMetadatosSociales(page, { origin }) {
       continue;
     }
     if (!revisadas.has(ruta)) {
-      const respuesta = await fetch(`${origin}${ruta}`);
+      const respuesta = await pedirTarjeta(origin, ruta);
       if (respuesta.status !== 200) {
         revisadas.set(ruta, `responde ${respuesta.status}`);
       } else {

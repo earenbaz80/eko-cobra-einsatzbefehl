@@ -18,7 +18,6 @@ export function computePulseStabilityPct(
   bleeding: boolean,
   focusedAimActive: boolean
 ): number {
-  const fatigueRatio = fatigue / 100;
   const raw =
     (100 - fatigue * 0.62 - (100 - torso) * 0.22 - (100 - arms) * 0.16) *
       (bleeding ? 0.82 : 1) +

@@ -10,6 +10,8 @@
  * tests puedan usar un doble en memoria.
  */
 
+import type { SnapshotSimulacion } from './simulation';
+
 /** Versión actual del esquema de guardado. Cámbiala al modificar la forma del estado. */
 export const SCHEMA_VERSION = 1;
 
@@ -29,6 +31,8 @@ export interface SaveState {
   score?: number;
   /** Tick del motor. */
   tick?: number;
+  /** Posición, mundo y puertas de la simulación para reanudar sin reiniciar. */
+  simulacion?: SnapshotSimulacion;
   /** Cualquier dato adicional de la partida. */
   [key: string]: unknown;
 }

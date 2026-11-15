@@ -109,6 +109,11 @@ describe('referenciasRotas', () => {
     expect(referenciasRotas(build, [{ ruta: 'assets/index-ChfuXwfe.js', texto: 'const aviso = "vamos allá"; const v = "1.2.3";' }])).toEqual([]);
   });
 
+  it('no confunde una extensión suelta del runtime con un archivo del build', () => {
+    const texto = 'const esCss = (e) => e.pathname.endsWith(`.css`); const otra = ".js";';
+    expect(referenciasRotas(build, [{ ruta: 'assets/index-ChfuXwfe.js', texto }])).toEqual([]);
+  });
+
   it('ignora plantillas de JS con interpolación', () => {
     expect(referenciasRotas(build, [{ ruta: 'assets/index-ChfuXwfe.js', texto: 'import(`./assets/${nombre}.js`)' }])).toEqual([]);
   });

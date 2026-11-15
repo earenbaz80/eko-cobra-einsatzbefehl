@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useModalA11y } from '../hooks/useModalA11y';
 import {
   AlertTriangle,
   Search,
@@ -100,6 +101,7 @@ const INTEL_DOSSIERS: DossierEntry[] = [
 ];
 
 export const EkisIntelModal: React.FC<EkisIntelModalProps> = ({ onClose }) => {
+  const dialogRef = useModalA11y();
   const [filterRole, setFilterRole] = useState<'ALL' | 'SUSPECT' | 'HOSTAGE'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDossier, setSelectedDossier] = useState<DossierEntry>(INTEL_DOSSIERS[0]);
@@ -124,7 +126,13 @@ export const EkisIntelModal: React.FC<EkisIntelModalProps> = ({ onClose }) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-6xl border border-[#38BDF8]/60 bg-[#0B111A] text-[#E2E8F0] shadow-[0_0_50px_rgba(0,0,0,0.9)] flex flex-col max-h-[92vh] overflow-hidden">
+      <div className="w-full max-w-6xl border border-[#38BDF8]/60 bg-[#0B111A] text-[#E2E8F0] shadow-[0_0_50px_rgba(0,0,0,0.9)] flex flex-col max-h-[92vh] overflow-hidden"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Archivos de inteligencia EKIS: sospechosos y rehenes"
+        tabIndex={-1}
+      >
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#1E293B] px-6 py-4 bg-[#0F172A] shrink-0">
           <div className="flex items-center gap-3">

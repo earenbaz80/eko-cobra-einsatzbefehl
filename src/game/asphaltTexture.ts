@@ -10,7 +10,6 @@ class AsphaltTextureManager {
   private imgCracks: HTMLImageElement | null = null;
   private imgOil: HTMLImageElement | null = null;
   private proceduralCanvas: HTMLCanvasElement | null = null;
-  private isInitialized = false;
 
   constructor() {
     this.init();
@@ -40,8 +39,6 @@ class AsphaltTextureManager {
     } catch {
       // Procedural canvas will serve as fallback
     }
-
-    this.isInitialized = true;
   }
 
   /**

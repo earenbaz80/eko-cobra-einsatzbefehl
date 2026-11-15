@@ -18,8 +18,12 @@ export const esFuenteDeReferencias = (ruta) => /\.(html|js|mjs|css|webmanifest|j
 
 const nombreDe = (ruta) => ruta.split('/').pop().toLowerCase();
 
-/** Extensiones que se publican como archivo: si una fuente las nombra, el archivo debe existir. */
-const EXTENSIONES = /\.(?:js|mjs|css|html|json|webmanifest|png|jpe?g|webp|svg|ico|woff2?|ttf|otf|mp3|ogg|wav|mp4|webm|wasm)$/i;
+/**
+ * Extensiones que se publican como archivo: si una fuente las nombra, el archivo debe existir.
+ * Exige un nombre delante del punto: el runtime de Vite contiene la cadena `.css` suelta
+ * (`pathname.endsWith('.css')`) y no es una referencia a ningún archivo del build.
+ */
+const EXTENSIONES = /[^./\\]\.(?:js|mjs|css|html|json|webmanifest|png|jpe?g|webp|svg|ico|woff2?|ttf|otf|mp3|ogg|wav|mp4|webm|wasm)$/i;
 
 /** Referencias que no son del build: otros orígenes, datos embebidos o anclas. */
 const EXTERNAS = /^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i;

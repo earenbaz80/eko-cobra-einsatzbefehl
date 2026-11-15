@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { avanzar, colisiona, crearPartida, crearAzar, distanciaASegmento, PASO_MAXIMO, type Partida } from './simulation';
+import {
+  avanzar,
+  colisiona,
+  crearPartida,
+  crearPartidaDesdeMundo,
+  crearAzar,
+  distanciaASegmento,
+  PASO_MAXIMO,
+  type Partida,
+} from './simulation';
 
 const PASO = 0.05;
 
@@ -179,6 +188,21 @@ describe('movimiento y colisión', () => {
     const antes = partida.jugador.x;
     correr(partida, 10);
     expect(partida.jugador.x).toBe(antes);
+  });
+
+  it('la ruta del motor (mundo propio) frena en la misma pared y avanza tick y tiempo', () => {
+    const base = crearPartida('graz', 7);
+    const partida = crearPartidaDesdeMundo('APARTMENT', base.mundo, { x: 185, y: 410 }, 7);
+    partida.jugador.velocidad = 168; // velocidad base del motor
+    partida.entrada = { x: -1, y: 0 };
+    correr(partida, 200);
+    expect(partida.jugador.x).toBeGreaterThan(90);
+    expect(partida.jugador.x).toBeLessThanOrEqual(110);
+    const antes = partida.jugador.x;
+    correr(partida, 10);
+    expect(partida.jugador.x).toBe(antes);
+    expect(partida.tick).toBe(210);
+    expect(partida.tiempo).toBeCloseTo(210 * PASO);
   });
 
   it('dos partidas con la misma semilla recorren lo mismo', () => {

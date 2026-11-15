@@ -10,6 +10,8 @@ import {
   hasSave,
   createMemoryStorage,
 } from './save';
+import { createGrazApartmentLayout } from './grazMap';
+import type { SnapshotSimulacion } from './simulation';
 
 describe('guardado: serialización', () => {
   it('serializa con la versión de esquema y la carga de vuelta', () => {
@@ -38,6 +40,25 @@ describe('guardado: serialización', () => {
     expect(parsed).not.toBeNull();
     expect(parsed!.state).toEqual(estado);
     expect(parsed!.version).toBe(SCHEMA_VERSION);
+  });
+
+  it('guarda y recupera la posición, el mundo y las puertas', () => {
+    const storage = createMemoryStorage();
+    const layout = createGrazApartmentLayout();
+    const simulacion: SnapshotSimulacion = {
+      jugador: { x: 185, y: 410, angulo: Math.PI / 2 },
+      tick: 210,
+      tiempo: 10.5,
+      mundo: {
+        paredes: layout.walls,
+        puertas: layout.doors,
+        muebles: layout.furniture,
+      },
+    };
+    expect(saveGame({ gameState: 'PLAYING', simulacion }, storage)).toBe(true);
+    const cargado = loadGame(storage);
+    expect(cargado?.simulacion).toEqual(simulacion);
+    expect(cargado?.simulacion?.mundo.puertas).toEqual(layout.doors);
   });
 
   it('borra la partida guardada', () => {

@@ -19,6 +19,7 @@ Una única página web que ejecuta un motor de juego propio sobre `<canvas>`. No
 - **Equipo policial**: C4, ariete, patada de brecha, granadas CS, táser, IFAK/torniquete, linterna, cámara térmica FLIR con paletas y visión nocturna GPNVG-18.
 - **HUD diegético**: minimapa 2D arrastrable, PiP de la bodycam de Kobra-2, retícula que sigue al cursor con lectura de munición y objetivo, radio de la central y panel EKO-Pad de planificación.
 - **Audio procedural**: sintetizado con Web Audio (disparos, pasos, ambiente, lluvia) y órdenes por voz con Web Speech.
+- **Partida reanudable**: el progreso se guarda cada cinco segundos y al ocultar o cerrar la pestaña; al volver, la operación se reconstruye conservando marcador, tiempo y tick.
 
 ## Galería
 
@@ -67,7 +68,7 @@ Una única página web que ejecuta un motor de juego propio sobre `<canvas>`. No
 | HUD compacto | `Tab` |
 | Cerrar panel / pausa | `Esc` |
 
-Las teclas de movimiento, acción y visión nocturna se pueden reasignar desde la interfaz; la configuración queda en `localStorage`.
+Las teclas de movimiento, acción y visión nocturna se pueden reasignar desde la interfaz; la configuración queda en `localStorage` bajo `eko_cobra_keybinds`. Al cargar se descartan acciones y códigos desconocidos y las teclas que falten vuelven a su valor por defecto, de modo que un JSON corrupto o una versión antigua no bloquean el input.
 
 En móvil y tablet aparecen controles en pantalla: un joystick a la izquierda para moverte (empuja hasta el borde para esprintar) y, a la derecha, **FUEGO**, **ACCIÓN**, **RECARGA**, **POSTURA**, **LINTERNA** y **EKO-PAD**. Tocar la escena apunta y dispara hacia ese punto. Conviene jugar en horizontal: en vertical el HUD se reduce a dos filas (salud, IFAK, radio, EKO-PAD y menú) y las funciones que no caben —la paleta FLIR y el comando de voz— pasan a la cabecera del EKO-PAD, y los controles, los subtítulos y las órdenes se reparten en franjas que no se pisan: la app mide el bloque inferior real (barra + avisos) y el alto de los controles y publica esas medidas como variables CSS, así que si el HUD envuelve en más filas o cambia el tamaño de letra las franjas se recolocan solas. El audio se desbloquea con el primer toque, como exigen Safari iOS y Chrome Android. Con el manifest y los iconos del emblema, en Android y escritorio el juego se instala en pantalla completa desde el propio navegador; en iOS se añade a la pantalla de inicio con `apple-touch-icon`.
 
@@ -95,13 +96,18 @@ La app queda en <http://localhost:3000>.
 
 ## Tests y CI
 
-La lógica que no depende del canvas vive en módulos puros y está cubierta por **46 tests**:
+La lógica que no depende del canvas vive en módulos puros y está cubierta por **193 tests**:
 
 - `src/game/ballistics.ts` — dispersión, zonas de impacto, daño y fatiga.
 - `src/game/roe.ts` — reglas de enfrentamiento y penalizaciones.
 - `src/game/suspectAi.ts` — reacción y rendición de sospechosos.
 - `src/game/squadAi.ts` — formaciones y comportamiento del binomio.
 - `src/game/hudMetrics.ts` — métricas del HUD.
+- `src/game/simulation.ts` — física y simulación determinista sobre los mapas reales.
+- `src/game/gameState.ts` — reductor y transiciones válidas de la partida.
+- `src/game/replay.ts` — reproducción de entradas y hashes dorados.
+- `src/game/save.ts` — serialización, versiones de esquema y almacenamiento tolerante a fallos.
+- `src/game/keybinds.ts` — validación de teclas guardadas y detección de conflictos.
 - `src/game/soundEngine.ts` — ciclo de vida del audio.
 
 GitHub Actions ejecuta typecheck, tests y build en cada push a `main` y en cada pull request.

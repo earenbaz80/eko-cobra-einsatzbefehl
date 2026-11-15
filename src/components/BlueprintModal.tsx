@@ -1,4 +1,5 @@
 import React from 'react';
+import { useModalA11y } from '../hooks/useModalA11y';
 import {
   computeLoadoutMetrics,
   EKO_COBRA_AMMO,
@@ -34,6 +35,7 @@ export const BlueprintModal: React.FC<BlueprintModalProps> = ({
   onClose,
   onDeployNow,
 }) => {
+  const dialogRef = useModalA11y();
   const [openSections, setOpenSections] = React.useState<Record<string, boolean>>({
     PROFILE: true,
     SENSORS: true,
@@ -85,7 +87,13 @@ export const BlueprintModal: React.FC<BlueprintModalProps> = ({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-7xl border border-[#334155] bg-[#0B111A] text-[#E2E8F0] shadow-2xl flex flex-col max-h-[92vh]">
+      <div className="w-full max-w-7xl border border-[#334155] bg-[#0B111A] text-[#E2E8F0] shadow-2xl flex flex-col max-h-[92vh]"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Blaupause: planificación pre-misión y equipamiento"
+        tabIndex={-1}
+      >
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#1E293B] px-6 py-4 bg-[#0F172A] shrink-0">
           <div>

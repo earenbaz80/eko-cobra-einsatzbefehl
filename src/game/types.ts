@@ -1,4 +1,4 @@
-export type GameState = 'TITLE' | 'PLAYING' | 'PAUSED' | 'SUMMARY';
+export type GameState = 'TITLE' | 'PLAYING' | 'PAUSED' | 'VICTORY' | 'DEFEAT';
 
 export type EntryPointId = 'HAUPTEINGANG_A' | 'BALKON_B';
 export type EntryDoctrine = 'STEALTH' | 'DYNAMIC';

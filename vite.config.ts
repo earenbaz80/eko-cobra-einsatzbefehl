@@ -21,11 +21,36 @@ const marcaDeBuild = (): Plugin => ({
     html.replace('</head>', `    <meta name="eko-build" content="${shaDelBuild}" />\n  </head>`),
 });
 
+// Política de seguridad de contenido: solo en el build. En desarrollo se rompería el
+// preámbulo en línea de React Refresh; el sitio publicado no tiene scripts en línea.
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com data:",
+  "img-src 'self' data: blob:",
+  "media-src 'self' data: blob:",
+  "connect-src 'self'",
+  "base-uri 'self'",
+  "form-action 'none'",
+  "object-src 'none'",
+].join('; ');
+
+const politicaDeSeguridad = (): Plugin => ({
+  name: 'eko-csp-produccion',
+  apply: 'build',
+  transformIndexHtml: (html) =>
+    html.replace(
+      '<meta charset="UTF-8" />',
+      `<meta charset="UTF-8" />\n    <meta http-equiv="Content-Security-Policy" content="${CSP}" />`
+    ),
+});
+
 export default defineConfig(() => {
   return {
     // En GitHub Pages el sitio cuelga de /eko-cobra-einsatzbefehl/; en local se queda en '/'.
     base: process.env.VITE_BASE_PATH ?? '/',
-    plugins: [react(), tailwindcss(), marcaDeBuild()],
+    plugins: [react(), tailwindcss(), marcaDeBuild(), politicaDeSeguridad()],
     resolve: {
       alias: {
         '@': path.resolve(import.meta.dirname, '.'),

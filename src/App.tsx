@@ -24,6 +24,7 @@ import {
   MicOff,
 } from 'lucide-react';
 import { TouchControls } from './components/TouchControls';
+import { useModalA11y } from './hooks/useModalA11y';
 import { construirResumen, publicarResumen, quiereMenu } from './components/errorReport';
 const BlueprintModal = lazy(() =>
   import('./components/BlueprintModal').then((m) => ({ default: m.BlueprintModal }))
@@ -45,7 +46,8 @@ const OperatorCareerModal = lazy(() =>
 );
 import { soundEngine } from './game/soundEngine';
 import { TacticalEngine } from './game/TacticalEngine';
-import { loadGame, hasSave, clearSave, saveGame } from './game/save';
+import { loadGame, hasSave, saveGame, clearSave } from './game/save';
+import { conflictosDeKeybinds } from './game/keybinds';
 import { GameState, HudSnapshot, MissionPlan, SquadCommand, COBRA_RANK_TIERS, computePlayerMissionRank, RadioFeedItem } from './game/types';
 
 const INITIAL_PLAN: MissionPlan = {
@@ -102,6 +104,13 @@ export default function App() {
   const engineRef = useRef<TacticalEngine | null>(null);
   const activeModalRef = useRef<ActiveModalId>('NONE');
   const isRebindingNvgKeyRef = useRef<boolean>(false);
+  /**
+   * Último snapshot del HUD y su firma. El primero permite guardar la partida desde un
+   * temporizador estable (sin depender de `hud` en las deps); la segunda evita
+   * re-renderizar la app cuando el motor emite el mismo estado.
+   */
+  const hudRef = useRef<HudSnapshot | null>(null);
+  const hudSignatureRef = useRef('');
 
   const [gameState, setGameState] = useState<GameState>('TITLE');
   const [plan, setPlan] = useState<MissionPlan>(INITIAL_PLAN);
@@ -155,17 +164,18 @@ export default function App() {
   // Collapsible Tactical HUD Menu States (Default closed so screen is clean and unobstructed)
   const [missionsAccordionOpen, setMissionsAccordionOpen] = useState(true);
   const [isTouchDevice, setIsTouchDevice] = useState(false);
-  const [hudCompactMode, setHudCompactMode] = useState(true);
-  const [missionPanelOpen, setMissionPanelOpen] = useState(false);
+  const [, setHudCompactMode] = useState(true);
+  const [, setMissionPanelOpen] = useState(false);
   const [tutorialActive, setTutorialActive] = useState(false);
   const [tutorialStep, setTutorialStep] = useState(0);
   const [keybindModalOpen, setKeybindModalOpen] = useState(false);
+  const keybindDialogRef = useModalA11y(keybindModalOpen);
+  const controlsDialogRef = useModalA11y(activeModal === 'CONTROLS');
   const [rebindingAction, setRebindingAction] = useState<string | null>(null);
   const [keybinds, setKeybinds] = useState<Record<string, string>>({});
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [anatomyDrawerOpen, setAnatomyDrawerOpen] = useState(false);
   const [squadDrawerOpen, setSquadDrawerOpen] = useState(false);
-  const [biometricCardOpen, setBiometricCardOpen] = useState(true);
   const [radioLogOpen, setRadioLogOpen] = useState(false);
   const [rankDrawerOpen, setRankDrawerOpen] = useState(false);
   const [pauseAuditOpen, setPauseAuditOpen] = useState(true);
@@ -339,8 +349,22 @@ export default function App() {
     const engine = new TacticalEngine(
       canvas,
       INITIAL_PLAN,
-      (snapshot) => setHud(snapshot),
-      (nextState) => setGameState(nextState)
+      (snapshot) => {
+        hudRef.current = snapshot;
+        const firma = JSON.stringify(snapshot);
+        if (firma === hudSignatureRef.current) return;
+        hudSignatureRef.current = firma;
+        setHud(snapshot);
+      },
+      (nextState) => {
+        // Al terminar la misión la partida deja de ser reanudable: se borra el guardado
+        // para que el menú no ofrezca continuar una operación ya cerrada.
+        if (nextState === 'VICTORY' || nextState === 'DEFEAT') {
+          clearSave();
+          setHasSavedGame(false);
+        }
+        setGameState(nextState);
+      }
     );
 
     // Backing store at devicePixelRatio (capped at 2); the engine draws in CSS pixels.
@@ -553,6 +577,14 @@ export default function App() {
     else if (mode === 'TIROL') engineRef.current?.startTirolOperation();
     else if (mode === 'SCHWECHAT') engineRef.current?.startSchwechatOperation();
     else engineRef.current?.startApartmentOperation();
+    // El escenario se reconstruye y luego se superpone la simulación guardada:
+    // posición, mundo y puertas, además del marcador, el tiempo y el tick.
+    engineRef.current?.restoreProgress({
+      score: typeof saved.score === 'number' ? saved.score : undefined,
+      elapsedSeconds: typeof saved.elapsedSeconds === 'number' ? saved.elapsedSeconds : undefined,
+      tick: typeof saved.tick === 'number' ? saved.tick : undefined,
+    });
+    if (saved.simulacion) engineRef.current?.restaurarSimulacion(saved.simulacion);
     setHasSavedGame(false);
   };
 
@@ -668,10 +700,11 @@ export default function App() {
 
   const handleReturnToTitle = () => {
     if (engineRef.current) {
-      engineRef.current.gameState = 'TITLE';
+      engineRef.current.cambiarEstado('RETURN_TO_TITLE');
       engineRef.current.isTrainingMode = false;
       engineRef.current.resetMission(plan);
-      setGameState('TITLE');
+      clearSave();
+      setHasSavedGame(false);
       setTutorialActive(false);
       setTutorialStep(0);
       soundEngine.stopAmbientDrone();
@@ -688,8 +721,8 @@ export default function App() {
   // que acaba de romperse, y el parámetro se limpia para que un F5 posterior tampoco.
   useEffect(() => {
     if (!quiereMenu(window.location.search)) return;
-    if (engineRef.current) engineRef.current.gameState = 'TITLE';
-    setGameState('TITLE');
+    if (engineRef.current) engineRef.current.cambiarEstado('RETURN_TO_TITLE');
+    else setGameState('TITLE');
     openModalExclusive('NONE');
     window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`);
   }, []);
@@ -777,24 +810,42 @@ export default function App() {
     }
   };
 
-  // Guardado automático de la partida en curso cada 5 s mientras se juega.
+  // Guardado automático de la partida en curso. El temporizador no depende del HUD (que
+  // cambia varias veces por segundo y antes reiniciaba el intervalo sin llegar a los 5 s):
+  // lee el último snapshot desde un ref. Se guarda además al pausar o salir de la pantalla.
   useEffect(() => {
     if (gameState !== 'PLAYING') return;
-    const id = window.setInterval(() => {
+    const persist = (silent = false) => {
       const eng = engineRef.current;
+      const ultimo = hudRef.current;
       if (!eng) return;
-      saveGame({
+      const guardado = saveGame({
         gameState: 'PLAYING',
         plan,
         missionMode: eng.missionMode,
-        elapsedSeconds: hud?.elapsedSeconds ?? 0,
-        score: hud?.score ?? 0,
+        elapsedSeconds: ultimo?.elapsedSeconds ?? 0,
+        score: ultimo?.score ?? 0,
         tick: eng.ticks,
+        simulacion: eng.capturarSimulacion() ?? undefined,
       });
-      setHasSavedGame(true);
-    }, 5000);
-    return () => window.clearInterval(id);
-  }, [gameState, plan, hud]);
+      if (guardado && !silent) setHasSavedGame(true);
+    };
+    persist();
+    const id = window.setInterval(() => persist(), 5000);
+    const alOcultar = () => {
+      if (document.visibilityState === 'hidden') persist(true);
+    };
+    const alSalir = () => persist(true);
+    window.addEventListener('pagehide', alSalir);
+    window.addEventListener('beforeunload', alSalir);
+    document.addEventListener('visibilitychange', alOcultar);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener('pagehide', alSalir);
+      window.removeEventListener('beforeunload', alSalir);
+      document.removeEventListener('visibilitychange', alOcultar);
+    };
+  }, [gameState, plan]);
 
   const handleSquadCommand = (cmd: SquadCommand) => {
     engineRef.current?.issueSquadCommand(cmd);
@@ -808,19 +859,13 @@ export default function App() {
     }
   };
 
-  const formatTime = (secs: number) => {
-    const m = Math.floor(secs / 60)
-      .toString()
-      .padStart(2, '0');
-    const s = (secs % 60).toString().padStart(2, '0');
-    return `${m}:${s}`;
-  };
-
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#080C11] select-none">
       {/* Isolated 60fps Tactical Canvas with Diegetic Smart Reticle */}
       <canvas
         ref={canvasRef}
+        role="application"
+        aria-label="Campo de operaciones táctico. Muévete con WASD, apunta y dispara con el ratón, abre el EKO-Pad con M y consulta todos los controles en el manual operativo."
         onWheel={(e) => {
           e.preventDefault();
           engineRef.current?.handleWheel(e.deltaY);
@@ -1046,7 +1091,13 @@ export default function App() {
       {/* KEYBIND REMAPPING MODAL */}
       {keybindModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#080C11]/80 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="w-full max-w-2xl border border-[#334155] bg-[#0B111A] p-5 shadow-2xl font-mono-tabular">
+          <div className="w-full max-w-2xl border border-[#334155] bg-[#0B111A] p-5 shadow-2xl font-mono-tabular"
+            ref={keybindDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Remapear teclas"
+            tabIndex={-1}
+          >
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-bold text-white">Remapear Teclas</h2>
               <button
@@ -1127,8 +1178,10 @@ export default function App() {
               >
                 Restablecer por defecto
               </button>
-              {Object.values(keybinds).some((code, i, arr) => arr.indexOf(code) !== i) && (
-                <span className="text-[10px] text-[#EF4444]">Hay teclas duplicadas</span>
+              {conflictosDeKeybinds(keybinds).length > 0 && (
+                <span className="text-[10px] text-[#EF4444]">
+                  Teclas duplicadas: {conflictosDeKeybinds(keybinds).map(formatKeyCodeLabel).join(', ')}
+                </span>
               )}
             </div>
             <p className="text-[10px] text-[#94A3B8] mt-3">
@@ -2056,7 +2109,7 @@ export default function App() {
                       [×]
                     </button>
                   </div>
-                  {hud.radioFeed.slice(0, 4).map((item, idx) => (
+                  {hud.radioFeed.slice(0, 4).map((item) => (
                     <div
                       key={item.id}
                       onClick={() => engineRef.current?.replayRadioMessage(item)}
@@ -2289,7 +2342,7 @@ export default function App() {
       )}
 
       {/* ==================== 3. UNIFIED PAUSE & MISSION SUMMARY MODAL (TRANSLUCENT) ==================== */}
-      {(gameState === 'PAUSED' || gameState === 'SUMMARY') &&
+      {(gameState === 'PAUSED' || gameState === 'VICTORY' || gameState === 'DEFEAT') &&
         activeModal === 'NONE' &&
         hud && (
           <div className="fixed inset-0 z-30 flex items-center justify-center bg-[#080C11]/55 backdrop-blur-sm p-4 md:p-6 overflow-y-auto">
@@ -2478,8 +2531,9 @@ export default function App() {
                   onClick={() => {
                     openModalExclusive('NONE');
                     if (engineRef.current) {
-                      engineRef.current.gameState = 'TITLE';
-                      setGameState('TITLE');
+                      engineRef.current.cambiarEstado('RETURN_TO_TITLE');
+                      clearSave();
+                      setHasSavedGame(false);
                     }
                   }}
                   className="px-4 py-2.5 text-xs font-semibold text-[#94A3B8] hover:text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
@@ -2563,7 +2617,13 @@ export default function App() {
             if (e.target === e.currentTarget) openModalExclusive('NONE');
           }}
         >
-          <div className="w-full max-w-4xl border border-[#334155]/70 bg-[#0B111A]/75 backdrop-blur-md text-[#E2E8F0] shadow-2xl p-6 md:p-8">
+          <div className="w-full max-w-4xl border border-[#334155]/70 bg-[#0B111A]/75 backdrop-blur-md text-[#E2E8F0] shadow-2xl p-6 md:p-8"
+            ref={controlsDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Manual operativo de controles"
+            tabIndex={-1}
+          >
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#334155]/50 pb-4 mb-6">
               <div>
                 <div className="text-xs font-mono-tabular text-[#D97706]">

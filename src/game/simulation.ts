@@ -118,7 +118,7 @@ export interface JugadorSimulado {
 }
 
 export interface Partida {
-  mision: MisionSimulada;
+  mision: string;
   semilla: number;
   tick: number;
   tiempo: number;
@@ -128,6 +128,14 @@ export interface Partida {
   entrada: { x: number; y: number };
   azar: () => number;
   avanzar: (dt: number) => void;
+}
+
+/** Estado de simulación serializable para reanudar una partida. */
+export interface SnapshotSimulacion {
+  jugador: { x: number; y: number; angulo: number };
+  tick: number;
+  tiempo: number;
+  mundo: { paredes: WallSegment[]; puertas: DoorEntity[]; muebles: FurnitureItem[] };
 }
 
 /** Paso máximo por fotograma, igual que el motor: un frame largo no atraviesa paredes. */
@@ -169,15 +177,25 @@ export function crearPartida(mision: MisionSimulada, semilla: number): Partida {
   else if (mision === 'pasillo' || mision === 'almacen') escenario = ESCENARIOS[mision];
   else throw new Error(`misión desconocida: ${mision}`);
 
-  const azar = crearAzar(semilla);
   const mundo = {
     paredes: escenario.paredes.map((pared) => ({ ...pared })),
     puertas: escenario.puertas.map((puerta) => ({ ...puerta })),
     muebles: escenario.muebles.map((mueble) => ({ ...mueble })),
   };
+  return crearPartidaDesdeMundo(mision, mundo, escenario.inicio, semilla);
+}
+
+/** Crea una partida sobre un mundo ya existente (el del motor) sin clonarlo. */
+export function crearPartidaDesdeMundo(
+  mision: string,
+  mundo: Partida['mundo'],
+  inicio: { x: number; y: number },
+  semilla: number = 0
+): Partida {
+  const azar = crearAzar(semilla);
   const jugador: JugadorSimulado = {
-    x: escenario.inicio.x,
-    y: escenario.inicio.y,
+    x: inicio.x,
+    y: inicio.y,
     radio: 9,
     velocidad: 120,
     orientacion: azar() * Math.PI * 2,

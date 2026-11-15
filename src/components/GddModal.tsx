@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useModalA11y } from '../hooks/useModalA11y';
 import {
   computeLoadoutMetrics,
   EKO_COBRA_GADGETS,
@@ -29,6 +30,7 @@ export const GddModal: React.FC<GddModalProps> = ({
   onClose,
   onStartPrototype,
 }) => {
+  const dialogRef = useModalA11y();
   const [section, setSection] = useState<GddSection>('ARSENAL_LOADOUT');
   const metrics = computeLoadoutMetrics(plan);
 
@@ -45,7 +47,13 @@ export const GddModal: React.FC<GddModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#080C11]/95 p-4 md:p-6 overflow-y-auto">
-      <div className="w-full max-w-6xl border border-[#334155] bg-[#0B111A] text-[#E2E8F0] shadow-2xl flex flex-col max-h-[92vh]">
+      <div className="w-full max-w-6xl border border-[#334155] bg-[#0B111A] text-[#E2E8F0] shadow-2xl flex flex-col max-h-[92vh]"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Documento maestro de diseño (GDD)"
+        tabIndex={-1}
+      >
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#1E293B] px-6 py-4 bg-[#0F172A] shrink-0">
           <div>

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useModalA11y } from '../hooks/useModalA11y';
 import {
   Activity,
   Award,
@@ -278,6 +279,8 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
     onAddTacticalMarker(worldX, worldY, selectedMarkerType);
   };
 
+  const dialogRef = useModalA11y(isOpen);
+
   const activeMarkerMeta =
     MARKER_MODES.find((m) => m.type === selectedMarkerType) || MARKER_MODES[0];
 
@@ -295,6 +298,11 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
         className={`w-full max-w-6xl border-[12px] border-[#1E293B] bg-[#090E17] text-[#E2E8F0] shadow-[0_0_50px_rgba(0,0,0,0.9)] font-mono-tabular flex flex-col max-h-[92vh] rounded-[2rem] overflow-hidden ${
           isVisible ? 'animate-ekopad-in' : 'animate-ekopad-out'
         }`}
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="EKO-Pad: mapa táctico, órdenes de escuadra y telemetría"
+        tabIndex={-1}
       >
         {/* Top Rugged Tablet Hardware Bezel & Telemetry Header (Collapsible inside Header) */}
         <div className="flex flex-col bg-[#0F172A]/65 border-b border-[#334155]/60">
