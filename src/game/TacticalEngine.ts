@@ -2181,6 +2181,7 @@ export class TacticalEngine extends TacticalEngineCore {
       }
 
       if (actor.role === 'SUSPECT' && actor.state === 'AIMING_WINDUP' && player) {
+        const pulse = 0.5 + 0.5 * Math.sin(this.elapsedSeconds * 12);
         ctx.strokeStyle = `rgba(239, 68, 68, ${0.35 + actor.windupProgress * 0.6})`;
         ctx.lineWidth = 1.5 + actor.windupProgress * 1.5;
         ctx.beginPath();
@@ -2199,6 +2200,50 @@ export class TacticalEngine extends TacticalEngineCore {
           -Math.PI / 2 + actor.windupProgress * Math.PI * 2
         );
         ctx.stroke();
+
+        // Pulsing warning diamond above the muzzle line.
+        ctx.fillStyle = `rgba(248, 113, 113, ${(0.55 + pulse * 0.35).toFixed(3)})`;
+        ctx.beginPath();
+        ctx.moveTo(0, -actor.radius - 24);
+        ctx.lineTo(6, -actor.radius - 17);
+        ctx.lineTo(0, -actor.radius - 10);
+        ctx.lineTo(-6, -actor.radius - 17);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // Movement intent telegraph: only alerted/investigating suspects, never patrols.
+      const isAlerted =
+        actor.state === 'ALERTED' ||
+        actor.state === 'PANIC' ||
+        actor.state === 'FLEEING' ||
+        actor.suspicionState === 'INVESTIGATING' ||
+        actor.suspicionState === 'ALERTED';
+      if (actor.role === 'SUSPECT' && isAlerted && actor.investigateTarget) {
+        const dx = actor.investigateTarget.x - actor.x;
+        const dy = actor.investigateTarget.y - actor.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 24) {
+          const len = Math.min(dist, 90);
+          ctx.save();
+          ctx.rotate(Math.atan2(dy, dx));
+          ctx.strokeStyle = 'rgba(251, 191, 36, 0.45)';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([5, 5]);
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(len, 0);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = 'rgba(251, 191, 36, 0.55)';
+          ctx.beginPath();
+          ctx.moveTo(len, 0);
+          ctx.lineTo(len - 8, -4);
+          ctx.lineTo(len - 8, 4);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
       }
 
       // For suspects, hostages, and targets, rotate coordinate system by actor.angle
