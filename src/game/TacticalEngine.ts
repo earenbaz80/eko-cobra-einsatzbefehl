@@ -280,24 +280,22 @@ export class TacticalEngine extends TacticalEngineCore {
     }
 
     // Subtle ambient vignette to frame the view and reinforce focus on the lit cone.
-    // Drawn in screen space after the world pass, before HUD/minimap overlays.
-    ctx.save();
-    const ambientVignette = ctx.createRadialGradient(
-      width * 0.5,
-      height * 0.5,
-      Math.min(width, height) * 0.32,
-      width * 0.5,
-      height * 0.5,
-      Math.max(width, height) * 0.78
-    );
-    ambientVignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
-    ambientVignette.addColorStop(
-      1,
-      this.nightMode ? 'rgba(0, 0, 12, 0.30)' : 'rgba(2, 6, 12, 0.22)'
-    );
-    ctx.fillStyle = ambientVignette;
-    ctx.fillRect(0, 0, width, height);
-    ctx.restore();
+    if (player && this.gameState === 'PLAYING') {
+      ctx.save();
+      const ambientVignette = ctx.createRadialGradient(
+        width * 0.5,
+        height * 0.5,
+        Math.min(width, height) * 0.32,
+        width * 0.5,
+        height * 0.5,
+        Math.max(width, height) * 0.78
+      );
+      ambientVignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
+      ambientVignette.addColorStop(1, 'rgba(2, 6, 12, 0.22)');
+      ctx.fillStyle = ambientVignette;
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
+    }
 
     // 11. Render Night Vision (NVG) Post-Processing Filter, Trauma Vignette, Directional Hit Flash, Peripheral Acoustic Edge Indicators & Minimap
     if (player && this.gameState === 'PLAYING') {
@@ -568,6 +566,13 @@ export class TacticalEngine extends TacticalEngineCore {
     grad.addColorStop(1, `rgba(220, 38, 38, ${alpha * 0.9})`);
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, width, height);
+
+    // Clearer suppression indicator: one pulsing red edge frame on top of the vignette.
+    const pulse = 0.5 + 0.5 * Math.sin(this.elapsedSeconds * 9);
+    const edgeAlpha = Math.min(0.9, alpha * (0.7 + pulse * 0.3));
+    ctx.strokeStyle = `rgba(239, 68, 68, ${edgeAlpha.toFixed(3)})`;
+    ctx.lineWidth = 4;
+    ctx.strokeRect(6, 6, width - 12, height - 12);
     ctx.restore();
   }
 
@@ -2113,6 +2118,29 @@ export class TacticalEngine extends TacticalEngineCore {
         actor.state === 'ARRESTED' ||
         actor.state === 'DEAD';
 
+      if (actor.role === 'SUSPECT' && actor.lastSeenX !== undefined && actor.lastSeenY !== undefined && !showFull && !actor.spottedByMirror && !actor.identifiedByRadio) {
+        const age = this.elapsedSeconds - (actor.lastSeenAt ?? 0);
+        if (age >= 0 && age < 4) {
+          ctx.save();
+          ctx.translate(actor.lastSeenX, actor.lastSeenY);
+          const alpha = (1 - age / 4) * 0.55;
+          ctx.strokeStyle = `rgba(239, 68, 68, ${alpha.toFixed(3)})`;
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          ctx.arc(0, 0, actor.radius + 9, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.restore();
+        }
+      }
+
+      if (actor.role === 'SUSPECT' && (showFull || actor.spottedByMirror || actor.identifiedByRadio)) {
+        actor.lastSeenX = actor.x;
+        actor.lastSeenY = actor.y;
+        actor.lastSeenAt = this.elapsedSeconds;
+      }
+
       if (!showFull && !actor.spottedByMirror && !actor.identifiedByRadio) continue;
 
       // Draw subtle helmet-camera telemetry link line ONLY while actively scanning an unidentified target
@@ -2183,6 +2211,21 @@ export class TacticalEngine extends TacticalEngineCore {
         this.activeTool,
         this.elapsedSeconds + this.titlePanTime
       );
+
+      // Threat readability: clear contour keyed to alert level (no gameplay change).
+      if (actor.role === 'SUSPECT' && actor.state !== 'DEAD' && actor.state !== 'ARRESTED') {
+        const contourColor =
+          actor.alertLevel === 'COMBAT'
+            ? '#EF4444'
+            : actor.alertLevel === 'READY'
+              ? '#F59E0B'
+              : '#38BDF8';
+        ctx.strokeStyle = contourColor;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, actor.radius + 5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
 
       ctx.restore();
 
