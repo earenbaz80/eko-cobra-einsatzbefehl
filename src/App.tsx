@@ -206,6 +206,8 @@ export default function App() {
     isRebindingNvgKeyRef.current = false;
     setIsRebindingNvgKey(false);
   };
+  const closeModal = () => openModalExclusive('NONE');
+  const openBlueprintModal = () => openModalExclusive('BLUEPRINT');
 
   const formatKeyCodeLabel = (code: string): string => {
     if (code.startsWith('Key')) return code.slice(3).toUpperCase();
@@ -1165,8 +1167,8 @@ export default function App() {
             isOpen={activeModal === 'PAD'}
           hud={hud}
           engineRef={engineRef}
-          onClose={() => openModalExclusive('NONE')}
-          onOpenBlueprint={() => openModalExclusive('BLUEPRINT')}
+          onClose={closeModal}
+          onOpenBlueprint={openBlueprintModal}
           onVoiceStart={startVoiceCapture}
           onVoiceStop={stopVoiceCapture}
           isListening={isListening}
@@ -1180,7 +1182,7 @@ export default function App() {
           <BlueprintModal
             plan={plan}
             onChangePlan={handlePlanChange}
-            onClose={() => openModalExclusive('NONE')}
+            onClose={closeModal}
             onDeployNow={handleStartMission}
           />
         </Suspense>
@@ -1192,7 +1194,7 @@ export default function App() {
           <GddModal
             plan={plan}
             onChangePlan={handlePlanChange}
-            onClose={() => openModalExclusive('NONE')}
+            onClose={closeModal}
             onStartPrototype={handleStartMission}
           />
         </Suspense>
@@ -1219,8 +1221,8 @@ export default function App() {
              isRebindingNvgKeyRef.current = next;
              setIsRebindingNvgKey(next);
            }}
-           onOpenBlueprint={() => openModalExclusive('BLUEPRINT')}
-           onClose={() => openModalExclusive('NONE')}
+           onOpenBlueprint={openBlueprintModal}
+           onClose={closeModal}
          />
       )}
 
@@ -1230,7 +1232,7 @@ export default function App() {
           <ArmoryInspectorModal
             plan={plan}
             onChangePlan={handlePlanChange}
-            onClose={() => openModalExclusive('NONE')}
+            onClose={closeModal}
           />
         </Suspense>
       )}
@@ -1238,7 +1240,7 @@ export default function App() {
       {/* EKIS Criminal Intelligence Database Modal */}
       {activeModal === 'INTEL' && (
         <Suspense fallback={null}>
-          <EkisIntelModal onClose={() => openModalExclusive('NONE')} />
+          <EkisIntelModal onClose={closeModal} />
         </Suspense>
       )}
 
@@ -1248,7 +1250,7 @@ export default function App() {
           <OperatorCareerModal
             xpTelemetry={hud?.xpTelemetry}
             score={hud?.score}
-            onClose={() => openModalExclusive('NONE')}
+            onClose={closeModal}
         />
         </Suspense>
       )}
