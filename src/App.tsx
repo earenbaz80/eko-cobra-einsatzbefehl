@@ -4,10 +4,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   Award,
-  ChevronDown,
-  ChevronUp,
   Crosshair,
-  Eye,
   Flame,
   Heart,
   Menu,
@@ -24,6 +21,11 @@ import {
   MicOff,
 } from 'lucide-react';
 import { TouchControls } from './components/TouchControls';
+import { TitleScreen } from './components/TitleScreen';
+import { KeybindRemapModal } from './components/KeybindRemapModal';
+import { TutorialOverlay } from './components/TutorialOverlay';
+import { PauseSummaryModal } from './components/PauseSummaryModal';
+import { ControlsModal } from './components/ControlsModal';
 import { useModalA11y } from './hooks/useModalA11y';
 import { construirResumen, publicarResumen, quiereMenu } from './components/errorReport';
 const BlueprintModal = lazy(() =>
@@ -48,7 +50,6 @@ import { soundEngine } from './game/soundEngine';
 import { instalarHookE2E } from './game/e2e';
 import { TacticalEngine } from './game/TacticalEngine';
 import { loadGame, hasSave, saveGame, clearSave } from './game/save';
-import { conflictosDeKeybinds } from './game/keybinds';
 import { GameState, HudSnapshot, MissionPlan, SquadCommand, COBRA_RANK_TIERS, computePlayerMissionRank, RadioFeedItem } from './game/types';
 
 const INITIAL_PLAN: MissionPlan = {
@@ -929,162 +930,33 @@ export default function App() {
 
       {/* ==================== 1. TITLE SCREEN OVERLAY ==================== */}
       {gameState === 'TITLE' && (
-        <div className="absolute inset-0 z-20 flex flex-col justify-between bg-gradient-to-t from-[#080C11]/95 via-[#080C11]/70 to-[#080C11]/85 p-2 sm:p-4 overflow-y-auto">
-          {/* Top Quiet Identification Line */}
-          <div className="flex items-center justify-between text-[10.5px] font-mono-tabular text-[#94A3B8] pb-1 border-b border-[#334155]/40">
-            <div>BUNDESMINISTERIUM FÜR INNERES · DIREKTION FÜR SPEZIALEINHEITEN (DSE)</div>
-            <div>EINSATZORT: GRAZ - BEZIRK LEND (STEIERMARK)</div>
-          </div>
-
-          {/* Main Content Grid: Left Hero Branding, Right Sidebar Menu with All Buttons */}
-          <div className="my-auto grid grid-cols-1 lg:grid-cols-12 gap-3 lg:gap-5 items-center w-full py-2 max-w-7xl mx-auto">
-            {/* Left Hero Lockup */}
-            <div className="lg:col-span-7 flex flex-col justify-center">
-              <div className="flex items-center gap-4 mb-2">
-                <img
-                  src={`${import.meta.env.BASE_URL}assets/aistudio/Embl_me_du_Einsatzkommando_Cobra__EKO_Cobra__ff5e252c.svg`}
-                  alt="EKO Cobra Emblem"
-                  className="w-20 h-24 sm:w-24 sm:h-28 object-contain drop-shadow-[0_0_20px_rgba(56,189,248,0.5)] shrink-0"
-                />
-                <div className="flex flex-col gap-1">
-                  <h1
-                    className="font-display text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight text-white leading-tight drop-shadow-[0_4px_12px_rgba(0,0,0,0.9)] [text-shadow:_0_2px_0_#1E293B,_0_4px_0_#0F172A,_0_6px_20px_rgba(56,189,248,0.5)]"
-                    style={{ textWrap: 'balance' }}
-                  >
-                    EKO COBRA: EINSATZBEFEHL
-                  </h1>
-                  <div className="text-[11px] sm:text-xs font-mono-tabular tracking-widest text-[#D97706] font-bold">
-                    EINSATZKOMMANDO COBRA
-                  </div>
-                </div>
-              </div>
-
-              <p className="mt-2 max-w-2xl text-xs sm:text-sm text-[#CBD5E1] leading-relaxed">
-                Simulador táctico top-down 2D de intervención policial en Austria. Cada disparo es auditado bajo la{' '}
-                <span className="text-white font-semibold">Waffengebrauchsgesetz</span>. Selecciona tu perfil de operador, equipa cámara térmica FLIR, micro-cámara óptica o gas lacrimógeno CS y arresta con vida.
-              </p>
-
-              {/* Current Pre-Mission Configuration Summary Line */}
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] font-mono-tabular text-[#94A3B8] bg-[#0F172A]/70 p-2 border border-[#334155]/60">
-                <span className="text-white font-semibold">
-                  Perfil: {hud?.profileName || 'Aufklärer / Optik-Spezialist'}
-                </span>
-                <span aria-hidden="true">·</span>
-                <span className="text-[#D97706]">
-                  Arma: {hud?.primaryName || 'Steyr AUG A3 Para 9mm'}
-                </span>
-                <span aria-hidden="true">·</span>
-                <span className="text-[#38BDF8]">
-                  Sensor [Q]: {hud?.inspectionName || 'Cámara Térmica Infrarroja'}
-                </span>
-                <span aria-hidden="true">·</span>
-                <span className="text-[#10B981]">
-                  Gadget [G]: {hud?.gadgetName || 'CS-Reizgasgranate'}
-                </span>
-              </div>
-            </div>
-
-            {/* Right Sidebar Menu with Vertical Stack (Original Title Screen Layout) */}
-            <div className="lg:col-span-5 flex flex-col gap-2.5 bg-[#080C11]/92 backdrop-blur-md border border-[#334155] p-3.5 shadow-[0_0_30px_rgba(0,0,0,0.8)]">
-              <div className="text-[10px] font-mono-tabular tracking-widest text-[#D97706] border-b border-[#334155]/60 pb-1 flex items-center justify-between">
-                <span>MENÚ TÁCTICO · INICIO</span>
-                <span className="text-[#38BDF8]">DSE-AT</span>
-              </div>
-
-              {hasSavedGame && (
-                <button
-                  onClick={handleResumeGame}
-                  className="w-full px-3 py-2 text-xs font-bold text-black bg-[#10B981] hover:bg-[#34D399] transition-colors cursor-pointer flex items-center justify-between border border-[#10B981]"
-                >
-                  <span className="flex items-center gap-2">
-                    <ArrowLeft className="w-4 h-4" />
-                    <span>REANUDAR PARTIDA GUARDADA</span>
-                  </span>
-                </button>
-              )}
-
-              {/* Misiones Dropdown / Buttons */}
-              <div className="relative">
-                <button
-                  onClick={() => {
-                    soundEngine.playUiClick();
-                    setMissionsAccordionOpen((prev) => !prev);
-                  }}
-                  className="w-full px-3 py-2 text-xs font-bold text-white bg-[#1E293B]/90 hover:bg-[#334155]/90 transition-colors cursor-pointer flex items-center justify-between border border-[#38BDF8]/40"
-                >
-                  <span className="flex items-center gap-2">
-                    <Crosshair className="w-4 h-4 text-[#38BDF8]" />
-                    <span>MISIONES EKO COBRA</span>
-                  </span>
-                  {missionsAccordionOpen ? <ChevronUp className="w-4 h-4 text-[#38BDF8]" /> : <ChevronDown className="w-4 h-4 text-[#38BDF8]" />}
-                </button>
-
-                {missionsAccordionOpen && (
-                  <div className="mt-1 flex flex-col gap-1 bg-[#080C11]/95 border border-[#38BDF8] p-1.5 shadow-xl">
-                    <button onClick={handleStartApartmentMission} className="text-left px-2.5 py-1.5 text-xs font-bold text-[#FDE68A] bg-[#0F172A] border border-[#D97706] hover:bg-[#D97706]/20 transition-colors">Misión 1: Piso Graz - Lend</button>
-                    <button onClick={handleStartInvestigationMission} className="text-left px-2.5 py-1.5 text-xs font-bold text-[#A7F3D0] bg-[#064E3B]/80 border border-[#10B981] hover:bg-[#10B981]/20 transition-colors">Misión Investigación (sin disparos)</button>
-                    <button onClick={handleStartStationMission} className="text-left px-2.5 py-1.5 text-xs font-bold text-black bg-[#38BDF8] hover:bg-[#38BDF8]/80 transition-colors">Misión 2: Estación de Trenes</button>
-                    <button onClick={handleStartNightStationMission} className="text-left px-2.5 py-1.5 text-xs font-bold text-[#E0F2FE] bg-[#0B111A] border border-[#38BDF8] hover:bg-[#38BDF8]/20 transition-colors">Misión 2B: Estación Nocturna</button>
-                    <button onClick={handleStartMetroMission} className="text-left px-2.5 py-1.5 text-xs font-bold text-[#FDE68A] bg-[#422006] border border-[#F59E0B] hover:bg-[#F59E0B]/20 transition-colors">Misión 6: Metro U3 (Incidente)</button>
-                    <button onClick={handleStartLinzMission} className="text-left px-2.5 py-1.5 text-xs font-bold text-[#A7F3D0] bg-[#064E3B]/80 border border-[#10B981] hover:bg-[#10B981]/20 transition-colors">Misión 3: Laboratorio Químico</button>
-                    <button onClick={handleStartTirolMission} className="text-left px-2.5 py-1.5 text-xs font-bold text-[#E0F2FE] bg-[#0369A1]/80 border border-[#38BDF8] hover:bg-[#38BDF8]/20 transition-colors">Misión 4: Chalet Alpino (Tirol)</button>
-                    <button onClick={handleStartSchwechatMission} className="text-left px-2.5 py-1.5 text-xs font-bold text-[#FECDD3] bg-[#881337]/80 border border-[#F43F5E] hover:bg-[#F43F5E]/20 transition-colors">Misión 5: Aeropuerto Wien-Schwechat</button>
-                    <button onClick={handleStartTrainingRange} className="text-left px-2.5 py-1.5 text-xs font-bold text-[#FDE68A] bg-[#0F172A] border border-[#F59E0B] hover:bg-[#F59E0B]/20 transition-colors">Entrenamiento de Tiro CQB</button>
-                    <button onClick={handleStartTutorial} className="text-left px-2.5 py-1.5 text-xs font-bold text-black bg-[#10B981] hover:bg-[#34D399] transition-colors">Tutorial Interactivo CQB</button>
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-1.5">
-                <button onClick={() => openModalExclusive('ARMORY')} className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-[#FDE68A] bg-[#0F172A] border border-[#F59E0B]/70 hover:bg-[#1E293B] transition-colors cursor-pointer">
-                  <Crosshair className="w-3.5 h-3.5 text-[#F59E0B]" /> Armería
-                </button>
-                <button onClick={() => openModalExclusive('INTEL')} className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-[#A7F3D0] bg-[#0F172A] border border-[#10B981]/70 hover:bg-[#1E293B] transition-colors cursor-pointer">
-                  <Radio className="w-3.5 h-3.5 text-[#10B981]" /> Inteligencia EKIS
-                </button>
-                <button onClick={() => openModalExclusive('CAREER')} className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-[#BAE6FD] bg-[#0F172A] border border-[#38BDF8]/70 hover:bg-[#1E293B] transition-colors cursor-pointer">
-                  <Award className="w-3.5 h-3.5 text-[#38BDF8]" /> Expediente
-                </button>
-                <button onClick={() => openModalExclusive('BLUEPRINT')} className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-white bg-[#0F172A] border border-[#38BDF8]/60 hover:bg-[#1E293B] transition-colors cursor-pointer">
-                  <Tablet className="w-3.5 h-3.5 text-[#38BDF8]" /> Blueprint
-                </button>
-                <button onClick={() => openModalExclusive('GDD')} className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-[#CBD5E1] bg-[#0F172A] border border-[#334155] hover:bg-[#1E293B] transition-colors cursor-pointer">
-                  <Award className="w-3.5 h-3.5 text-[#94A3B8]" /> GDD
-                </button>
-                <button onClick={() => openModalExclusive('CONTROLS')} className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-[#38BDF8] bg-[#0F172A] border border-[#334155] hover:bg-[#1E293B] transition-colors cursor-pointer">
-                  <Crosshair className="w-3.5 h-3.5 text-[#38BDF8]" /> Controles
-                </button>
-                <button
-                  onClick={() => {
-                    soundEngine.playUiClick();
-                    setKeybindModalOpen(true);
-                  }}
-                  className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-[#A7F3D0] bg-[#0F172A] border border-[#10B981]/70 hover:bg-[#1E293B] transition-colors cursor-pointer"
-                >
-                  Remapear Teclas
-                </button>
-              </div>
-
-              <button onClick={handleToggleMute} className="w-full flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-semibold text-[#E2E8F0] bg-[#0F172A] border border-[#334155] hover:bg-[#1E293B] transition-colors cursor-pointer">
-                {muted ? <VolumeX className="w-3.5 h-3.5 text-red-400" /> : <Volume2 className="w-3.5 h-3.5 text-green-400" />} Audio: {muted ? 'Silenciado' : 'Activo'}
-              </button>
-              <button onClick={handleToggleRadioAudio} title="Pitido y textura TETRA; no afecta al ticker, subtítulos ni burbujas" className="w-full flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-semibold text-[#E2E8F0] bg-[#0F172A] border border-[#334155] hover:bg-[#1E293B] transition-colors cursor-pointer">
-                <Radio className={`w-3.5 h-3.5 ${radioAudioEnabled ? 'text-[#38BDF8]' : 'text-[#94A3B8]'}`} /> Radio: {radioAudioEnabled ? 'Pitido TETRA' : 'Silenciada'}
-              </button>
-              <button onClick={handleToggleSubtitles} className="w-full flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-semibold text-[#E2E8F0] bg-[#0F172A] border border-[#334155] hover:bg-[#1E293B] transition-colors cursor-pointer">
-                Subtítulos: {subtitlesEnabled ? 'Activos' : 'Desactivados'}
-              </button>
-              <button onClick={handleCycleColorblind} className="w-full flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-semibold text-[#E2E8F0] bg-[#0F172A] border border-[#334155] hover:bg-[#1E293B] transition-colors cursor-pointer">
-                Daltonismo: {colorblindMode}
-              </button>
-            </div>
-          </div>
-
-          {/* Bottom Footer Info */}
-          <div className="text-[10px] font-mono-tabular text-[#64748B] text-center pt-1 border-t border-[#334155]/40">
-            EKO COBRA TACTICAL ENGINE v3.8 · REPUBLIK ÖSTERREICH
-          </div>
-        </div>
+        <TitleScreen
+          hud={hud}
+          hasSavedGame={hasSavedGame}
+          handleResumeGame={handleResumeGame}
+          missionsAccordionOpen={missionsAccordionOpen}
+          setMissionsAccordionOpen={setMissionsAccordionOpen}
+          handleStartApartmentMission={handleStartApartmentMission}
+          handleStartInvestigationMission={handleStartInvestigationMission}
+          handleStartStationMission={handleStartStationMission}
+          handleStartNightStationMission={handleStartNightStationMission}
+          handleStartMetroMission={handleStartMetroMission}
+          handleStartLinzMission={handleStartLinzMission}
+          handleStartTirolMission={handleStartTirolMission}
+          handleStartSchwechatMission={handleStartSchwechatMission}
+          handleStartTrainingRange={handleStartTrainingRange}
+          handleStartTutorial={handleStartTutorial}
+          openModalExclusive={openModalExclusive}
+          setKeybindModalOpen={setKeybindModalOpen}
+          handleToggleMute={handleToggleMute}
+          muted={muted}
+          handleToggleRadioAudio={handleToggleRadioAudio}
+          radioAudioEnabled={radioAudioEnabled}
+          handleToggleSubtitles={handleToggleSubtitles}
+          subtitlesEnabled={subtitlesEnabled}
+          handleCycleColorblind={handleCycleColorblind}
+          colorblindMode={colorblindMode}
+        />
       )}
 
       {/* MINIMALIST RADIO TICKER BAR (Single-line top-center, disappears after 5 seconds) */}
@@ -1119,179 +991,48 @@ export default function App() {
       )}
 
       {/* KEYBIND REMAPPING MODAL */}
-      {keybindModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#080C11]/80 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="w-full max-w-2xl border border-[#334155] bg-[#0B111A] p-5 shadow-2xl font-mono-tabular"
-            ref={keybindDialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Remapear teclas"
-            tabIndex={-1}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-white">Remapear Teclas</h2>
-              <button
-                onClick={() => {
-                  soundEngine.playUiClick();
-                  setKeybindModalOpen(false);
-                  setRebindingAction(null);
-                }}
-                className="text-[#94A3B8] hover:text-white cursor-pointer"
-              >
-                [×]
-              </button>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[60vh] overflow-y-auto pr-1">
-              {[
-                ['moveForward', 'Mover adelante'],
-                ['moveBackward', 'Mover atrás'],
-                ['moveLeft', 'Mover izquierda'],
-                ['moveRight', 'Mover derecha'],
-                ['policeShout', 'Grito policial'],
-                ['interact', 'Interactuar'],
-                ['breachKick', 'Brecha patada'],
-                ['breachC4', 'Brecha C4'],
-                ['breachRam', 'Brecha ariete'],
-                ['inspect', 'Sensor óptico'],
-                ['gadget', 'Lanzar gadget'],
-                ['toolTaser', 'Cambiar a Taser'],
-                ['flashlight', 'Linterna'],
-                ['ifak', 'IFAK / Torniquete'],
-                ['aimZone', 'Zona de impacto'],
-                ['stance', 'Cambiar postura'],
-                ['thermalPalette', 'Paleta térmica'],
-                ['biometric', 'ID biométrico'],
-                ['interrogate', 'Interrogatorio'],
-                ['reload', 'Recargar'],
-                ['clearBlastArea', 'Despejar zona C4'],
-              ].map(([action, label]) => {
-                const current = keybinds[action];
-                const conflict = Object.entries(keybinds).some(
-                  ([otherAction, otherCode]) => otherAction !== action && otherCode === current
-                );
-                return (
-                  <div
-                    key={action}
-                    className={`flex items-center justify-between gap-2 border px-3 py-2 ${
-                      conflict ? 'border-[#EF4444] bg-[#7F1D1D]/20' : 'border-[#334155] bg-[#0F172A]'
-                    }`}
-                  >
-                    <span className="text-xs text-[#CBD5E1]">{label}</span>
-                    <button
-                      onClick={() => {
-                        soundEngine.playUiClick();
-                        setRebindingAction(action);
-                      }}
-                      className={`px-2 py-1 text-xs font-bold border cursor-pointer ${
-                        rebindingAction === action
-                          ? 'border-[#F59E0B] text-[#FDE68A] bg-[#F59E0B]/20 animate-pulse'
-                          : conflict
-                            ? 'border-[#EF4444] text-[#FCA5A5] hover:bg-[#EF4444]/20'
-                            : 'border-[#38BDF8] text-[#38BDF8] hover:bg-[#38BDF8]/20'
-                      }`}
-                    >
-                      {rebindingAction === action
-                        ? 'Pulsa tecla…'
-                        : formatKeyCodeLabel(current || 'KeyA')}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="flex items-center justify-between mt-3">
-              <button
-                onClick={() => {
-                  soundEngine.playUiClick();
-                  engineRef.current?.resetKeybinds();
-                  if (engineRef.current) setKeybinds({ ...engineRef.current.keybinds });
-                }}
-                className="px-3 py-1.5 text-xs font-bold text-[#94A3B8] border border-[#334155] hover:text-white cursor-pointer"
-              >
-                Restablecer por defecto
-              </button>
-              {conflictosDeKeybinds(keybinds).length > 0 && (
-                <span className="text-[10px] text-[#EF4444]">
-                  Teclas duplicadas: {conflictosDeKeybinds(keybinds).map(formatKeyCodeLabel).join(', ')}
-                </span>
-              )}
-            </div>
-            <p className="text-[10px] text-[#94A3B8] mt-3">
-              Pulsa Escape para cancelar la asignación. Los cambios se guardan automáticamente.
-            </p>
-          </div>
-        </div>
-      )}
+      <KeybindRemapModal
+        isOpen={keybindModalOpen}
+        dialogRef={keybindDialogRef}
+        keybinds={keybinds}
+        rebindingAction={rebindingAction}
+        formatKeyCodeLabel={formatKeyCodeLabel}
+        onClose={() => {
+          soundEngine.playUiClick();
+          setKeybindModalOpen(false);
+          setRebindingAction(null);
+        }}
+        onRebind={(action) => {
+          soundEngine.playUiClick();
+          setRebindingAction(action);
+        }}
+        onReset={() => {
+          soundEngine.playUiClick();
+          engineRef.current?.resetKeybinds();
+          if (engineRef.current) setKeybinds({ ...engineRef.current.keybinds });
+        }}
+      />
 
       {/* INTERACTIVE TUTORIAL OVERLAY */}
       {gameState === 'PLAYING' && tutorialActive && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[min(92vw,42rem)] bg-[#080C11]/95 backdrop-blur-md border border-[#10B981]/70 shadow-[0_0_30px_rgba(16,185,129,0.35)] p-4 font-mono-tabular">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold text-[#10B981] tracking-widest">
-              TUTORIAL INTERACTIVO · PASO {tutorialStep + 1}/6
-            </span>
-            <button
-              onClick={() => {
-                soundEngine.playUiClick();
-                setTutorialActive(false);
-                setTutorialStep(0);
-              }}
-              className="text-[#94A3B8] hover:text-white text-xs cursor-pointer"
-            >
-              Saltar [×]
-            </button>
-          </div>
-          <div className="text-sm font-bold text-white mb-1">
-            {[
-              'Movimiento',
-              'Disparo',
-              'Postura',
-              'EKO-Pad C4I',
-              'Impacto',
-              'Despliegue',
-            ][tutorialStep]}
-          </div>
-          <div className="text-xs text-[#CBD5E1] mb-3">
-            {[
-              'Usa WASD para moverte por la galería de tiro.',
-              'Apunta con el ratón y haz clic izquierdo para disparar.',
-              'Pulsa Z para agacharte y mejorar precisión (avanza manualmente).',
-              'Pulsa M para abrir el EKO-Pad C4I.',
-              'Derriba un objetivo de la galería.',
-              'Dominas lo básico. Despliega a una misión real cuando estés listo.',
-            ][tutorialStep]}
-          </div>
-          <div className="flex items-center gap-2">
-            {tutorialStep === 2 && (
-              <button
-                onClick={() => {
-                  soundEngine.playUiClick();
-                  setTutorialStep(3);
-                }}
-                className="px-3 py-1.5 text-xs font-bold text-black bg-[#10B981] hover:bg-[#34D399] cursor-pointer"
-              >
-                Siguiente
-              </button>
-            )}
-            {tutorialStep === 5 && (
-              <button
-                onClick={() => {
-                  soundEngine.playUiClick();
-                  setTutorialActive(false);
-                  setTutorialStep(0);
-                  handleStartMission();
-                }}
-                className="px-3 py-1.5 text-xs font-bold text-black bg-[#D97706] hover:bg-[#F59E0B] cursor-pointer"
-              >
-                Desplegar a misión
-              </button>
-            )}
-            {tutorialStep < 5 && tutorialStep !== 2 && (
-              <span className="text-[10px] text-[#94A3B8]">
-                Completa la acción para avanzar…
-              </span>
-            )}
-          </div>
-        </div>
+        <TutorialOverlay
+          tutorialStep={tutorialStep}
+          onSkip={() => {
+            soundEngine.playUiClick();
+            setTutorialActive(false);
+            setTutorialStep(0);
+          }}
+          onNext={() => {
+            soundEngine.playUiClick();
+            setTutorialStep(3);
+          }}
+          onDeploy={() => {
+            soundEngine.playUiClick();
+            setTutorialActive(false);
+            setTutorialStep(0);
+            handleStartMission();
+          }}
+        />
       )}
 
       {/* VOICE COMMAND MIC INDICATOR */}
@@ -2410,204 +2151,26 @@ export default function App() {
       {(gameState === 'PAUSED' || gameState === 'VICTORY' || gameState === 'DEFEAT') &&
         activeModal === 'NONE' &&
         hud && (
-          <div className="fixed inset-0 z-30 flex items-center justify-center bg-[#080C11]/55 backdrop-blur-sm p-4 md:p-6 overflow-y-auto">
-            <div className="w-full max-w-3xl border border-[#334155]/70 bg-[#0B111A]/75 backdrop-blur-md p-6 md:p-8 shadow-2xl">
-              {/* Top Modal Switcher Bar */}
-              <div className="flex flex-wrap items-center justify-between gap-2 pb-4 mb-5 border-b border-[#1E293B] font-mono-tabular text-xs">
-                <span className="text-[#D97706] font-bold">
-                  {gameState === 'PAUSED'
-                    ? '⏸️ CENTRO DE MANDO EN PAUSA'
-                    : '📊 INFORME OFICIAL POST-OPERACIÓN'}
-                </span>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={() => openModalExclusive('PAD')}
-                    className="px-3 py-1 border border-[#38BDF8] bg-[#0F172A] text-[#38BDF8] hover:bg-[#38BDF8] hover:text-black font-bold cursor-pointer"
-                  >
-                    📱 EKO-PAD Táctico [M]
-                  </button>
-                  <button
-                    onClick={() => openModalExclusive('BLUEPRINT')}
-                    className="px-3 py-1 border border-[#334155] bg-[#0F172A] text-[#38BDF8] hover:border-[#38BDF8] cursor-pointer"
-                  >
-                    📋 Blaupause &amp; Equipo
-                  </button>
-                  <button
-                    onClick={() => openModalExclusive('GDD')}
-                    className="px-3 py-1 border border-[#334155] bg-[#0F172A] text-[#CBD5E1] hover:text-white cursor-pointer"
-                  >
-                    📘 Manual GDD
-                  </button>
-                  <button
-                    onClick={() => openModalExclusive('CONTROLS')}
-                    className="px-3 py-1 border border-[#334155] bg-[#0F172A] text-[#10B981] hover:border-[#10B981] cursor-pointer"
-                  >
-                    ⌨️ Controles
-                  </button>
-                </div>
-              </div>
-
-              {gameState === 'PAUSED' ? (
-                <>
-                  <h2 className="font-display text-3xl font-bold text-white">
-                    Einsatz in Graz - Lend (3. Stock)
-                  </h2>
-                  <p className="text-xs text-[#94A3B8] mt-1 font-mono-tabular">
-                    Perfil: {hud.profileName} · Rango: {hud.xpTelemetry.rankEs} (NV.{hud.xpTelemetry.level}) · Fatiga: {hud.fatigue}% ({hud.pulseBpm} BPM)
-                  </p>
-                </>
-              ) : (
-                <>
-                  <div className="flex items-center justify-between gap-4">
-                    <div>
-                      <div className="text-xs font-mono-tabular text-[#D97706]">
-                        AUDITORÍA FISCALÍA DE GRAZ Y DIRECCIÓN EKO COBRA
-                      </div>
-                      <h2 className="font-display text-3xl font-bold text-white mt-1">
-                        {hud.missionResult?.title}
-                      </h2>
-                    </div>
-                    <div className="px-4 py-2 border border-[#D97706] bg-[#D97706]/15 font-display text-4xl font-bold text-[#F59E0B]">
-                      GRADO {hud.missionResult?.grade}
-                    </div>
-                  </div>
-                  <p className="text-sm text-[#CBD5E1] mt-3 leading-relaxed">
-                    {hud.missionResult?.subtitle}
-                  </p>
-                </>
-              )}
-
-              {/* ROE & XP Metrics Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 my-5 font-mono-tabular">
-                <div className="border border-[#1E293B] bg-[#080C11] p-3">
-                  <div className="text-[10px] text-[#94A3B8]">PUNTUACIÓN ROE</div>
-                  <div className="text-lg font-bold text-white mt-0.5">{hud.score} PTS</div>
-                </div>
-                <div className="border border-[#1E293B] bg-[#080C11] p-3">
-                  <div className="text-[10px] text-[#94A3B8]">SOSPECHOSOS</div>
-                  <div className="text-lg font-bold text-[#10B981] mt-0.5">
-                    {hud.suspectsSecured}/{hud.suspectsTotal}
-                  </div>
-                </div>
-                <div className="border border-[#1E293B] bg-[#080C11] p-3">
-                  <div className="text-[10px] text-[#94A3B8]">REHENES SALVOS</div>
-                  <div className="text-lg font-bold text-[#38BDF8] mt-0.5">
-                    {hud.hostagesSecured}/{hud.hostagesTotal}
-                  </div>
-                </div>
-                <div className="border border-[#1E293B] bg-[#080C11] p-3">
-                  <div className="text-[10px] text-[#94A3B8]">XP OPERADOR</div>
-                  <div className="text-lg font-bold text-[#FBBF24] mt-0.5">
-                    +{hud.xpTelemetry.sessionXp} XP
-                  </div>
-                </div>
-              </div>
-
-              {/* Collapsible ROE Event Audit Log (Smooth Accordion fadeIn / fadeOut) */}
-              {hud.roeEvents.length > 0 && (
-                <div className="border border-[#1E293B] bg-[#080C11] mb-6 font-mono-tabular">
-                  <button
-                    onClick={() => {
-                      soundEngine.playUiClick();
-                      setPauseAuditOpen((v) => !v);
-                    }}
-                    className="w-full flex items-center justify-between px-4 py-2.5 text-xs text-[#94A3B8] hover:text-white cursor-pointer"
-                  >
-                    <span>
-                      REGISTRO DE AUDITORÍA LEGAL (WAFFENGEBRAUCHSGESETZ) · {hud.roeEvents.length}{' '}
-                      EVENTOS
-                    </span>
-                    <span>{pauseAuditOpen ? '▾ PLEGAR' : '▸ DESPLEGAR'}</span>
-                  </button>
-                  <div
-                    className={`tactical-collapse-grid ${
-                      pauseAuditOpen ? 'tactical-collapse-open' : 'tactical-collapse-closed'
-                    }`}
-                  >
-                    <div className="overflow-hidden">
-                      <div className="px-4 pb-3 pt-1 border-t border-[#1E293B] max-h-40 overflow-y-auto space-y-1.5 text-xs">
-                        {hud.roeEvents.map((ev) => (
-                          <div key={ev.id} className="flex items-center justify-between gap-2">
-                            <span className="text-[#CBD5E1]">{ev.label}</span>
-                            <span className={ev.lawful ? 'text-[#10B981]' : 'text-[#EF4444]'}>
-                              {ev.points > 0 ? `+${ev.points}` : ev.points} PTS
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Critical Events Timeline (After Action Review - AAR) */}
-              {hud.criticalEvents && hud.criticalEvents.length > 0 && (
-                <div className="border border-[#334155] bg-[#080C11] p-3 mb-5 font-mono-tabular">
-                  <div className="text-xs font-bold text-[#38BDF8] border-b border-[#1E293B] pb-1.5 mb-2 flex items-center justify-between">
-                    <span>⏱️ CRONOLOGÍA DETALLADA DE EVENTOS (AFTER ACTION REVIEW - AAR)</span>
-                    <span className="text-[#94A3B8] text-[10px]">{hud.criticalEvents.length} eventos registrados</span>
-                  </div>
-                  <div className="max-h-44 overflow-y-auto space-y-1.5 text-[11px] pr-1">
-                    {hud.criticalEvents.map((ev) => (
-                      <div key={ev.id} className="flex items-center justify-between gap-2 p-1.5 bg-[#0F172A]/70 border border-[#1E293B]">
-                        <div className="flex items-center gap-2 truncate">
-                          <span className="px-1.5 py-0.5 text-[9px] bg-[#1E293B] text-[#38BDF8] font-bold shrink-0">{ev.timeStr}</span>
-                          <span className={`text-[9px] font-extrabold uppercase px-1 rounded shrink-0 ${
-                            ev.severity === 'SUCCESS' ? 'bg-[#064E3B] text-[#A7F3D0]' :
-                            ev.severity === 'VIOLATION' ? 'bg-[#7F1D1D] text-[#FCA5A5]' :
-                            ev.severity === 'WARN' ? 'bg-[#78350F] text-[#FDE68A]' : 'bg-[#1E293B] text-[#CBD5E1]'
-                          }`}>
-                            {ev.type}
-                          </span>
-                          <span className="text-white truncate font-medium">{ev.title}</span>
-                          <span className="text-[#94A3B8] text-[10px] truncate">({ev.location})</span>
-                        </div>
-                        {ev.pointsDelta !== undefined && (
-                          <span className={`font-bold shrink-0 text-xs ${ev.pointsDelta >= 0 ? 'text-[#10B981]' : 'text-[#EF4444]'}`}>
-                            {ev.pointsDelta >= 0 ? `+${ev.pointsDelta}` : ev.pointsDelta} PTS
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Action Buttons */}
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-3">
-                  {gameState === 'PAUSED' && (
-                    <button
-                      onClick={() => engineRef.current?.handleKeyDown('Escape')}
-                      className="px-5 py-2.5 text-xs font-bold text-black bg-[#D97706] hover:bg-[#F59E0B] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                    >
-                      Continuar Operación [Esc]
-                    </button>
-                  )}
-                  <button
-                    onClick={handleStartMission}
-                    className="px-5 py-2.5 text-xs font-bold text-white bg-[#1E293B] border border-[#475569] hover:border-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                  >
-                    Reiniciar Intervención
-                  </button>
-                </div>
-
-                <button
-                  onClick={() => {
-                    openModalExclusive('NONE');
-                    if (engineRef.current) {
-                      engineRef.current.cambiarEstado('RETURN_TO_TITLE');
-                      clearSave();
-                      setHasSavedGame(false);
-                    }
-                  }}
-                  className="px-4 py-2.5 text-xs font-semibold text-[#94A3B8] hover:text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  Menú Principal
-                </button>
-              </div>
-            </div>
-          </div>
+          <PauseSummaryModal
+            gameState={gameState as 'PAUSED' | 'VICTORY' | 'DEFEAT'}
+            hud={hud}
+            pauseAuditOpen={pauseAuditOpen}
+            onToggleAudit={() => {
+              soundEngine.playUiClick();
+              setPauseAuditOpen((v) => !v);
+            }}
+            onOpenModal={openModalExclusive}
+            onContinue={() => engineRef.current?.handleKeyDown('Escape')}
+            onRestart={handleStartMission}
+            onReturnTitle={() => {
+              openModalExclusive('NONE');
+              if (engineRef.current) {
+                engineRef.current.cambiarEstado('RETURN_TO_TITLE');
+                clearSave();
+                setHasSavedGame(false);
+              }
+            }}
+          />
         )}
 
       {/* ==================== 4. INTERACTIVE EKO-PAD C4I TABLET MODAL (With FadeIn / FadeOut & Temporary Markers) ==================== */}
@@ -2676,264 +2239,29 @@ export default function App() {
 
       {/* ==================== 7. TACTICAL CONTROLS & CQB DOCTRINE MODAL ==================== */}
       {activeModal === 'CONTROLS' && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#080C11]/55 backdrop-blur-sm p-4 md:p-6 overflow-y-auto"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) openModalExclusive('NONE');
-          }}
-        >
-          <div className="w-full max-w-4xl border border-[#334155]/70 bg-[#0B111A]/75 backdrop-blur-md text-[#E2E8F0] shadow-2xl p-6 md:p-8"
-            ref={controlsDialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Manual operativo de controles"
-            tabIndex={-1}
-          >
-            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#334155]/50 pb-4 mb-6">
-              <div>
-                <div className="text-xs font-mono-tabular text-[#D97706]">
-                  MANUAL OPERATIVO DE CONTROLES · EKO COBRA CQB
-                </div>
-                <h2 className="font-display text-2xl md:text-3xl font-bold text-white mt-0.5">
-                  Controles Tácticos, EKO-PAD, Brechas Acústicas y ROE
-                </h2>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => openModalExclusive('BLUEPRINT')}
-                  className="px-3.5 py-2 text-xs font-semibold border border-[#334155]/70 bg-[#080C11]/55 text-[#38BDF8] hover:border-[#38BDF8] cursor-pointer"
-                >
-                  Ir a Blaupause
-                </button>
-                <button
-                  onClick={() => openModalExclusive('NONE')}
-                  className="px-4 py-2 text-xs font-bold bg-[#D97706] text-black hover:bg-[#F59E0B] cursor-pointer"
-                >
-                  Cerrar [Esc]
-                </button>
-              </div>
-            </div>
-
-            {/* GLOBAL HUD OPACITY CONTROL BAR (SLIDER + PRESET BUTTONS) */}
-            <div className="mb-5 border border-[#38BDF8]/50 bg-[#080C11]/70 p-4 font-mono-tabular shadow-lg">
-              <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-                <div>
-                  <div className="text-xs font-bold text-[#38BDF8] flex items-center gap-2">
-                    <span>🎛️ OPACIDAD GLOBAL DE LA INTERFAZ TÁCTICA (HUD &amp; MINIMAPA)</span>
-                    <span className="px-2 py-0.5 text-[10px] font-extrabold bg-[#38BDF8]/20 border border-[#38BDF8] text-[#BAE6FD]">
-                      {hudOpacity}%
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-[#94A3B8] mt-0.5">
-                    Ajusta la transparencia global de todos los paneles del HUD, barra TETRA y minimapa para despejar la visión durante entradas CQB intensas.
-                  </p>
-                </div>
-
-                {/* Step & Preset Buttons */}
-                <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
-                  <button
-                    onClick={() => handleHudOpacityChange(hudOpacity - 10, true)}
-                    disabled={hudOpacity <= 15}
-                    className="px-2 py-1 border border-[#334155] bg-[#0F172A] text-[#CBD5E1] hover:text-white hover:border-[#38BDF8] disabled:opacity-40 cursor-pointer font-bold"
-                    title="Reducir opacidad un 10%"
-                  >
-                    −10%
-                  </button>
-                  {[
-                    { val: 25, label: '25% Sigilo' },
-                    { val: 50, label: '50% Táctico' },
-                    { val: 75, label: '75% Medio' },
-                    { val: 90, label: '90% Estándar' },
-                    { val: 100, label: '100% Máx.' },
-                  ].map((preset) => (
-                    <button
-                      key={preset.val}
-                      onClick={() => handleHudOpacityChange(preset.val, true)}
-                      className={`px-2.5 py-1 border transition-colors cursor-pointer font-semibold ${
-                        hudOpacity === preset.val
-                          ? 'bg-[#38BDF8] text-black border-[#38BDF8] font-bold shadow-[0_0_10px_rgba(56,189,248,0.4)]'
-                          : 'bg-[#0F172A]/80 border-[#334155] text-[#CBD5E1] hover:text-white hover:border-[#38BDF8]/60'
-                      }`}
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => handleHudOpacityChange(hudOpacity + 10, true)}
-                    disabled={hudOpacity >= 100}
-                    className="px-2 py-1 border border-[#334155] bg-[#0F172A] text-[#CBD5E1] hover:text-white hover:border-[#38BDF8] disabled:opacity-40 cursor-pointer font-bold"
-                    title="Aumentar opacidad un 10%"
-                  >
-                    +10%
-                  </button>
-                </div>
-              </div>
-
-              {/* Interactive Range Slider with Visual Scale */}
-              <div className="flex items-center gap-3">
-                <span className="text-[10px] text-[#94A3B8] shrink-0">15% (Mín)</span>
-                <div className="relative flex-1 flex items-center">
-                  <input
-                    type="range"
-                    min={15}
-                    max={100}
-                    step={5}
-                    value={hudOpacity}
-                    onChange={(e) => handleHudOpacityChange(Number(e.target.value))}
-                    aria-label="Control deslizante de opacidad global del HUD"
-                    className="w-full h-2 bg-[#1E293B] accent-[#38BDF8] cursor-pointer"
-                  />
-                </div>
-                <span className="text-[10px] text-[#94A3B8] shrink-0">100% (Opaco)</span>
-              </div>
-            </div>
-
-            {/* NIGHT VISION (NVG) POST-PROCESSING & CONFIGURABLE KEYBIND BAR */}
-            <div className="mb-5 border border-[#10B981]/55 bg-[#080C11]/75 p-4 font-mono-tabular shadow-lg">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="text-xs font-bold text-[#34D399] flex items-center gap-2">
-                    <Eye className="w-4 h-4 text-[#10B981]" />
-                    <span>VISIÓN NOCTURNA MONOCROMÁTICA (GPNVG-18 GEN-3 PHOSPHOR)</span>
-                    <span className="px-2 py-0.5 text-[10px] font-extrabold bg-[#10B981]/20 border border-[#10B981] text-[#A7F3D0]">
-                      TECLA [{formatKeyCodeLabel(nvgKeyCode)}]
-                    </span>
-                    {hud?.nvgActive && (
-                      <span className="px-2 py-0.5 text-[10px] font-extrabold bg-[#10B981] text-black animate-pulse">
-                        ACTIVA (+24dB)
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-[#94A3B8] mt-0.5">
-                    Aplica un filtro de post-procesamiento de fósforo verde monocromático e intensificación de luz residual que amplifica el contraste en habitaciones oscuras sin delatar tu posición con la linterna.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
-                  <button
-                    onClick={() => engineRef.current?.toggleNightVision()}
-                    className={`px-3 py-1.5 border font-bold transition-colors cursor-pointer ${
-                      hud?.nvgActive
-                        ? 'bg-[#10B981] text-black border-[#34D399] shadow-[0_0_12px_rgba(16,185,129,0.5)]'
-                        : 'bg-[#0F172A] text-[#34D399] border-[#10B981]/60 hover:bg-[#10B981]/20'
-                    }`}
-                  >
-                    {hud?.nvgActive ? '🟢 NVG: ENCENDIDA' : '⚫ NVG: APAGADA'}
-                  </button>
-
-                  <span className="text-[#475569] mx-0.5">|</span>
-                  <span className="text-[#94A3B8]">Tecla:</span>
-                  {[
-                    { code: 'KeyN', label: '[N]' },
-                    { code: 'KeyK', label: '[K]' },
-                    { code: 'KeyJ', label: '[J]' },
-                    { code: 'KeyP', label: '[P]' },
-                  ].map((kb) => (
-                    <button
-                      key={kb.code}
-                      onClick={() => {
-                        isRebindingNvgKeyRef.current = false;
-                        setIsRebindingNvgKey(false);
-                        handleNvgKeyChange(kb.code, true);
-                      }}
-                      className={`px-2 py-1 border transition-colors cursor-pointer font-semibold ${
-                        nvgKeyCode === kb.code && !isRebindingNvgKey
-                          ? 'bg-[#10B981] text-black border-[#10B981] font-bold'
-                          : 'bg-[#0F172A]/80 border-[#334155] text-[#CBD5E1] hover:text-white hover:border-[#10B981]/60'
-                      }`}
-                    >
-                      {kb.label}
-                    </button>
-                  ))}
-
-                  <button
-                    onClick={() => {
-                      soundEngine.playUiClick();
-                      const next = !isRebindingNvgKey;
-                      isRebindingNvgKeyRef.current = next;
-                      setIsRebindingNvgKey(next);
-                    }}
-                    className={`px-2.5 py-1 border transition-colors cursor-pointer font-bold ${
-                      isRebindingNvgKey
-                        ? 'bg-[#F59E0B] text-black border-[#FDE68A] animate-pulse'
-                        : 'bg-[#0F172A] border-[#38BDF8]/60 text-[#38BDF8] hover:bg-[#38BDF8]/20'
-                    }`}
-                    title="Haz clic y pulsa cualquier tecla del teclado para asignarla a la Visión Nocturna"
-                  >
-                    {isRebindingNvgKey
-                      ? '⌨️ Pulsa una tecla...'
-                      : `Personalizar [${formatKeyCodeLabel(nvgKeyCode)}]`}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 font-mono-tabular text-xs">
-              <div className="border border-[#334155]/55 bg-[#080C11]/50 p-4 space-y-2.5">
-                <div className="text-[#F59E0B] font-bold text-sm">
-                  01. MOVIMIENTO, PASOS Y FATIGA
-                </div>
-                <p className="text-[#CBD5E1]">
-                  <strong>[WASD / Flechas]:</strong> Caminar táctico (pasos silenciosos y firmes).
-                </p>
-                <p className="text-[#CBD5E1]">
-                  <strong>[Shift + WASD]:</strong> Correr / Sprint táctico (+36% velocidad, pasos fuertes de botas y equipo, aumenta la barra de <strong>Fatiga</strong>).
-                </p>
-                <p className="text-[#CBD5E1]">
-                  <strong>[Mantener Z / Alt / Ctrl]:</strong> <strong>Apuntado Enfocado (Präzisionsanschlag)</strong> — amortigua la velocidad de giro del operador, reduce la dispersión un 38% y aumenta la precisión de tiro.
-                </p>
-                <p className="text-[#94A3B8]">
-                  <strong>Fatiga y Signos Vitales:</strong> Correr o recibir impactos aumenta la fatiga y los BPM tuyos y de Kobra-2, reduciendo la precisión y estabilidad hasta descansar.
-                </p>
-              </div>
-
-              <div className="border border-[#334155]/55 bg-[#080C11]/50 p-4 space-y-2.5">
-                <div className="text-[#38BDF8] font-bold text-sm">
-                  02. EKO-PAD C4I, INTERROGATORIO Y ROE
-                </div>
-                <p className="text-[#CBD5E1]">
-                  <strong>[Tecla M]:</strong> Abrir el <strong>EKO-PAD Táctico</strong> (Colocar marcadores en tiempo real).
-                </p>
-                <p className="text-[#CBD5E1]">
-                  <strong>[Tecla I]:</strong> <strong>Interrogatorio Exprès</strong> a sospechosos esposados (revela a todos los hostiles y rehenes ocultos en la red C4I +100 XP).
-                </p>
-                <p className="text-[#CBD5E1]">
-                  <strong>[Tecla B]:</strong> Identificar objetivo por cámara en radio TETRA (+90 / +75 PTS ROE y XP).
-                </p>
-                <p className="text-[#CBD5E1]">
-                  <strong>[Tecla V] / [Espacio]:</strong> <strong>Modo Torso/Extremidades (§7 WVG)</strong> · Grito policial <em>&quot;¡POLIZEI!&quot;</em>.
-                </p>
-                <p className="text-[#38BDF8] text-[11px] bg-[#0F172A]/70 p-2 border border-[#38BDF8]/40">
-                  📷 <strong>Bodycam PIP de Kobra-2:</strong> Transmisión en directo de la cámara de casco de Kobra-2 en la esquina superior izquierda.
-                </p>
-                <p className="text-[#CBD5E1]">
-                  <strong>[Tecla T] / [Tecla H]:</strong> Alternar Taser X2 / Aplicar torniquete IFAK.
-                </p>
-              </div>
-
-              <div className="border border-[#334155]/55 bg-[#080C11]/50 p-4 space-y-2.5">
-                <div className="text-[#10B981] font-bold text-sm">
-                  03. BALÍSTICA, BREACHING Y ÓRDENES CQB
-                </div>
-                <p className="text-[#CBD5E1]">
-                  <strong>Disparo a Cerraduras &amp; Penetración:</strong> Disparar a la cerradura de una puerta la destruye y la fuerza al instante. Munición FMJ y AP atraviesa tabiques de yeso y puertas de madera.
-                </p>
-                <p className="text-[#CBD5E1]">
-                  <strong>[Clic Derecho en Puertas/Ventanas]:</strong> Menú táctico emergente para Kobra-2 (brechado, sonda u órdenes).
-                </p>
-                <p className="text-[#CBD5E1]">
-                  <strong>[F] Patada / [X] Ariete / [C] C4:</strong> Abrir brecha en puertas o ventanas exteriores con astillado real y destrucción de muebles por impacto.
-                </p>
-                <p className="text-[#CBD5E1]">
-                  <strong>[Q] / [G] / [L] / [{formatKeyCodeLabel(nvgKeyCode)}]:</strong> Sensor óptico/térmico, Lanzar granada CS/Flash, Linterna y Visión Nocturna GPNVG-18 (NVG).
-                </p>
-                <p className="text-[#CBD5E1]">
-                  <strong>[1]–[8] Órdenes CQB:</strong> [1] Seguimiento · [2] Posición · [3] Brechar · [4] Sonda · [5] Gas CS · [6] Esposar · [7] Supresión · [8] Reagrupar.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
+         <ControlsModal
+           controlsDialogRef={controlsDialogRef}
+           nvgActive={hud?.nvgActive ?? false}
+           hudOpacity={hudOpacity}
+           onHudOpacityChange={handleHudOpacityChange}
+           nvgKeyCode={nvgKeyCode}
+           isRebindingNvgKey={isRebindingNvgKey}
+           formatKeyCodeLabel={formatKeyCodeLabel}
+           onToggleNightVision={() => engineRef.current?.toggleNightVision()}
+           onSelectNvgKey={(code) => {
+             isRebindingNvgKeyRef.current = false;
+             setIsRebindingNvgKey(false);
+             handleNvgKeyChange(code, true);
+           }}
+           onRebindToggle={() => {
+             soundEngine.playUiClick();
+             const next = !isRebindingNvgKey;
+             isRebindingNvgKeyRef.current = next;
+             setIsRebindingNvgKey(next);
+           }}
+           onOpenBlueprint={() => openModalExclusive('BLUEPRINT')}
+           onClose={() => openModalExclusive('NONE')}
+         />
       )}
 
       {/* Armory Inspector Modal */}
