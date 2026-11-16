@@ -556,7 +556,7 @@ export class TacticalEngine extends TacticalEngineCore {
     width: number,
     height: number
   ) {
-    const unsafeArmedC4 = this.activeC4Charges.filter(
+    const unsafeArmedC4 = this.c4.charges.filter(
       (charge) => !this.isBlastAreaClear(charge)
     );
     if (unsafeArmedC4.length === 0) return;
@@ -1599,10 +1599,10 @@ export class TacticalEngine extends TacticalEngineCore {
     this.renderExteriorWindows(ctx);
 
     // Progreso diegético de la colocación de C4 sobre el objetivo.
-    if (this.c4Planting) {
-      const ratio = Math.min(1, this.c4Planting.progress / this.c4Planting.maxProgress);
+    if (this.c4.planting) {
+      const ratio = Math.min(1, this.c4.planting.progress / this.c4.planting.maxProgress);
       ctx.save();
-      ctx.translate(this.c4Planting.x, this.c4Planting.y);
+      ctx.translate(this.c4.planting.x, this.c4.planting.y);
       ctx.strokeStyle = 'rgba(239, 68, 68, 0.35)';
       ctx.lineWidth = 4;
       ctx.beginPath();
@@ -1620,7 +1620,7 @@ export class TacticalEngine extends TacticalEngineCore {
     }
 
     // Render Active Placed C4 Charges on doors/windows with flashing LED & countdown badge
-    for (const charge of this.activeC4Charges) {
+    for (const charge of this.c4.charges) {
       ctx.save();
       ctx.translate(charge.x, charge.y);
       ctx.fillStyle = '#1E293B';

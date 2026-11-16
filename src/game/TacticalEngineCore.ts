@@ -55,7 +55,9 @@ import {
   RadioFeed
 } from './radioFeed';
 import {
-  C4ChargeSystem
+  C4ChargeSystem,
+  C4_SAFE_RADIUS,
+  type C4Dependencies
 } from './c4Charges';
 import {
   chooseSquadSteeringAngle,
@@ -321,11 +323,6 @@ export const AUSTRIAN_SHOUTS = [
   'POLIZEI! ERGEBEN SIE SICH!',
 ];
 
-/** Tiempo visible de colocación de la carga antes de armarla. */
-const C4_PLANT_SECONDS = 1.7;
-/** Radio de seguridad para detonar sin alcanzar a los propios agentes. */
-const C4_SAFE_RADIUS = 190;
-
 /** World-to-screen zoom shared by rendering, aiming and hit testing. */
 export const CAMERA_ZOOM = 1.55;
 
@@ -556,25 +553,6 @@ public nightMode: boolean = false;
   protected gadgetCount: number = 3;
   protected ifakCount: number = 2;
   protected c4: C4ChargeSystem = new C4ChargeSystem();
-
-  public get c4Count(): number {
-    return this.c4.count;
-  }
-  public set c4Count(value: number) {
-    this.c4.count = value;
-  }
-  public get activeC4Charges(): ActiveC4Charge[] {
-    return this.c4.charges;
-  }
-  public set activeC4Charges(value: ActiveC4Charge[]) {
-    this.c4.charges = value;
-  }
-  public get c4Planting(): C4ChargeSystem['planting'] {
-    return this.c4.planting;
-  }
-  public set c4Planting(value: C4ChargeSystem['planting']) {
-    this.c4.planting = value;
-  }
   protected c4WarningBeepTimer: number = 0;
   protected aimZoneMode: 'TORSO' | 'EXTREMITIES' = 'TORSO';
   protected modeSwitchPulseTimer: number = 0;
@@ -1003,13 +981,13 @@ public nightMode: boolean = false;
     const door = this.doors.find((d) => d.id === 'TRAINING_DOOR');
     if (!door || door.isOpen) return;
     if (mode === 'C4') {
-      this.beginC4Plant({
+      this.c4.beginPlant({
         targetName: door.name,
         x: (door.x1 + door.x2) / 2,
         y: (door.y1 + door.y2) / 2,
         doorId: door.id,
         isWindow: false,
-      });
+      }, this.c4Dependencies);
       return;
     }
     this.initiateBreach(door, mode);
@@ -2889,130 +2867,34 @@ public nightMode: boolean = false;
 
     const door = this.findNearestDoor(player.x, player.y, 65);
     if (door && !door.isOpen) {
-      this.beginC4Plant({
+      this.c4.beginPlant({
         targetName: door.name,
         x: (door.x1 + door.x2) / 2,
         y: (door.y1 + door.y2) / 2,
         doorId: door.id,
         isWindow: false,
-      });
+      }, this.c4Dependencies);
       return;
     }
 
     const extWin = this.findNearestExteriorWindow(player.x, player.y, 68);
     if (extWin && !extWin.isBreached) {
-      this.beginC4Plant({
+      this.c4.beginPlant({
         targetName: extWin.label || 'Ventana Exterior',
         x: (extWin.x1 + extWin.x2) / 2,
         y: (extWin.y1 + extWin.y2) / 2,
         windowId: extWin.id,
         isWindow: true,
-      });
+      }, this.c4Dependencies);
     }
-  }
-
-  /**
-   * Coloca una carga con un tiempo visible. La carga no se arma ni consume
-   * inventario hasta que el proceso termina; si el operador se aleja, se cancela.
-   */
-  protected beginC4Plant(target: {
-    targetName: string;
-    x: number;
-    y: number;
-    doorId?: string;
-    windowId?: string;
-    isWindow: boolean;
-  }): boolean {
-    if (this.c4.planting) return false;
-    if (this.c4.count <= 0) {
-      this.pushRadio('KOBRA-1', 'Keine Sprengladungen (C4) mehr verfügbar!', 'warn');
-      return false;
-    }
-    const alreadyPlaced = this.c4.charges.some((charge) =>
-      target.doorId ? charge.doorId === target.doorId : charge.windowId === target.windowId
-    );
-    if (alreadyPlaced) {
-      this.pushRadio('KOBRA-1', `Ya hay una carga activa en ${target.targetName}.`, 'warn');
-      return false;
-    }
-
-    this.c4.planting = {
-      ...target,
-      progress: 0,
-      maxProgress: C4_PLANT_SECONDS,
-    };
-    soundEngine.playBreachPrep('C4');
-    this.pushRadio(
-      'KOBRA-1',
-      `Colocando C4 en ${target.targetName}... mantén la posición [${C4_PLANT_SECONDS.toFixed(1)}s].`,
-      'warn'
-    );
-    this.emitHudSnapshot();
-    return true;
-  }
-
-  /** Avanza la colocación y arma la carga sólo al terminar el gesto. */
-  protected updateC4Planting(dt: number): void {
-    const planting = this.c4.planting;
-    if (!planting) return;
-
-    const player = this.getPlayer();
-    if (!player || player.state === 'DEAD') {
-      this.c4.planting = undefined;
-      this.emitHudSnapshot();
-      return;
-    }
-
-    if (planting.doorId) {
-      const door = this.doors.find((item) => item.id === planting.doorId);
-      if (!door || door.isOpen || door.isDestroyed) {
-        this.c4.planting = undefined;
-        this.pushRadio('KOBRA-1', 'C4 cancelada: la puerta dejó de ser un objetivo válido.', 'warn');
-        this.emitHudSnapshot();
-        return;
-      }
-    }
-
-    // En la galería de tiro el control [C] coloca la carga de forma remota para
-    // poder practicar la secuencia completa sin recorrer el pasillo.
-    if (!this.isTrainingMode && Math.hypot(player.x - planting.x, player.y - planting.y) > 100) {
-      this.c4.planting = undefined;
-      this.pushRadio('KOBRA-1', 'C4 cancelada: el operador se alejó antes de terminar la colocación.', 'warn');
-      this.emitHudSnapshot();
-      return;
-    }
-
-    planting.progress += dt;
-    if (planting.progress < planting.maxProgress) return;
-
-    this.c4.planting = undefined;
-    if (!this.isTrainingMode) {
-      this.c4.count = Math.max(0, this.c4.count - 1);
-    }
-    this.c4.charges.push({
-      id: 'c4_' + Math.random().toString(36).substring(2, 9),
-      targetName: planting.targetName,
-      x: planting.x,
-      y: planting.y,
-      remainingSeconds: 0,
-      maxSeconds: 0,
-      doorId: planting.doorId,
-      windowId: planting.windowId,
-      isWindow: planting.isWindow,
-      phase: 'ARMED',
-      safeToDetonate: false,
-    });
-    soundEngine.playC4WarningBeep(1.1);
-    this.pushRadio(
-      'KOBRA-1',
-      `C4 ARMADA en ${planting.targetName}. Ordena despejar la zona [J]; la detonación queda bloqueada hasta que el binomio esté a distancia segura.`,
-      'warn'
-    );
-    this.emitHudSnapshot();
   }
 
   /** Comprueba que ningún agente propio quede dentro del radio de la explosión. */
   public isBlastAreaClear(charge: ActiveC4Charge): boolean {
+    return this.c4.isBlastAreaClear(charge, this.getBlastFriendlies());
+  }
+
+  private getBlastFriendlies(): ActorEntity[] {
     const friendlies = this.actors.filter(
       (actor) =>
         (actor.role === 'PLAYER' || actor.role === 'SQUAD') &&
@@ -3024,9 +2906,7 @@ public nightMode: boolean = false;
       if (player && player.state !== 'DEAD') friendlies.push(player);
       if (squad && squad.state !== 'DEAD') friendlies.push(squad);
     }
-    return friendlies.every(
-      (actor) => Math.hypot(actor.x - charge.x, actor.y - charge.y) >= C4_SAFE_RADIUS
-    );
+    return friendlies;
   }
 
   /** Punto de reunión fuera del radio de la carga, evitando paredes y mobiliario. */
@@ -3062,29 +2942,24 @@ public nightMode: boolean = false;
   }
 
   public detonateActiveC4() {
-    if (this.c4.planting) {
-      this.pushRadio('KOBRA-1', 'La carga todavía se está colocando; espera a que quede armada.', 'warn');
-      return;
-    }
-    if (this.c4.charges.length === 0) return;
+    this.c4.detonate(this.c4Dependencies);
+  }
 
-    const unsafeCharge = this.c4.charges.find((charge) => !this.isBlastAreaClear(charge));
-    if (unsafeCharge) {
-      this.pushRadio(
-        'KOBRA-1',
-        `Detonación bloqueada: el binomio sigue dentro del radio de seguridad de ${unsafeCharge.targetName}. Usa [J] para despejar la zona y aléjate.`,
-        'warn'
-      );
-      this.emitHudSnapshot();
-      return;
-    }
-
-    for (const charge of [...this.c4.charges]) {
-      charge.phase = 'DETONATING';
-      this.triggerC4Explosion(charge);
-    }
-    this.c4.charges = [];
-    this.emitHudSnapshot();
+  private get c4Dependencies(): C4Dependencies {
+    return {
+      getPlayer: () => this.getPlayer(),
+      getFriendlies: () => this.getBlastFriendlies(),
+      isDoorTargetValid: (doorId) => {
+        const door = this.doors.find((item) => item.id === doorId);
+        return !!door && !door.isOpen && !door.isDestroyed;
+      },
+      isTrainingMode: this.isTrainingMode,
+      pushRadio: (speaker, text, tone) => this.pushRadio(speaker, text, tone),
+      emitHudSnapshot: () => this.emitHudSnapshot(),
+      playPlantStarted: () => soundEngine.playBreachPrep('C4'),
+      playArmedWarning: (seconds) => soundEngine.playC4WarningBeep(seconds),
+      explode: (charge) => this.triggerC4Explosion(charge),
+    };
   }
 
   protected triggerC4Explosion(charge: ActiveC4Charge) {
@@ -5819,7 +5694,7 @@ public nightMode: boolean = false;
     this.nvgWarmupTimer = Math.max(0, this.nvgWarmupTimer - dt);
 
     // La C4 se coloca primero y queda armada. No hay detonación automática.
-    this.updateC4Planting(dt);
+    this.c4.updatePlanting(dt, this.c4Dependencies);
 
     // Aviso acústico moderado mientras el binomio siga dentro del radio seguro.
     const unsafeArmedC4 = this.c4.charges.filter((charge) => !this.isBlastAreaClear(charge));

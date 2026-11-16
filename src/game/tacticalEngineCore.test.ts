@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TacticalEngineCore } from './TacticalEngineCore';
+import { C4ChargeSystem } from './c4Charges';
 import { createGrazApartmentLayout } from './grazMap';
 import { soundEngine } from './soundEngine';
 import type { ActorEntity, DoorEntity, LightSwitchEntity, WallSconceLight } from './types';
@@ -11,6 +12,10 @@ import type { ActorEntity, DoorEntity, LightSwitchEntity, WallSconceLight } from
  * reales y no una copia de su lógica.
  */
 function createEngine(overrides: Record<string, unknown> = {}): any {
+  const { c4Count = 2, activeC4Charges = [], ...rest } = overrides;
+  const c4 = new C4ChargeSystem();
+  c4.count = c4Count as number;
+  c4.charges = activeC4Charges as typeof c4.charges;
   const engine = Object.create(TacticalEngineCore.prototype) as any;
   Object.assign(engine, {
     squadCommand: 'FOLLOW',
@@ -24,10 +29,10 @@ function createEngine(overrides: Record<string, unknown> = {}): any {
     doors: [],
     commandPulseTimer: 0,
     squadHoldAnchorAngle: 0,
-    c4: { count: 2, charges: [], planting: undefined },
+    c4,
     pushRadio: vi.fn(),
     emitHudSnapshot: vi.fn(),
-    ...overrides,
+    ...rest,
   });
   return engine;
 }
@@ -295,7 +300,7 @@ describe('órdenes de Kobra 2', () => {
     expect(engine.chooseSquadBreachMode(unlockedDoor)).toBe('KICK');
     expect(engine.chooseSquadBreachMode(lockedWoodDoor)).toBe('SHOOT_LOCK');
 
-    engine.c4Count = 1;
+    engine.c4.count = 1;
     expect(engine.chooseSquadBreachMode(lockedHeavyDoor)).toBe('C4');
 
     engine.plan = { squadGear: 'RAM' };
@@ -753,13 +758,13 @@ describe('secuencia de plantado y despeje de C4', () => {
 
     engine.handleDoorBreachC4();
 
-    expect(engine.c4Planting).toMatchObject({
+    expect(engine.c4.planting).toMatchObject({
       targetName: mainDoor.name,
       progress: 0,
       maxProgress: 1.7,
     });
-    expect(engine.activeC4Charges).toHaveLength(0);
-    expect(engine.c4Count).toBe(2);
+    expect(engine.c4.charges).toHaveLength(0);
+    expect(engine.c4.count).toBe(2);
   });
 
   it('arma la carga al completar el plantado, sin abrir la puerta ni detonar automáticamente', () => {
@@ -776,16 +781,16 @@ describe('secuencia de plantado y despeje de C4', () => {
     const trigger = vi.spyOn(engine, 'triggerC4Explosion').mockImplementation(() => {});
 
     engine.handleDoorBreachC4();
-    engine.updateC4Planting(1.0);
-    expect(engine.activeC4Charges).toHaveLength(0);
+    engine.c4.updatePlanting(1.0, engine.c4Dependencies);
+    expect(engine.c4.charges).toHaveLength(0);
 
-    engine.updateC4Planting(0.8);
+    engine.c4.updatePlanting(0.8, engine.c4Dependencies);
 
-    expect(engine.c4Planting).toBeUndefined();
-    expect(engine.c4Count).toBe(1);
+    expect(engine.c4.planting).toBeUndefined();
+    expect(engine.c4.count).toBe(1);
     expect(mainDoor.isOpen).toBe(false);
-    expect(engine.activeC4Charges).toHaveLength(1);
-    expect(engine.activeC4Charges[0]).toMatchObject({ phase: 'ARMED', safeToDetonate: false });
+    expect(engine.c4.charges).toHaveLength(1);
+    expect(engine.c4.charges[0]).toMatchObject({ phase: 'ARMED', safeToDetonate: false });
     expect(trigger).not.toHaveBeenCalled();
   });
 
@@ -803,10 +808,10 @@ describe('secuencia de plantado y despeje de C4', () => {
     vi.spyOn(soundEngine, 'playC4WarningBeep').mockImplementation(() => {});
 
     engine.handleDoorBreachC4();
-    engine.updateC4Planting(1.7);
+    engine.c4.updatePlanting(1.7, engine.c4Dependencies);
 
-    expect(engine.activeC4Charges).toHaveLength(1);
-    expect(engine.c4Count).toBe(2);
+    expect(engine.c4.charges).toHaveLength(1);
+    expect(engine.c4.count).toBe(2);
   });
 
   it('cancela el plantado si el operador se aleja antes de terminar', () => {
@@ -822,11 +827,11 @@ describe('secuencia de plantado y despeje de C4', () => {
 
     engine.handleDoorBreachC4();
     localPlayer.x = 500;
-    engine.updateC4Planting(0.5);
+    engine.c4.updatePlanting(0.5, engine.c4Dependencies);
 
-    expect(engine.c4Planting).toBeUndefined();
-    expect(engine.activeC4Charges).toHaveLength(0);
-    expect(engine.c4Count).toBe(2);
+    expect(engine.c4.planting).toBeUndefined();
+    expect(engine.c4.charges).toHaveLength(0);
+    expect(engine.c4.count).toBe(2);
   });
 
   it('bloquea la detonación mientras un agente propio sigue dentro del radio', () => {
@@ -844,7 +849,7 @@ describe('secuencia de plantado y despeje de C4', () => {
     engine.detonateActiveC4();
 
     expect(trigger).not.toHaveBeenCalled();
-    expect(engine.activeC4Charges).toHaveLength(1);
+    expect(engine.c4.charges).toHaveLength(1);
     expect(engine.pushRadio).toHaveBeenCalledWith(
       'KOBRA-1',
       expect.stringContaining('Detonación bloqueada'),
@@ -883,6 +888,6 @@ describe('secuencia de plantado y despeje de C4', () => {
     engine.detonateActiveC4();
 
     expect(trigger).toHaveBeenCalledTimes(1);
-    expect(engine.activeC4Charges).toHaveLength(0);
+    expect(engine.c4.charges).toHaveLength(0);
   });
 });
