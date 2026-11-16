@@ -1166,9 +1166,30 @@ export default function App() {
           <TacticalPadModal
             isOpen={activeModal === 'PAD'}
           hud={hud}
-          engineRef={engineRef}
           onClose={closeModal}
+          onClearWaypoint={() => {
+            engineRef.current?.clearTacticalWaypoint();
+          }}
+          onAddTacticalMarker={(x, y, type, customLabel) => {
+            engineRef.current?.addTacticalMarker(x, y, type, customLabel);
+          }}
+          onRemoveTacticalMarker={(id) => {
+            engineRef.current?.removeTacticalMarker(id);
+          }}
+          onClearTacticalMarkers={() => {
+            engineRef.current?.clearTacticalMarkers();
+          }}
+          onSquadCommand={(cmd) => {
+            engineRef.current?.issueSquadCommand(cmd);
+          }}
+          onApplyIfak={() => {
+            engineRef.current?.applyIfakTreatment();
+          }}
+          onTriggerBiometricId={(actorId) => {
+            engineRef.current?.triggerBiometricRadioId(actorId);
+          }}
           onOpenBlueprint={openBlueprintModal}
+          onCycleThermal={() => engineRef.current?.cycleThermalPaletteMode()}
           onVoiceStart={startVoiceCapture}
           onVoiceStop={stopVoiceCapture}
           isListening={isListening}

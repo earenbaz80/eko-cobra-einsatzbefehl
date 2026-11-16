@@ -25,15 +25,27 @@ import {
   X,
 } from 'lucide-react';
 import { soundEngine } from '../game/soundEngine';
-import type { TacticalEngine } from '../game/TacticalEngine';
 import { HudSnapshot, SquadCommand, TacticalMarkerType } from '../game/types';
 
 interface TacticalPadModalProps {
   isOpen: boolean;
   hud: HudSnapshot;
-  engineRef: React.RefObject<TacticalEngine | null>;
   onClose: () => void;
+  onClearWaypoint: () => void;
+  onAddTacticalMarker: (
+    x: number,
+    y: number,
+    type: TacticalMarkerType,
+    customLabel?: string
+  ) => void;
+  onRemoveTacticalMarker: (id: string) => void;
+  onClearTacticalMarkers: () => void;
+  onSquadCommand: (cmd: SquadCommand) => void;
+  onApplyIfak: () => void;
+  onTriggerBiometricId: (actorId?: string) => void;
   onOpenBlueprint: () => void;
+  /** Ciclo de paleta térmica (el botón del pie se oculta en móvil y vive aquí). */
+  onCycleThermal: () => void;
   /** Comando de voz: se mantiene pulsado, igual que en la barra inferior. */
   onVoiceStart: () => void;
   onVoiceStop: () => void;
@@ -199,9 +211,16 @@ const SQUAD_ORDER_CATALOG: Array<{
 export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
   isOpen,
   hud,
-  engineRef,
   onClose,
+  onClearWaypoint,
+  onAddTacticalMarker,
+  onRemoveTacticalMarker,
+  onClearTacticalMarkers,
+  onSquadCommand,
+  onApplyIfak,
+  onTriggerBiometricId,
   onOpenBlueprint,
+  onCycleThermal,
   onVoiceStart,
   onVoiceStop,
   isListening,
@@ -264,7 +283,7 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
     // Map viewBox is 80..1140 (width 1060), 60..760 (height 700)
     const worldX = 80 + relX * 1060;
     const worldY = 60 + relY * 700;
-                            engineRef.current?.addTacticalMarker(worldX, worldY, selectedMarkerType);
+    onAddTacticalMarker(worldX, worldY, selectedMarkerType);
   };
 
   const dialogRef = useModalA11y(isOpen);
@@ -368,7 +387,7 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
                 <button
                   onClick={() => {
                     soundEngine.playUiClick();
-                                            engineRef.current?.cycleThermalPaletteMode();
+                    onCycleThermal();
                   }}
                   disabled={!thermalActive}
                   title={
@@ -670,7 +689,7 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
                           <div className="flex items-center gap-1.5">
                             {pad.markers.length > 0 && (
                               <button
-                                onClick={() => engineRef.current?.clearTacticalMarkers()}
+                                onClick={onClearTacticalMarkers}
                                 className="px-2 py-1 text-[10px] border border-[#EF4444]/60 bg-[#EF4444]/15 text-[#FCA5A5] hover:bg-[#EF4444]/30 flex items-center gap-1 cursor-pointer"
                               >
                                 <Trash2 className="w-3 h-3" />
@@ -679,7 +698,7 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
                             )}
                             {pad.waypoint && (
                               <button
-                                onClick={() => engineRef.current?.clearTacticalWaypoint()}
+                                onClick={onClearWaypoint}
                                 className="px-2 py-1 text-[10px] border border-[#38BDF8]/60 bg-[#38BDF8]/15 text-[#BAE6FD] hover:bg-[#38BDF8]/30 cursor-pointer"
                               >
                                 ⌖ Quitar GPS
@@ -925,7 +944,7 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
                           transform={`translate(${mk.x}, ${mk.y})`}
                           onClick={(ev) => {
                             ev.stopPropagation();
-                            engineRef.current?.removeTacticalMarker(mk.id);
+                            onRemoveTacticalMarker(mk.id);
                           }}
                           className="cursor-pointer"
                         >
@@ -1069,7 +1088,7 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
                       return (
                         <button
                           key={mk.id}
-                                                          onClick={() => engineRef.current?.removeTacticalMarker(mk.id)}
+                          onClick={() => onRemoveTacticalMarker(mk.id)}
                           className={`px-2 py-0.5 text-[10px] border ${c} hover:opacity-80 flex items-center gap-1 cursor-pointer`}
                         >
                           <span>
@@ -1131,7 +1150,7 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
                         return (
                           <button
                             key={ord.cmd}
-                            onClick={() => engineRef.current?.issueSquadCommand(ord.cmd)}
+                            onClick={() => onSquadCommand(ord.cmd)}
                             className={`p-2 text-left border transition-all cursor-pointer ${
                               isCurrent
                                 ? 'bg-[#38BDF8]/25 border-[#38BDF8] text-white shadow-[0_0_12px_rgba(56,189,248,0.25)]'
@@ -1161,7 +1180,7 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
                         <span>BIOMONITOR DE ESCUADRA (SIGNOS VITALES)</span>
                       </div>
                       <button
-                        onClick={() => engineRef.current?.applyIfakTreatment()}
+                        onClick={onApplyIfak}
                         className="px-2.5 py-1 text-[10px] font-bold bg-[#0F172A]/70 border border-[#38BDF8] text-[#38BDF8] hover:bg-[#38BDF8] hover:text-black transition-colors cursor-pointer"
                       >
                         [H] Aplicar IFAK ({hud.ifakCount}x)
@@ -1358,7 +1377,7 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
                             </span>
                           ) : (
                             <button
-                              onClick={() => engineRef.current?.triggerBiometricRadioId(c.id)}
+                              onClick={() => onTriggerBiometricId(c.id)}
                               className="px-2.5 py-1 text-[10px] font-bold bg-[#D97706] text-black hover:bg-[#F59E0B] cursor-pointer"
                             >
                               [B] Marcar ID
@@ -1386,7 +1405,7 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
                     <div
                       key={d.id}
                       onClick={() =>
-                        engineRef.current?.addTacticalMarker(
+                        onAddTacticalMarker(
                           (d.x1 + d.x2) * 0.5,
                           (d.y1 + d.y2) * 0.5,
                           'BREACH_ZONE',
