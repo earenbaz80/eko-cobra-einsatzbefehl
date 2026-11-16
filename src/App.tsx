@@ -1164,33 +1164,9 @@ export default function App() {
           <TacticalPadModal
             isOpen={activeModal === 'PAD'}
           hud={hud}
+          engineRef={engineRef}
           onClose={() => openModalExclusive('NONE')}
-          onClearWaypoint={() => {
-            engineRef.current?.clearTacticalWaypoint();
-          }}
-          onAddTacticalMarker={(x, y, type, customLabel) => {
-            engineRef.current?.addTacticalMarker(x, y, type, customLabel);
-          }}
-          onRemoveTacticalMarker={(id) => {
-            engineRef.current?.removeTacticalMarker(id);
-          }}
-          onClearTacticalMarkers={() => {
-            engineRef.current?.clearTacticalMarkers();
-          }}
-          onSquadCommand={(cmd) => {
-            engineRef.current?.issueSquadCommand(cmd);
-          }}
-          onApplyIfak={() => {
-            engineRef.current?.applyIfakTreatment();
-          }}
-          onTriggerBiometricId={(actorId) => {
-            engineRef.current?.triggerBiometricRadioId(actorId);
-          }}
-          onOpenBlueprint={() => {
-            openModalExclusive('BLUEPRINT');
-          }}
-          onCycleThermal={() => engineRef.current?.cycleThermalPaletteMode()}
-          thermalActive={hud.inspectionId === 'THERMAL_CAM' && hud.mirrorActive}
+          onOpenBlueprint={() => openModalExclusive('BLUEPRINT')}
           onVoiceStart={startVoiceCapture}
           onVoiceStop={stopVoiceCapture}
           isListening={isListening}
@@ -1270,20 +1246,9 @@ export default function App() {
       {activeModal === 'CAREER' && (
         <Suspense fallback={null}>
           <OperatorCareerModal
-            xpTelemetry={
-            hud?.xpTelemetry ?? {
-              totalXp: 0,
-              sessionXp: 0,
-              level: 1,
-              rankDe: 'Aspirant',
-              rankEs: 'Aspirante Cobra',
-              xpInLevel: 0,
-              xpForNextLevel: 500,
-              progressPct: 0,
-            }
-          }
-          score={hud?.score ?? 0}
-          onClose={() => openModalExclusive('NONE')}
+            xpTelemetry={hud?.xpTelemetry}
+            score={hud?.score}
+            onClose={() => openModalExclusive('NONE')}
         />
         </Suspense>
       )}

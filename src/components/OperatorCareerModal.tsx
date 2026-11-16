@@ -17,17 +17,29 @@ import {
 import { soundEngine } from '../game/soundEngine';
 
 interface OperatorCareerModalProps {
-  xpTelemetry: OperatorXpTelemetry;
-  score: number;
+  xpTelemetry?: OperatorXpTelemetry;
+  score?: number;
   onClose: () => void;
 }
 
+const DEFAULT_XP_TELEMETRY: OperatorXpTelemetry = {
+  totalXp: 0,
+  sessionXp: 0,
+  level: 1,
+  rankDe: 'Aspirant',
+  rankEs: 'Aspirante Cobra',
+  xpInLevel: 0,
+  xpForNextLevel: 500,
+  progressPct: 0,
+};
+
 export const OperatorCareerModal: React.FC<OperatorCareerModalProps> = ({
   xpTelemetry,
-  score,
+  score = 0,
   onClose,
 }) => {
   const dialogRef = useModalA11y();
+  const telemetry = xpTelemetry ?? DEFAULT_XP_TELEMETRY;
   const currentRank: PlayerMissionRank = computePlayerMissionRank(score);
 
   return (
@@ -107,16 +119,16 @@ export const OperatorCareerModal: React.FC<OperatorCareerModalProps> = ({
             <div className="w-full flex flex-col gap-1.5 mt-2 text-left">
               <div className="flex justify-between text-xs font-bold">
                 <span className="text-[#94A3B8]">EXPERIENCIA OPERATIVA (XP):</span>
-                <span className="text-[#38BDF8]">{xpTelemetry.totalXp} XP</span>
+                <span className="text-[#38BDF8]">{telemetry.totalXp} XP</span>
               </div>
               <div className="w-full h-3.5 bg-[#1E293B] overflow-hidden border border-[#334155] flex items-center">
                 <div
                   className="h-full bg-gradient-to-r from-[#38BDF8] to-[#10B981] transition-all duration-500"
-                  style={{ width: `${xpTelemetry.progressPct}%` }}
+                  style={{ width: `${telemetry.progressPct}%` }}
                 />
               </div>
               <div className="text-[10px] text-[#64748B] text-right">
-                Nivel {xpTelemetry.level} · Progresión {xpTelemetry.xpInLevel} / {xpTelemetry.xpForNextLevel} XP
+                Nivel {telemetry.level} · Progresión {telemetry.xpInLevel} / {telemetry.xpForNextLevel} XP
               </div>
             </div>
           </div>
