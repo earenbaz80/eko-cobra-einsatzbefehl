@@ -31,6 +31,7 @@ import {
   WallSconceLight
 } from './types';
 import { CAMERA_ZOOM, TacticalEngineCore } from './TacticalEngineCore';
+import { ART } from './artDirection';
 
 /**
  * Capa de dibujo del motor táctico.
@@ -572,7 +573,7 @@ export class TacticalEngine extends TacticalEngineCore {
     // Clearer suppression indicator: one pulsing red edge frame on top of the vignette.
     const pulse = 0.5 + 0.5 * Math.sin(this.elapsedSeconds * 9);
     const edgeAlpha = Math.min(0.9, alpha * (0.7 + pulse * 0.3));
-    ctx.strokeStyle = `rgba(239, 68, 68, ${edgeAlpha.toFixed(3)})`;
+    ctx.strokeStyle = `rgba(${ART.threat}, ${edgeAlpha.toFixed(3)})`;
     ctx.lineWidth = 4;
     ctx.strokeRect(6, 6, width - 12, height - 12);
     ctx.restore();
@@ -1176,17 +1177,9 @@ export class TacticalEngine extends TacticalEngineCore {
     lCtx.scale(CAMERA_ZOOM, CAMERA_ZOOM);
     lCtx.translate(-this.camX, -this.camY);
 
-    const stairGrad = lCtx.createRadialGradient(170, 410, 20, 170, 410, 290);
-    stairGrad.addColorStop(0, this.nvgActive ? 'rgba(255, 255, 255, 0.82)' : 'rgba(255, 255, 255, 0.55)');
-    stairGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-    lCtx.fillStyle = stairGrad;
-    lCtx.fillRect(80, 90, 180, 640);
-
-    const balconyGrad = lCtx.createRadialGradient(1055, 540, 20, 1055, 540, 250);
-    balconyGrad.addColorStop(0, this.nvgActive ? 'rgba(255, 255, 255, 0.78)' : 'rgba(255, 255, 255, 0.45)');
-    balconyGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-    lCtx.fillStyle = balconyGrad;
-    lCtx.fillRect(960, 350, 200, 380);
+    // Interior stairwell/balcony illumination comes from their wall sconces
+    // (see the sconce loop below), so switching or destroying those fixtures
+    // actually darkens the area instead of leaving a baked ambient pool.
 
     // 2B. Carve ambient illumination from urban streetlamps along the perimeter streets
     for (const lamp of URBAN_STREET_LAMPS) {
@@ -1199,6 +1192,19 @@ export class TacticalEngine extends TacticalEngineCore {
       lCtx.beginPath();
       lCtx.arc(lamp.x, lamp.y, lamp.radius, 0, Math.PI * 2);
       lCtx.fill();
+
+      // Volumetric warm sodium glow on the main canvas so exterior light has
+      // a distinct identity from the cool tactical flashlight beam.
+      ctx.save();
+      const streetGlow = ctx.createRadialGradient(lamp.x, lamp.y, 4, lamp.x, lamp.y, lamp.radius);
+      streetGlow.addColorStop(0, this.nvgActive ? 'rgba(251, 191, 36, 0.22)' : 'rgba(251, 191, 36, 0.16)');
+      streetGlow.addColorStop(0.55, this.nvgActive ? 'rgba(251, 191, 36, 0.10)' : 'rgba(251, 191, 36, 0.06)');
+      streetGlow.addColorStop(1, 'rgba(251, 191, 36, 0)');
+      ctx.fillStyle = streetGlow;
+      ctx.beginPath();
+      ctx.arc(lamp.x, lamp.y, lamp.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     }
 
     // 2C. Carve & Render Wall Sconce Lamps (Wandlampen) along corridors and hallways
@@ -2127,7 +2133,7 @@ export class TacticalEngine extends TacticalEngineCore {
           ctx.save();
           ctx.translate(lastSeen.x, lastSeen.y);
           const alpha = (1 - age / 4) * 0.55;
-          ctx.strokeStyle = `rgba(239, 68, 68, ${alpha.toFixed(3)})`;
+          ctx.strokeStyle = `rgba(${ART.threat}, ${alpha.toFixed(3)})`;
           ctx.lineWidth = 1.5;
           ctx.setLineDash([4, 4]);
           ctx.beginPath();
@@ -2182,14 +2188,14 @@ export class TacticalEngine extends TacticalEngineCore {
 
       if (actor.role === 'SUSPECT' && actor.state === 'AIMING_WINDUP' && player) {
         const pulse = 0.5 + 0.5 * Math.sin(this.elapsedSeconds * 12);
-        ctx.strokeStyle = `rgba(239, 68, 68, ${0.35 + actor.windupProgress * 0.6})`;
+        ctx.strokeStyle = `rgba(${ART.threat}, ${0.35 + actor.windupProgress * 0.6})`;
         ctx.lineWidth = 1.5 + actor.windupProgress * 1.5;
         ctx.beginPath();
         ctx.moveTo(0, 0);
         ctx.lineTo(Math.cos(actor.angle) * 260, Math.sin(actor.angle) * 260);
         ctx.stroke();
 
-        ctx.strokeStyle = '#EF4444';
+        ctx.strokeStyle = `rgb(${ART.threat})`;
         ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.arc(
@@ -2202,7 +2208,7 @@ export class TacticalEngine extends TacticalEngineCore {
         ctx.stroke();
 
         // Pulsing warning diamond above the muzzle line.
-        ctx.fillStyle = `rgba(248, 113, 113, ${(0.55 + pulse * 0.35).toFixed(3)})`;
+        ctx.fillStyle = `rgba(${ART.threat}, ${(0.55 + pulse * 0.35).toFixed(3)})`;
         ctx.beginPath();
         ctx.moveTo(0, -actor.radius - 24);
         ctx.lineTo(6, -actor.radius - 17);
@@ -2227,7 +2233,7 @@ export class TacticalEngine extends TacticalEngineCore {
           const len = Math.min(dist, 90);
           ctx.save();
           ctx.rotate(Math.atan2(dy, dx));
-          ctx.strokeStyle = 'rgba(251, 191, 36, 0.45)';
+          ctx.strokeStyle = `rgba(${ART.warning}, 0.45)`;
           ctx.lineWidth = 1.5;
           ctx.setLineDash([5, 5]);
           ctx.beginPath();
@@ -2235,7 +2241,7 @@ export class TacticalEngine extends TacticalEngineCore {
           ctx.lineTo(len, 0);
           ctx.stroke();
           ctx.setLineDash([]);
-          ctx.fillStyle = 'rgba(251, 191, 36, 0.55)';
+          ctx.fillStyle = `rgba(${ART.warning}, 0.55)`;
           ctx.beginPath();
           ctx.moveTo(len, 0);
           ctx.lineTo(len - 8, -4);
@@ -2264,10 +2270,10 @@ export class TacticalEngine extends TacticalEngineCore {
       if (actor.role === 'SUSPECT' && actor.state !== 'DEAD' && actor.state !== 'ARRESTED') {
         const contourColor =
           actor.alertLevel === 'COMBAT'
-            ? '#EF4444'
+            ? `rgb(${ART.threat})`
             : actor.alertLevel === 'READY'
-              ? '#F59E0B'
-              : '#38BDF8';
+              ? `rgb(${ART.warning})`
+              : `rgb(${ART.ally})`;
         ctx.strokeStyle = contourColor;
         ctx.lineWidth = 2;
         ctx.beginPath();

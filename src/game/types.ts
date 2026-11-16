@@ -570,7 +570,9 @@ export interface TacticalMapContact {
   roomName: string;
   isKnown: boolean;
   identifiedByRadio: boolean;
+  directlyVisible: boolean;
   isArmed: boolean;
+  threatPolygon?: { x: number; y: number }[];
   weaponLabel?: string;
   ekisCode?: string;
   warrantStatus?: string;

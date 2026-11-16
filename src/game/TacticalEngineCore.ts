@@ -325,6 +325,15 @@ export const AUSTRIAN_SHOUTS = [
 ];
 
 /** World-to-screen zoom shared by rendering, aiming and hit testing. */
+function getWeaponThreatRange(weaponLabel?: string): number {
+  const label = (weaponLabel ?? '').toLowerCase();
+  if (/vz\.?\s*58|aug|gewehr|rifle|ak-?47|karabiner/.test(label)) return 280;
+  if (/skorpion|mp-?5|smg|maschinenpistole/.test(label)) return 230;
+  if (/schrot|shotgun|flinte/.test(label)) return 150;
+  if (/messer|knife|bajonett/.test(label)) return 120;
+  return 180;
+}
+
 export const CAMERA_ZOOM = 1.55;
 
 /** Contrato de introspección de solo lectura para las pruebas E2E. */
@@ -8789,7 +8798,17 @@ public nightMode: boolean = false;
           roomName: a.roomName,
           isKnown: true,
           identifiedByRadio: !!a.identifiedByRadio,
+          directlyVisible: !!(a.visibleToPlayer || a.visibleToSquad),
           isArmed: a.isArmed,
+          threatPolygon:
+            a.role === 'SUSPECT' &&
+            a.isArmed &&
+            (a.visibleToPlayer || a.visibleToSquad) &&
+            a.state !== 'DEAD' &&
+            a.state !== 'ARRESTED' &&
+            a.state !== 'SURRENDERED'
+              ? this.computeVisibilityPolygon(a.x, a.y, a.angle, getWeaponThreatRange(a.weaponLabel), 0.35, 24)
+              : undefined,
           weaponLabel: a.weaponLabel,
           ekisCode: a.biometricProfile?.ekisCode,
           warrantStatus: a.biometricProfile?.warrantStatus,
