@@ -55,6 +55,9 @@ import {
   RadioFeed
 } from './radioFeed';
 import {
+  C4ChargeSystem
+} from './c4Charges';
+import {
   chooseSquadSteeringAngle,
   computeSquadNavTarget
 } from './squadAi';
@@ -552,19 +555,26 @@ public nightMode: boolean = false;
   protected taserCharges: number = 3;
   protected gadgetCount: number = 3;
   protected ifakCount: number = 2;
-  protected c4Count: number = 2;
-  public activeC4Charges: ActiveC4Charge[] = [];
-  /** Colocación en curso: la carga todavía no existe en el mundo. */
-  protected c4Planting?: {
-    targetName: string;
-    x: number;
-    y: number;
-    doorId?: string;
-    windowId?: string;
-    isWindow: boolean;
-    progress: number;
-    maxProgress: number;
-  };
+  protected c4: C4ChargeSystem = new C4ChargeSystem();
+
+  public get c4Count(): number {
+    return this.c4.count;
+  }
+  public set c4Count(value: number) {
+    this.c4.count = value;
+  }
+  public get activeC4Charges(): ActiveC4Charge[] {
+    return this.c4.charges;
+  }
+  public set activeC4Charges(value: ActiveC4Charge[]) {
+    this.c4.charges = value;
+  }
+  public get c4Planting(): C4ChargeSystem['planting'] {
+    return this.c4.planting;
+  }
+  public set c4Planting(value: C4ChargeSystem['planting']) {
+    this.c4.planting = value;
+  }
   protected c4WarningBeepTimer: number = 0;
   protected aimZoneMode: 'TORSO' | 'EXTREMITIES' = 'TORSO';
   protected modeSwitchPulseTimer: number = 0;
@@ -771,8 +781,8 @@ public nightMode: boolean = false;
     this.criticalEvents = [];
     this.initExteriorWindowsAndAmbientDust();
     this.breachAction = undefined;
-    this.c4Planting = undefined;
-    this.activeC4Charges = [];
+    this.c4.planting = undefined;
+    this.c4.charges = [];
     this.c4WarningBeepTimer = 0;
     this.playerDarknessTimer = 0;
     this.lastPlayerShotTime = -999;
@@ -789,7 +799,7 @@ public nightMode: boolean = false;
     this.taserCharges = metrics.totalTaser;
     this.gadgetCount = metrics.totalGadgets;
     this.ifakCount = this.plan.profile === 'BREACHER' ? 3 : 2;
-    this.c4Count = this.plan.profile === 'BREACHER' ? 3 : 2;
+    this.c4.count = this.plan.profile === 'BREACHER' ? 3 : 2;
     this.aimZoneMode = this.plan.profile === 'VERHANDLUNGSFUEHRER' ? 'EXTREMITIES' : 'TORSO';
     this.aimTremorOffset = 0;
     this.playerFatigue = 0;
@@ -2871,8 +2881,8 @@ public nightMode: boolean = false;
 
   public handleDoorBreachC4() {
     const player = this.getPlayer();
-    if (!player || player.state === 'DEAD' || this.breachAction || this.c4Planting) return;
-    if (this.c4Count <= 0) {
+    if (!player || player.state === 'DEAD' || this.breachAction || this.c4.planting) return;
+    if (this.c4.count <= 0) {
       this.pushRadio('KOBRA-1', 'Keine Sprengladungen (C4) mehr verfügbar!', 'warn');
       return;
     }
@@ -2913,12 +2923,12 @@ public nightMode: boolean = false;
     windowId?: string;
     isWindow: boolean;
   }): boolean {
-    if (this.c4Planting) return false;
-    if (this.c4Count <= 0) {
+    if (this.c4.planting) return false;
+    if (this.c4.count <= 0) {
       this.pushRadio('KOBRA-1', 'Keine Sprengladungen (C4) mehr verfügbar!', 'warn');
       return false;
     }
-    const alreadyPlaced = this.activeC4Charges.some((charge) =>
+    const alreadyPlaced = this.c4.charges.some((charge) =>
       target.doorId ? charge.doorId === target.doorId : charge.windowId === target.windowId
     );
     if (alreadyPlaced) {
@@ -2926,7 +2936,7 @@ public nightMode: boolean = false;
       return false;
     }
 
-    this.c4Planting = {
+    this.c4.planting = {
       ...target,
       progress: 0,
       maxProgress: C4_PLANT_SECONDS,
@@ -2943,12 +2953,12 @@ public nightMode: boolean = false;
 
   /** Avanza la colocación y arma la carga sólo al terminar el gesto. */
   protected updateC4Planting(dt: number): void {
-    const planting = this.c4Planting;
+    const planting = this.c4.planting;
     if (!planting) return;
 
     const player = this.getPlayer();
     if (!player || player.state === 'DEAD') {
-      this.c4Planting = undefined;
+      this.c4.planting = undefined;
       this.emitHudSnapshot();
       return;
     }
@@ -2956,7 +2966,7 @@ public nightMode: boolean = false;
     if (planting.doorId) {
       const door = this.doors.find((item) => item.id === planting.doorId);
       if (!door || door.isOpen || door.isDestroyed) {
-        this.c4Planting = undefined;
+        this.c4.planting = undefined;
         this.pushRadio('KOBRA-1', 'C4 cancelada: la puerta dejó de ser un objetivo válido.', 'warn');
         this.emitHudSnapshot();
         return;
@@ -2966,7 +2976,7 @@ public nightMode: boolean = false;
     // En la galería de tiro el control [C] coloca la carga de forma remota para
     // poder practicar la secuencia completa sin recorrer el pasillo.
     if (!this.isTrainingMode && Math.hypot(player.x - planting.x, player.y - planting.y) > 100) {
-      this.c4Planting = undefined;
+      this.c4.planting = undefined;
       this.pushRadio('KOBRA-1', 'C4 cancelada: el operador se alejó antes de terminar la colocación.', 'warn');
       this.emitHudSnapshot();
       return;
@@ -2975,11 +2985,11 @@ public nightMode: boolean = false;
     planting.progress += dt;
     if (planting.progress < planting.maxProgress) return;
 
-    this.c4Planting = undefined;
+    this.c4.planting = undefined;
     if (!this.isTrainingMode) {
-      this.c4Count = Math.max(0, this.c4Count - 1);
+      this.c4.count = Math.max(0, this.c4.count - 1);
     }
-    this.activeC4Charges.push({
+    this.c4.charges.push({
       id: 'c4_' + Math.random().toString(36).substring(2, 9),
       targetName: planting.targetName,
       x: planting.x,
@@ -3044,7 +3054,7 @@ public nightMode: boolean = false;
 
   /** Orden táctica para que Kobra-2 se retire de la zona de la carga. */
   public orderBlastAreaClear() {
-    if (this.activeC4Charges.length === 0) {
+    if (this.c4.charges.length === 0) {
       this.pushRadio('KOBRA-1', 'No hay ninguna carga C4 activa que despejar.', 'info');
       return;
     }
@@ -3052,13 +3062,13 @@ public nightMode: boolean = false;
   }
 
   public detonateActiveC4() {
-    if (this.c4Planting) {
+    if (this.c4.planting) {
       this.pushRadio('KOBRA-1', 'La carga todavía se está colocando; espera a que quede armada.', 'warn');
       return;
     }
-    if (this.activeC4Charges.length === 0) return;
+    if (this.c4.charges.length === 0) return;
 
-    const unsafeCharge = this.activeC4Charges.find((charge) => !this.isBlastAreaClear(charge));
+    const unsafeCharge = this.c4.charges.find((charge) => !this.isBlastAreaClear(charge));
     if (unsafeCharge) {
       this.pushRadio(
         'KOBRA-1',
@@ -3069,11 +3079,11 @@ public nightMode: boolean = false;
       return;
     }
 
-    for (const charge of [...this.activeC4Charges]) {
+    for (const charge of [...this.c4.charges]) {
       charge.phase = 'DETONATING';
       this.triggerC4Explosion(charge);
     }
-    this.activeC4Charges = [];
+    this.c4.charges = [];
     this.emitHudSnapshot();
   }
 
@@ -3982,7 +3992,7 @@ public nightMode: boolean = false;
     const squad = this.getSquadmate();
     const player = this.getPlayer();
     if (!squad || !player || squad.state === 'DEAD') return;
-    if (cmd === 'CLEAR_BLAST_AREA' && this.activeC4Charges.length === 0) {
+    if (cmd === 'CLEAR_BLAST_AREA' && this.c4.charges.length === 0) {
       this.pushRadio('KOBRA-1', 'No hay ninguna carga C4 activa que despejar.', 'info');
       return;
     }
@@ -4127,7 +4137,7 @@ public nightMode: boolean = false;
       );
       this.squadCommand = 'FOLLOW';
     } else if (cmd === 'CLEAR_BLAST_AREA') {
-      const charge = this.activeC4Charges.find((item) => item.phase === 'ARMED');
+      const charge = this.c4.charges.find((item) => item.phase === 'ARMED');
       const safePoint = charge ? this.findC4ClearancePoint(charge, squad) : undefined;
       if (!charge || !safePoint) {
         this.squadCommand = 'HOLD';
@@ -5812,7 +5822,7 @@ public nightMode: boolean = false;
     this.updateC4Planting(dt);
 
     // Aviso acústico moderado mientras el binomio siga dentro del radio seguro.
-    const unsafeArmedC4 = this.activeC4Charges.filter((charge) => !this.isBlastAreaClear(charge));
+    const unsafeArmedC4 = this.c4.charges.filter((charge) => !this.isBlastAreaClear(charge));
     if (unsafeArmedC4.length > 0) {
       this.c4WarningBeepTimer += dt;
       if (this.c4WarningBeepTimer >= 1.25) {
@@ -6285,7 +6295,7 @@ public nightMode: boolean = false;
         if (this.breachAction.progress >= this.breachAction.maxProgress) {
           const mode = this.breachAction.mode;
           if (mode === 'C4') {
-            this.c4Count = Math.max(0, this.c4Count - 1);
+            this.c4.count = Math.max(0, this.c4.count - 1);
           }
           const finishedDoor = door;
           this.breachAction = undefined;
@@ -6835,7 +6845,7 @@ public nightMode: boolean = false;
       `${door.id} ${door.name}`
     );
     if (this.plan.squadGear === 'RAM') return 'RAM';
-    if (heavyDoor && this.c4Count > 0) return 'C4';
+    if (heavyDoor && this.c4.count > 0) return 'C4';
     return 'SHOOT_LOCK';
   }
 
@@ -6944,7 +6954,7 @@ public nightMode: boolean = false;
     }
 
     if (action.mode === 'C4') {
-      this.c4Count = Math.max(0, this.c4Count - 1);
+      this.c4.count = Math.max(0, this.c4.count - 1);
     }
     this.executeBreach(door, action.mode, 'KOBRA-2');
     this.detonateGadgetAt(doorX, doorY, 'FLASHBANG');
@@ -8571,7 +8581,7 @@ public nightMode: boolean = false;
   protected computeContextPrompt(player: ActorEntity | undefined): string | null {
     if (!player) return null;
 
-    const nearbyCharge = this.activeC4Charges.find(
+    const nearbyCharge = this.c4.charges.find(
       (charge) => Math.hypot(charge.x - player.x, charge.y - player.y) <= 170
     );
     if (nearbyCharge) {
@@ -8621,14 +8631,14 @@ public nightMode: boolean = false;
             : this.plan.inspectionDevice === 'MICRO_CAM'
               ? 'Micro-Cámara Óptica'
               : 'Espejo Táctico';
-        return `${door.name}: [Q] ${sensorLabel} · [F] Patada · [C] C4 (${this.c4Count}) · [X] Ariete`;
+        return `${door.name}: [Q] ${sensorLabel} · [F] Patada · [C] C4 (${this.c4.count}) · [X] Ariete`;
       }
       return `${door.name}: [E] Cerrar puerta`;
     }
 
     const extWin = this.findNearestExteriorWindow(player.x, player.y, 68);
     if (extWin && !extWin.isBreached) {
-      return `${extWin.label}: [F] Abrir brecha exterior · [X] Ariete · [C] Carga C4 (${this.c4Count})`;
+      return `${extWin.label}: [F] Abrir brecha exterior · [X] Ariete · [C] Carga C4 (${this.c4.count})`;
     }
 
     // Check if there is an unidentified target in agent camera view to prompt [B] Radio ID
@@ -8942,16 +8952,16 @@ public nightMode: boolean = false;
     }
 
     this.onHudUpdate({
-      activeC4Charges: this.activeC4Charges.map((c) => ({
+      activeC4Charges: this.c4.charges.map((c) => ({
         ...c,
         remainingSeconds: Math.max(0, c.remainingSeconds),
         safeToDetonate: this.isBlastAreaClear(c),
       })),
-      c4Planting: this.c4Planting
+      c4Planting: this.c4.planting
         ? {
-            targetName: this.c4Planting.targetName,
-            progressPct: Math.min(100, (this.c4Planting.progress / this.c4Planting.maxProgress) * 100),
-            executionTime: `${Math.max(0, this.c4Planting.maxProgress - this.c4Planting.progress).toFixed(1)}s`,
+            targetName: this.c4.planting.targetName,
+            progressPct: Math.min(100, (this.c4.planting.progress / this.c4.planting.maxProgress) * 100),
+            executionTime: `${Math.max(0, this.c4.planting.maxProgress - this.c4.planting.progress).toFixed(1)}s`,
           }
         : undefined,
       profileName: profileSpec.nameDe,
@@ -9014,7 +9024,7 @@ public nightMode: boolean = false;
       inspectionId: this.plan.inspectionDevice,
       gadgetName: gadgetSpec.nameDe,
       gadgetCount: this.gadgetCount,
-      c4Count: this.c4Count,
+      c4Count: this.c4.count,
       squadStatus: `KOBRA-2 · ${player?.alertLevel ?? 'READY'}`,
       squadCommand: this.squadCommand,
       suspectsSecured: suspects.filter((s) => s.state === 'ARRESTED' || s.state === 'DEAD').length,
@@ -9280,7 +9290,7 @@ public nightMode: boolean = false;
           })
         : null,
       tick: this.ticks,
-      c4Count: this.c4Count,
+      c4Count: this.c4.count,
       squadGear: this.plan.squadGear,
       radioFeed: Object.freeze(
         this.radio.items.map((item) =>

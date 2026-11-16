@@ -24,6 +24,7 @@ function createEngine(overrides: Record<string, unknown> = {}): any {
     doors: [],
     commandPulseTimer: 0,
     squadHoldAnchorAngle: 0,
+    c4: { count: 2, charges: [], planting: undefined },
     pushRadio: vi.fn(),
     emitHudSnapshot: vi.fn(),
     ...overrides,
