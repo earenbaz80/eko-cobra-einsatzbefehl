@@ -279,6 +279,26 @@ export class TacticalEngine extends TacticalEngineCore {
       this.renderAnamorphicLensFlares(ctx, player, squad);
     }
 
+    // Subtle ambient vignette to frame the view and reinforce focus on the lit cone.
+    // Drawn in screen space after the world pass, before HUD/minimap overlays.
+    ctx.save();
+    const ambientVignette = ctx.createRadialGradient(
+      width * 0.5,
+      height * 0.5,
+      Math.min(width, height) * 0.32,
+      width * 0.5,
+      height * 0.5,
+      Math.max(width, height) * 0.78
+    );
+    ambientVignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    ambientVignette.addColorStop(
+      1,
+      this.nightMode ? 'rgba(0, 0, 12, 0.30)' : 'rgba(2, 6, 12, 0.22)'
+    );
+    ctx.fillStyle = ambientVignette;
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+
     // 11. Render Night Vision (NVG) Post-Processing Filter, Trauma Vignette, Directional Hit Flash, Peripheral Acoustic Edge Indicators & Minimap
     if (player && this.gameState === 'PLAYING') {
       if (this.nvgActive) {
@@ -1257,7 +1277,7 @@ export class TacticalEngine extends TacticalEngineCore {
         player.y,
         periphPoly,
         periphRange,
-        (this.nvgActive ? 0.92 : 0.58) * weatherVisMult
+        (this.nvgActive ? 0.92 : this.flashlightOn ? 0.42 : 0.58) * weatherVisMult
       );
 
       if (this.nvgActive) {

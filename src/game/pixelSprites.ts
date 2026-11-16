@@ -413,9 +413,13 @@ export function drawPixelArtActor(
   const alertLevel: AlertLevel = actor.alertLevel ?? 'READY';
   const isFiring = (actor.recoilTimer ?? 0) > 0;
 
-  // 1. Pixel-art drop shadow under operator/suspect
-  ctx.fillStyle = 'rgba(4, 7, 12, 0.58)';
-  ctx.fillRect(-12, -10, 24, 20);
+  // 1. Contact shadow under the actor (soft edge, pixel art stays crisp above)
+  ctx.imageSmoothingEnabled = true;
+  ctx.fillStyle = 'rgba(4, 7, 12, 0.48)';
+  ctx.beginPath();
+  ctx.ellipse(0, 10, 16, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.imageSmoothingEnabled = false;
 
   // 2. Multi-Frame Animated Pixel Boots (4-frame walk cycle scaled by movement velocity)
   if (actor.state !== 'DEAD' && actor.state !== 'ARRESTED') {
