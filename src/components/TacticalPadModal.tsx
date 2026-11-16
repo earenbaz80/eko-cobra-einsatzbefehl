@@ -847,6 +847,25 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
                       );
                     })}
 
+                    {/* Line-of-sight & flashlight coverage */}
+                    <rect
+                      x="80"
+                      y="60"
+                      width="1060"
+                      height="700"
+                      fill="rgba(239, 68, 68, 0.06)"
+                      pointerEvents="none"
+                    />
+                    {pad.coveragePolygon.length > 2 && (
+                      <polygon
+                        points={pad.coveragePolygon.map((p) => `${p.x},${p.y}`).join(' ')}
+                        fill="rgba(56, 189, 248, 0.16)"
+                        stroke="rgba(56, 189, 248, 0.55)"
+                        strokeWidth="1.5"
+                        pointerEvents="none"
+                      />
+                    )}
+
                     {/* Exterior Windows / Breachable Walls */}
                     {pad.exteriorWindows.map((w) => (
                       <g key={w.id}>
@@ -1066,6 +1085,16 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
                       );
                     })}
                   </svg>
+                  <div className="absolute top-2 right-2 flex items-center gap-3 px-2 py-1 bg-[#05080D]/85 border border-[#334155]/60 text-[9px] font-mono pointer-events-none">
+                    <span className="flex items-center gap-1 text-[#7DD3FC]">
+                      <span className="w-2.5 h-2.5 bg-[#38BDF8]/40 border border-[#38BDF8]" />
+                      COBERTURA
+                    </span>
+                    <span className="flex items-center gap-1 text-[#FCA5A5]">
+                      <span className="w-2.5 h-2.5 bg-[#EF4444]/20 border border-[#EF4444]/70" />
+                      EXPUESTA
+                    </span>
+                  </div>
                 </div>
 
                 {/* Active Temporary Markers Chips Strip */}

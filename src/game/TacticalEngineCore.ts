@@ -108,6 +108,7 @@ import {
   StationAlertLevel,
   TacticalMapMarker,
   TacticalMarkerType,
+  TacticalPadData,
   Vec2,
   LightSwitchEntity,
   WallSconceLight,
@@ -8695,6 +8696,18 @@ public nightMode: boolean = false;
     const rankSpec = ranks[Math.min(ranks.length - 1, level - 1)];
 
     // Tactical Pad C4I Live Map & Telemetry Snapshot
+    const coveragePolygon: TacticalPadData['coveragePolygon'] = player
+      ? this.computeVisibilityPolygon(
+          player.x,
+          player.y,
+          player.angle,
+          (this.flashlightOn ? 560 : 250) *
+            this.getWeatherVisibilityMultiplier(player.x, player.y),
+          this.flashlightOn ? 0.38 : 1.22,
+          72
+        )
+      : [];
+
     const tacticalPad = {
       rooms: this.rooms.map((r) => {
         const roomActors = this.actors.filter((a) => a.roomName === r.id);
@@ -8793,6 +8806,7 @@ public nightMode: boolean = false;
         ...m,
         remainingSeconds: Math.max(0, Math.round(m.remainingSeconds)),
       })),
+      coveragePolygon,
     };
 
     const playerMissionRank = computePlayerMissionRank(this.score);

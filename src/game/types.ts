@@ -626,6 +626,10 @@ export interface TacticalPadData {
     label: string;
   };
   markers: TacticalMapMarker[];
+  coveragePolygon: {
+    x: number;
+    y: number;
+  }[];
 }
 
 export interface SecondaryObjective {
