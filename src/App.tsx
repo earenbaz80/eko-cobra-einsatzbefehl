@@ -12,7 +12,6 @@ import { TutorialOverlay } from './components/TutorialOverlay';
 import { PauseSummaryModal } from './components/PauseSummaryModal';
 import { ControlsModal } from './components/ControlsModal';
 import { TacticalHud } from './components/TacticalHud';
-import { useModalA11y } from './hooks/useModalA11y';
 import { construirResumen, publicarResumen, quiereMenu } from './components/errorReport';
 const BlueprintModal = lazy(() =>
   import('./components/BlueprintModal').then((m) => ({ default: m.BlueprintModal }))
@@ -160,14 +159,12 @@ export default function App() {
   });
 
   // Collapsible Tactical HUD Menu States (Default closed so screen is clean and unobstructed)
-  const [missionsAccordionOpen, setMissionsAccordionOpen] = useState(true);
   const [isTouchDevice, setIsTouchDevice] = useState(false);
   const [, setHudCompactMode] = useState(true);
   const [, setMissionPanelOpen] = useState(false);
   const [tutorialActive, setTutorialActive] = useState(false);
   const [tutorialStep, setTutorialStep] = useState(0);
   const [keybindModalOpen, setKeybindModalOpen] = useState(false);
-  const keybindDialogRef = useModalA11y(keybindModalOpen);
   const [rebindingAction, setRebindingAction] = useState<string | null>(null);
   const [keybinds, setKeybinds] = useState<Record<string, string>>({});
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
@@ -919,8 +916,6 @@ export default function App() {
           hud={hud}
           hasSavedGame={hasSavedGame}
           handleResumeGame={handleResumeGame}
-          missionsAccordionOpen={missionsAccordionOpen}
-          setMissionsAccordionOpen={setMissionsAccordionOpen}
           handleStartApartmentMission={handleStartApartmentMission}
           handleStartInvestigationMission={handleStartInvestigationMission}
           handleStartStationMission={handleStartStationMission}
@@ -978,7 +973,6 @@ export default function App() {
       {/* KEYBIND REMAPPING MODAL */}
       <KeybindRemapModal
         isOpen={keybindModalOpen}
-        dialogRef={keybindDialogRef}
         keybinds={keybinds}
         rebindingAction={rebindingAction}
         formatKeyCodeLabel={formatKeyCodeLabel}

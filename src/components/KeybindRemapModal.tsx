@@ -1,9 +1,8 @@
-import type { RefObject } from 'react';
+import { useModalA11y } from '../hooks/useModalA11y';
 import { conflictosDeKeybinds } from '../game/keybinds';
 
 interface KeybindRemapModalProps {
   isOpen: boolean;
-  dialogRef: RefObject<HTMLDivElement | null>;
   keybinds: Record<string, string>;
   rebindingAction: string | null;
   formatKeyCodeLabel: (code: string) => string;
@@ -14,7 +13,6 @@ interface KeybindRemapModalProps {
 
 export function KeybindRemapModal({
   isOpen,
-  dialogRef,
   keybinds,
   rebindingAction,
   formatKeyCodeLabel,
@@ -22,6 +20,7 @@ export function KeybindRemapModal({
   onRebind,
   onReset,
 }: KeybindRemapModalProps) {
+  const dialogRef = useModalA11y(isOpen);
   if (!isOpen) return null;
 
   return (

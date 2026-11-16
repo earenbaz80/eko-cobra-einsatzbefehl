@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   ArrowLeft,
   Award,
@@ -18,8 +19,6 @@ interface TitleScreenProps {
   hud: HudSnapshot | null;
   hasSavedGame: boolean;
   handleResumeGame: () => void;
-  missionsAccordionOpen: boolean;
-  setMissionsAccordionOpen: (value: boolean | ((prev: boolean) => boolean)) => void;
   handleStartApartmentMission: () => void;
   handleStartInvestigationMission: () => void;
   handleStartStationMission: () => void;
@@ -46,8 +45,6 @@ export function TitleScreen({
   hud,
   hasSavedGame,
   handleResumeGame,
-  missionsAccordionOpen,
-  setMissionsAccordionOpen,
   handleStartApartmentMission,
   handleStartInvestigationMission,
   handleStartStationMission,
@@ -69,6 +66,8 @@ export function TitleScreen({
   handleCycleColorblind,
   colorblindMode,
 }: TitleScreenProps) {
+  const [missionsAccordionOpen, setMissionsAccordionOpen] = useState(true);
+
   return (
     <div className="absolute inset-0 z-20 flex flex-col justify-between bg-gradient-to-t from-[#080C11]/95 via-[#080C11]/70 to-[#080C11]/85 p-2 sm:p-4 overflow-y-auto">
       {/* Top Quiet Identification Line */}
