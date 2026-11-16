@@ -1020,6 +1020,37 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
                       );
                     })}
 
+                    {/* Known hostile threat arcs (position + facing, no AI change) */}
+                    {pad.contacts
+                      .filter(
+                        (c) =>
+                          c.role === 'SUSPECT' &&
+                          c.isArmed &&
+                          c.state !== 'DEAD' &&
+                          c.state !== 'ARRESTED' &&
+                          c.state !== 'SURRENDERED'
+                      )
+                      .map((c) => {
+                        const range = 190;
+                        const half = 0.35;
+                        const a1 = c.angle - half;
+                        const a2 = c.angle + half;
+                        const x1 = c.x + Math.cos(a1) * range;
+                        const y1 = c.y + Math.sin(a1) * range;
+                        const x2 = c.x + Math.cos(a2) * range;
+                        const y2 = c.y + Math.sin(a2) * range;
+                        return (
+                          <path
+                            key={`threat-${c.id}`}
+                            d={`M ${c.x} ${c.y} L ${x1} ${y1} A ${range} ${range} 0 0 1 ${x2} ${y2} Z`}
+                            fill="rgba(239, 68, 68, 0.09)"
+                            stroke="rgba(239, 68, 68, 0.42)"
+                            strokeWidth="1"
+                            pointerEvents="none"
+                          />
+                        );
+                      })}
+
                     {/* Known Contacts (Kobra-1, Kobra-2, Spotted Suspects & Hostages) */}
                     {pad.contacts.map((c) => {
                       const isPlayer = c.role === 'PLAYER';
@@ -1093,6 +1124,10 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
                     <span className="flex items-center gap-1 text-[#FCA5A5]">
                       <span className="w-2.5 h-2.5 bg-[#EF4444]/20 border border-[#EF4444]/70" />
                       EXPUESTA
+                    </span>
+                    <span className="flex items-center gap-1 text-[#FCA5A5]">
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#EF4444]/25 border border-[#EF4444]" />
+                      AMENAZA
                     </span>
                   </div>
                 </div>
