@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { soundEngine } from '../game/soundEngine';
 import type { TacticalEngine } from '../game/TacticalEngine';
-import type { HudSnapshot, MissionPlan, SquadCommand } from '../game/types';
+import type { HudSnapshot, PrimaryWeaponId, SquadCommand } from '../game/types';
 import { COBRA_RANK_TIERS, computePlayerMissionRank } from '../game/types';
 
 interface TacticalHudProps {
@@ -42,8 +42,8 @@ interface TacticalHudProps {
   hudStackRef: React.RefObject<HTMLDivElement | null>;
   isListening: boolean;
   muted: boolean;
-  openModalExclusive: (modal: any) => void;
-  plan: MissionPlan;
+  openModalExclusive: (modal: 'PAD' | 'BLUEPRINT' | 'GDD' | 'CONTROLS') => void;
+  primaryWeapon: PrimaryWeaponId;
   radioAudioEnabled: boolean;
   radioLogOpen: boolean;
   rankDrawerOpen: boolean;
@@ -57,39 +57,38 @@ interface TacticalHudProps {
   stopVoiceCapture: () => void;
 }
 
-export function TacticalHud(props: TacticalHudProps) {
-  const {
-    anatomyDrawerOpen,
-    commandMenuOpen,
-    engineRef,
-    handleHudOpacityChange,
-    handleReturnToTitle,
-    handleSquadCommand,
-    handleStartApartmentMission,
-    handleStartMission,
-    handleStartStationMission,
-    handleStartTrainingRange,
-    handleToggleMute,
-    handleToggleRadioAudio,
-    hud,
-    hudOpacity,
-    hudStackRef,
-    isListening,
-    muted,
-    openModalExclusive,
-    plan,
-    radioAudioEnabled,
-    radioLogOpen,
-    rankDrawerOpen,
-    setAnatomyDrawerOpen,
-    setCommandMenuOpen,
-    setRadioLogOpen,
-    setRankDrawerOpen,
-    setSquadDrawerOpen,
-    squadDrawerOpen,
-    startVoiceCapture,
-    stopVoiceCapture,
-  } = props;
+export function TacticalHud({
+  anatomyDrawerOpen,
+  commandMenuOpen,
+  engineRef,
+  handleHudOpacityChange,
+  handleReturnToTitle,
+  handleSquadCommand,
+  handleStartApartmentMission,
+  handleStartMission,
+  handleStartStationMission,
+  handleStartTrainingRange,
+  handleToggleMute,
+  handleToggleRadioAudio,
+  hud,
+  hudOpacity,
+  hudStackRef,
+  isListening,
+  muted,
+  openModalExclusive,
+  primaryWeapon,
+  radioAudioEnabled,
+  radioLogOpen,
+  rankDrawerOpen,
+  setAnatomyDrawerOpen,
+  setCommandMenuOpen,
+  setRadioLogOpen,
+  setRankDrawerOpen,
+  setSquadDrawerOpen,
+  squadDrawerOpen,
+  startVoiceCapture,
+  stopVoiceCapture,
+}: TacticalHudProps) {
   return (
         <div
           style={{ opacity: hudOpacity / 100 }}
@@ -158,7 +157,7 @@ export function TacticalHud(props: TacticalHudProps) {
                     key={w.id}
                     onClick={() => engineRef.current?.switchTrainingWeapon(w.id)}
                     className={`px-1.5 py-0.5 border transition-all cursor-pointer ${
-                      plan.primaryWeapon === w.id
+                      primaryWeapon === w.id
                         ? 'bg-[#F59E0B]/25 border-[#F59E0B] text-[#FDE68A] font-bold'
                         : 'bg-[#0F172A] border-[#334155] text-[#94A3B8] hover:text-white'
                     }`}

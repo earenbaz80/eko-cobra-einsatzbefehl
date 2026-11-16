@@ -1123,7 +1123,7 @@ export default function App() {
           isListening={isListening}
           muted={muted}
           openModalExclusive={openModalExclusive}
-          plan={plan}
+          primaryWeapon={plan.primaryWeapon}
           radioAudioEnabled={radioAudioEnabled}
           radioLogOpen={radioLogOpen}
           rankDrawerOpen={rankDrawerOpen}
