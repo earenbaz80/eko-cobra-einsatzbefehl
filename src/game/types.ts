@@ -356,9 +356,6 @@ export interface ActorEntity {
   spottedByThermal?: boolean;
   biometricScanProgress?: number;
   identifiedByRadio?: boolean;
-  lastSeenX?: number;
-  lastSeenY?: number;
-  lastSeenAt?: number;
   identifiedCameraSource?: string;
   biometricProfile?: {
     ekisCode: string;

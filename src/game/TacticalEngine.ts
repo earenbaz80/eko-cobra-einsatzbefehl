@@ -40,6 +40,8 @@ import { CAMERA_ZOOM, TacticalEngineCore } from './TacticalEngineCore';
  * diegético, minimapa, post-proceso).
  */
 export class TacticalEngine extends TacticalEngineCore {
+  private lastSeenPositions = new Map<string, { x: number; y: number; t: number }>();
+
   private renderGrenadeTrajectoryPreview(ctx: CanvasRenderingContext2D, player: ActorEntity) {
     if (!this.grenadeAimingActive) return;
 
@@ -2118,11 +2120,12 @@ export class TacticalEngine extends TacticalEngineCore {
         actor.state === 'ARRESTED' ||
         actor.state === 'DEAD';
 
-      if (actor.role === 'SUSPECT' && actor.lastSeenX !== undefined && actor.lastSeenY !== undefined && !showFull && !actor.spottedByMirror && !actor.identifiedByRadio) {
-        const age = this.elapsedSeconds - (actor.lastSeenAt ?? 0);
+      const lastSeen = this.lastSeenPositions.get(actor.id);
+      if (actor.role === 'SUSPECT' && lastSeen && !showFull && !actor.spottedByMirror && !actor.identifiedByRadio) {
+        const age = this.elapsedSeconds - lastSeen.t;
         if (age >= 0 && age < 4) {
           ctx.save();
-          ctx.translate(actor.lastSeenX, actor.lastSeenY);
+          ctx.translate(lastSeen.x, lastSeen.y);
           const alpha = (1 - age / 4) * 0.55;
           ctx.strokeStyle = `rgba(239, 68, 68, ${alpha.toFixed(3)})`;
           ctx.lineWidth = 1.5;
@@ -2132,13 +2135,13 @@ export class TacticalEngine extends TacticalEngineCore {
           ctx.stroke();
           ctx.setLineDash([]);
           ctx.restore();
+        } else if (age >= 4) {
+          this.lastSeenPositions.delete(actor.id);
         }
       }
 
       if (actor.role === 'SUSPECT' && (showFull || actor.spottedByMirror || actor.identifiedByRadio)) {
-        actor.lastSeenX = actor.x;
-        actor.lastSeenY = actor.y;
-        actor.lastSeenAt = this.elapsedSeconds;
+        this.lastSeenPositions.set(actor.id, { x: actor.x, y: actor.y, t: this.elapsedSeconds });
       }
 
       if (!showFull && !actor.spottedByMirror && !actor.identifiedByRadio) continue;
