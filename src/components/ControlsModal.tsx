@@ -1,8 +1,7 @@
-import type { RefObject } from 'react';
+import { useModalA11y } from '../hooks/useModalA11y';
 import { Eye } from 'lucide-react';
 
 interface ControlsModalProps {
-  controlsDialogRef: RefObject<HTMLDivElement | null>;
   nvgActive: boolean;
   hudOpacity: number;
   onHudOpacityChange: (value: number, persist?: boolean) => void;
@@ -17,7 +16,6 @@ interface ControlsModalProps {
 }
 
 export function ControlsModal({
-  controlsDialogRef,
   nvgActive,
   hudOpacity,
   onHudOpacityChange,
@@ -30,6 +28,8 @@ export function ControlsModal({
   onOpenBlueprint,
   onClose,
 }: ControlsModalProps) {
+  const controlsDialogRef = useModalA11y(true);
+
   return (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-[#080C11]/55 backdrop-blur-sm p-4 md:p-6 overflow-y-auto"
@@ -55,13 +55,13 @@ export function ControlsModal({
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => onOpenBlueprint()}
+                  onClick={onOpenBlueprint}
                   className="px-3.5 py-2 text-xs font-semibold border border-[#334155]/70 bg-[#080C11]/55 text-[#38BDF8] hover:border-[#38BDF8] cursor-pointer"
                 >
                   Ir a Blaupause
                 </button>
                 <button
-                  onClick={() => onClose()}
+                  onClick={onClose}
                   className="px-4 py-2 text-xs font-bold bg-[#D97706] text-black hover:bg-[#F59E0B] cursor-pointer"
                 >
                   Cerrar [Esc]
@@ -166,7 +166,7 @@ export function ControlsModal({
 
                 <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
                   <button
-                    onClick={() => onToggleNightVision()}
+                    onClick={onToggleNightVision}
                     className={`px-3 py-1.5 border font-bold transition-colors cursor-pointer ${
                       nvgActive
                         ? 'bg-[#10B981] text-black border-[#34D399] shadow-[0_0_12px_rgba(16,185,129,0.5)]'
@@ -200,9 +200,7 @@ export function ControlsModal({
                   ))}
 
                   <button
-                    onClick={() => {
-                      onRebindToggle()
-                    }}
+                    onClick={onRebindToggle}
                     className={`px-2.5 py-1 border transition-colors cursor-pointer font-bold ${
                       isRebindingNvgKey
                         ? 'bg-[#F59E0B] text-black border-[#FDE68A] animate-pulse'
