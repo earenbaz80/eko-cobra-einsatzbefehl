@@ -1215,6 +1215,19 @@ interface ChargeTarget {
 const DOOR_HALF = 3;
 const WINDOW_HALF = 3.5;
 
+/** Media anchura del estuche en planta, medida desde el anclaje. */
+const CHARGE_HALF_WIDTH = 4.6;
+/** Aire que se deja entre el estuche (o el vano) y la placa de progreso. */
+const PLATE_GAP = 2;
+
+/** Punto de apoyo de la carga, con el medio grosor del listón que la recibe. */
+interface ChargeAnchor {
+  x: number;
+  y: number;
+  angle: number;
+  half: number;
+}
+
 /**
  * Dónde se apoya la carga: al costado del listón (en planta la hoja o el vano
  * son un canto estrecho), sobre la cara que mira al operador que la colocó.
@@ -1223,7 +1236,7 @@ const WINDOW_HALF = 3.5;
 function chargeAnchor(
   scene: ArtProofScene,
   target: ChargeTarget
-): { x: number; y: number; angle: number } {
+): ChargeAnchor {
   const face = target.face;
 
   // La normal base es el lado "arriba" local del listón; el operador elige el
@@ -1234,7 +1247,7 @@ function chargeAnchor(
     const finalAngle = face && face.x * nx + face.y * ny < 0 ? angle + Math.PI : angle;
     const ox = Math.sin(finalAngle);
     const oy = -Math.cos(finalAngle);
-    return { x: mx + ox * half, y: my + oy * half, angle: finalAngle };
+    return { x: mx + ox * half, y: my + oy * half, angle: finalAngle, half };
   };
 
   if (target.isWindow) {
@@ -1248,7 +1261,12 @@ function chargeAnchor(
         // cara del vano que ve el jugador desde dentro.
         const ix = Math.cos(win.normalAngle);
         const iy = Math.sin(win.normalAngle);
-        return { x: mx + ix * WINDOW_HALF, y: my + iy * WINDOW_HALF, angle: Math.atan2(ix, -iy) };
+        return {
+          x: mx + ix * WINDOW_HALF,
+          y: my + iy * WINDOW_HALF,
+          angle: Math.atan2(ix, -iy),
+          half: WINDOW_HALF,
+        };
       }
       return sideAnchor(mx, my, angle, WINDOW_HALF);
     }
@@ -1260,7 +1278,7 @@ function chargeAnchor(
       return sideAnchor((leaf.x1 + leaf.x2) / 2, (leaf.y1 + leaf.y2) / 2, angle, DOOR_HALF);
     }
   }
-  return { x: target.x, y: target.y, angle: 0 };
+  return { x: target.x, y: target.y, angle: 0, half: DOOR_HALF };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1313,33 +1331,40 @@ function drawPixelText(
 }
 
 /**
- * Barra y porcentaje del plantado. La placa se dibuja del lado del operador y
- * corrida a lo largo de la hoja, para que nunca caiga al otro lado del listón
- * ni tape el estuche.
+ * Barra y porcentaje del plantado. La placa vive en el lado del operador y a su
+ * derecha, con las distancias sacadas del estuche y del medio grosor del vano:
+ * así no depende del giro del anclaje ni se va al quicio.
  */
 function drawPlantProgress(
   ctx: CanvasRenderingContext2D,
-  anchor: { x: number; y: number; angle: number },
+  anchor: ChargeAnchor,
   ratio: number
 ) {
   const label = `C4 ${Math.round(ratio * 100)}%`;
   const width = Math.max(34, pixelTextWidth(label) + 6);
-  // Con este ángulo el canto del operador queda en -y local: la normal exterior
-  // y la tangente de la hoja dan un punto a su lado, junto al estuche.
+  const height = 13;
+  // El -y local del anclaje apunta al operador: ésa es la normal exterior.
   const outwardX = Math.sin(anchor.angle);
   const outwardY = -Math.cos(anchor.angle);
-  const alongX = Math.cos(anchor.angle);
-  const alongY = Math.sin(anchor.angle);
-  const x = Math.round(anchor.x + outwardX * 10 + alongX * 32 - width / 2);
-  const y = Math.round(anchor.y + outwardY * 10 + alongY * 32 - 6);
+  // La placa se lee de pie, así que su huella sobre esa normal depende del giro.
+  const plateReach = Math.abs(outwardX) * (width / 2) + Math.abs(outwardY) * (height / 2);
+  // Por delante del vano (su medio grosor) y sin invadir la hoja ni el estuche.
+  const outward = anchor.half + PLATE_GAP + plateReach;
+  // Derecha del operador en pantalla: (-dy, dx) de su mirada, que va hacia el
+  // anclaje en dirección -outward. Queda igual en cualquier puerta o ventana.
+  const rightX = outwardY;
+  const rightY = -outwardX;
+  const lateral = CHARGE_HALF_WIDTH + PLATE_GAP + width / 2;
+  const x = Math.round(anchor.x + outwardX * outward + rightX * lateral - width / 2);
+  const y = Math.round(anchor.y + outwardY * outward + rightY * lateral - height / 2);
 
   ctx.fillStyle = 'rgba(8, 12, 17, 0.86)';
-  ctx.fillRect(x, y, width, 13);
+  ctx.fillRect(x, y, width, height);
   ctx.fillStyle = 'rgba(239, 68, 68, 0.85)';
   ctx.fillRect(x, y, width, 1);
-  ctx.fillRect(x, y + 12, width, 1);
-  ctx.fillRect(x, y, 1, 13);
-  ctx.fillRect(x + width - 1, y, 1, 13);
+  ctx.fillRect(x, y + height - 1, width, 1);
+  ctx.fillRect(x, y, 1, height);
+  ctx.fillRect(x + width - 1, y, 1, height);
 
   const barW = width - 4;
   ctx.fillStyle = '#1E293B';
@@ -1388,7 +1413,7 @@ function drawHeldCharge(
 function drawPlanting(
   ctx: CanvasRenderingContext2D,
   scene: ArtProofScene,
-  anchor: { x: number; y: number; angle: number },
+  anchor: ChargeAnchor,
   view: { x0: number; y0: number; x1: number; y1: number },
   time: number
 ) {
