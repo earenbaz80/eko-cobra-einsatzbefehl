@@ -267,10 +267,10 @@ const FIRE_ART_B = art(
 /* Personajes: 16x24 con tres poses y variantes de paleta              */
 /* ------------------------------------------------------------------ */
 
-type Pose = 'DOWN' | 'UP' | 'SIDE';
+type Pose = 'S' | 'SE' | 'E' | 'NE' | 'N';
 
 const BODY_ART: Record<Pose, string[]> = {
-  DOWN: [
+  S: [
     '................',
     '.....kkkkkk.....',
     '....khhhhhhk....',
@@ -296,7 +296,7 @@ const BODY_ART: Record<Pose, string[]> = {
     '..kkkk....kkkk..',
     '................',
   ],
-  UP: [
+  N: [
     '................',
     '.....kkkkkk.....',
     '....khhhhhhk....',
@@ -322,7 +322,7 @@ const BODY_ART: Record<Pose, string[]> = {
     '..kkkk....kkkk..',
     '................',
   ],
-  SIDE: [
+  E: [
     '................',
     '....kkkkkk......',
     '...khhhhhhk.....',
@@ -346,6 +346,58 @@ const BODY_ART: Record<Pose, string[]> = {
     '....kbb...bbk...',
     '...kbbb...bbbk..',
     '...kkkk...kkkk..',
+    '................',
+  ],
+  SE: [
+    '................',
+    '.....kkkkkk.....',
+    '....khhhhhhk....',
+    '....khHHHHhk....',
+    '....khHHHHhk....',
+    '.....kffffk.....',
+    '.....kfFffk.....',
+    '......kffk......',
+    '....kkvvvvkk....',
+    '...kvvvVVvvvk...',
+    '..kuvvvVVvvvuk..',
+    '..kuvvvVVvvggg..',
+    '..kuvvvvvvvGGk..',
+    '..kuuvvvvvuuk...',
+    '..kuuuuuuuuuk...',
+    '...kuuuuuuuuk...',
+    '...kuuuk.kuuuk..',
+    '....kkk...kkk...',
+    '....kbb..bbk....',
+    '....kbb..bbk....',
+    '...kbbb..bbbk...',
+    '...kkkk..kkkk...',
+    '................',
+    '................',
+  ],
+  NE: [
+    '................',
+    '.....kkkkkk.....',
+    '....khhhhhhk....',
+    '....khHHHHhk....',
+    '....khHHHHhk....',
+    '....khhhhhhk....',
+    '.....kHHHHk.....',
+    '......kHHk......',
+    '....kkvvvvkk....',
+    '...kvvvVVvvvk...',
+    '..kuvvvVVvvvuk..',
+    '..kuvvvVVvvggg..',
+    '..kuvvvvPPvvGGk.',
+    '..kuuvvvvvuuk...',
+    '..kuuuuuuuuuk...',
+    '...kuuuuuuuuk...',
+    '...kuuuk.kuuuk..',
+    '....kkk...kkk...',
+    '....kbb..bbk....',
+    '....kbb..bbk....',
+    '...kbbb..bbbk...',
+    '...kkkk..kkkk...',
+    '................',
     '................',
   ],
 };
@@ -477,17 +529,66 @@ function getTile(name: string, variant = 0): HTMLCanvasElement {
   return canvas;
 }
 
-function getSprite(role: string, pose: Pose): HTMLCanvasElement {
-  const key = `${role}:${pose}`;
+const LEG_TOP = 18;
+
+/** Ciclo de 4 fases: [pierna izq, pierna der, bob del tronco]. */
+const WALK_CYCLE: Array<[number, number, number]> = [
+  [1, -1, 1],
+  [0, 0, 0],
+  [-1, 1, 1],
+  [0, 0, 0],
+];
+
+const IDLE_FRAME = 1;
+
+function getBody(role: string, pose: Pose): HTMLCanvasElement {
+  const key = `body:${role}:${pose}`;
   const cached = spriteCache.get(key);
   if (cached) return cached;
-
   const palette = ROLE_PALETTE[role] ?? ROLE_PALETTE.SUSPECT;
   const isUnarmed = role === 'HOSTAGE';
-  const rows = BODY_ART[pose].map((row) =>
-    isUnarmed ? row.replace(/[gG]/g, '.') : row
-  );
+  const rows = BODY_ART[pose].map((row) => (isUnarmed ? row.replace(/[gG]/g, '.') : row));
   const canvas = renderArtToCanvas({ rows: pad(rows), map: palette }, 1);
+  spriteCache.set(key, canvas);
+  return canvas;
+}
+
+function buildWalkFrame(base: HTMLCanvasElement, leftOff: number, rightOff: number, bob: number): HTMLCanvasElement {
+  const width = base.width;
+  const height = base.height;
+  const legHeight = height - LEG_TOP;
+  const half = Math.floor(width / 2);
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+
+  // Piernas (desplazadas en horizontal)
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, LEG_TOP, half, legHeight);
+  ctx.clip();
+  ctx.drawImage(base, 0, LEG_TOP, half, legHeight, leftOff, LEG_TOP, half, legHeight);
+  ctx.restore();
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(half, LEG_TOP, width - half, legHeight);
+  ctx.clip();
+  ctx.drawImage(base, half, LEG_TOP, width - half, legHeight, half + rightOff, LEG_TOP, width - half, legHeight);
+  ctx.restore();
+
+  // Tronco encima: el bob (0-1 px) no abre hueco con las piernas
+  ctx.drawImage(base, 0, 0, width, LEG_TOP, 0, bob, width, LEG_TOP);
+  return canvas;
+}
+
+function getActorFrame(role: string, pose: Pose, frame: number): HTMLCanvasElement {
+  const key = `${role}:${pose}:${frame}`;
+  const cached = spriteCache.get(key);
+  if (cached) return cached;
+  const base = getBody(role, pose);
+  const [leftOff, rightOff, bob] = WALK_CYCLE[frame] ?? WALK_CYCLE[0];
+  const canvas = buildWalkFrame(base, leftOff, rightOff, bob);
   spriteCache.set(key, canvas);
   return canvas;
 }
@@ -1285,22 +1386,40 @@ function hexToRgba(hex: string, alpha: number): string {
 /* Actores                                                             */
 /* ------------------------------------------------------------------ */
 
-function poseForAngle(angle: number): Pose {
+function poseForAngle(angle: number): { pose: Pose; flip: boolean } {
   const normalized = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-  if (normalized > Math.PI * 0.25 && normalized < Math.PI * 0.75) return 'DOWN';
-  if (normalized > Math.PI * 1.25 && normalized < Math.PI * 1.75) return 'UP';
-  return 'SIDE';
+  const sector = Math.round(normalized / (Math.PI / 4)) % 8;
+  switch (sector) {
+    case 0:
+      return { pose: 'E', flip: false };
+    case 1:
+      return { pose: 'SE', flip: false };
+    case 2:
+      return { pose: 'S', flip: false };
+    case 3:
+      return { pose: 'SE', flip: true };
+    case 4:
+      return { pose: 'E', flip: true };
+    case 5:
+      return { pose: 'NE', flip: true };
+    case 6:
+      return { pose: 'N', flip: false };
+    default:
+      return { pose: 'NE', flip: false };
+  }
 }
 
 function drawActors(ctx: CanvasRenderingContext2D, scene: ArtProofScene, time: number) {
   const actors = [...scene.actors].sort((a, b) => a.y - b.y);
   for (const actor of actors) {
-    const pose = poseForAngle(actor.angle);
-    const sprite = getSprite(actor.role, pose);
-    const facingLeft = pose === 'SIDE' && Math.abs(actor.angle) > Math.PI / 2;
-    const bob = Math.sin(time * 8 + actor.x * 0.1) * 0.6 * (actor.vx || actor.vy ? 1 : 0);
+    const { pose, flip } = poseForAngle(actor.angle);
+    const moving = Math.hypot(actor.vx ?? 0, actor.vy ?? 0) > 6;
+    const frame = moving ? Math.floor(time * 9 + actor.x * 0.01) % WALK_CYCLE.length : IDLE_FRAME;
+    const sprite = getActorFrame(actor.role, pose, frame);
+    const facingLeft = flip;
+    const bob = moving ? 0 : Math.sin(time * 1.6 + actor.x * 0.05) * 0.5;
 
-    drawShadow(ctx, actor.x, actor.y + 3, 8.5, 3.4, 0.55);
+    drawShadow(ctx, actor.x, actor.y + 3, moving ? 9.5 : 8.5, 3.4, 0.55);
 
     ctx.save();
     ctx.translate(actor.x, actor.y - 12 + bob);
