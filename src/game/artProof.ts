@@ -37,7 +37,7 @@ function art(map: Record<string, string>, rows: string[]): PixelArt {
 }
 
 const SNOW_ART = art(
-  { a: '#B6C7D8', b: '#D6E3EF', c: '#A2B4C7', d: '#EEF5FB' },
+  { a: '#9FB2C4', b: '#C2D2E2', c: '#8FA3B6', d: '#DBE7F2' },
   [
     '..bbb...',
     '.bbdbb..',
@@ -51,7 +51,7 @@ const SNOW_ART = art(
 );
 
 const SNOW_DRIFT_ART = art(
-  { a: '#B6C7D8', b: '#D6E3EF', c: '#A2B4C7', d: '#EEF5FB' },
+  { a: '#9FB2C4', b: '#C2D2E2', c: '#8FA3B6', d: '#DBE7F2' },
   [
     'bbbbbbb.',
     'bbdbbbb.',
@@ -379,6 +379,7 @@ interface ArtProofScene {
   actors: ActorEntity[];
   sconces: WallSconceLight[];
   decals: FloorDecal[];
+  nightMode: boolean;
   player?: ActorEntity;
   camX: number;
   camY: number;
@@ -443,7 +444,7 @@ function floorTileFor(room: RoomZone, missionMode: string): string {
 }
 
 const FLOOR_BASE_COLOR: Record<string, string> = {
-  snow: '#C6D4E2',
+  snow: '#A9B8C8',
   wood: '#4E3826',
   stone: '#2A3441',
   asphalt: '#181E25',
@@ -460,6 +461,11 @@ function drawFloors(ctx: CanvasRenderingContext2D, scene: ArtProofScene, view: {
     fillTiles(ctx, tile, room.x, room.y, room.w, room.h, view, {
       variants: tile === 'snow' || tile === 'wood' ? 2 : 1,
     });
+    // La nieve tiende a quemar el detalle: se enfría con un velo tenue.
+    if (tile === 'snow') {
+      ctx.fillStyle = 'rgba(24, 38, 52, 0.16)';
+      ctx.fillRect(room.x, room.y, room.w, room.h);
+    }
     // Veta de sombra en el borde interior para dar profundidad a la sala.
     ctx.save();
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
@@ -787,10 +793,18 @@ function drawPallet(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
   ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
 }
 
-function drawFurniture(ctx: CanvasRenderingContext2D, scene: ArtProofScene, time: number) {
+function drawFurniture(
+  ctx: CanvasRenderingContext2D,
+  scene: ArtProofScene,
+  time: number,
+  isVisible: (x: number, y: number) => boolean
+) {
   const items = [...scene.furniture].sort((a, b) => a.y + a.h - (b.y + b.h));
   for (const item of items) {
     if (item.isDestroyed) continue;
+    const cx = item.x + item.w / 2;
+    const cy = item.y + item.h / 2;
+    if (!isVisible(cx, cy)) continue;
     drawShadow(
       ctx,
       item.x + item.w / 2,
@@ -973,7 +987,7 @@ function conePolygon(
   return points;
 }
 
-function occlusionSegments(scene: ArtProofScene): Segment[] {
+function wallAndDoorSegments(scene: ArtProofScene): Segment[] {
   const segments: Segment[] = [];
   for (const wall of scene.walls) {
     segments.push({ x1: wall.x1, y1: wall.y1, x2: wall.x2, y2: wall.y2 });
@@ -981,6 +995,11 @@ function occlusionSegments(scene: ArtProofScene): Segment[] {
   for (const door of scene.doors) {
     if (!door.isOpen && !door.isBreached) segments.push(doorLeafSegment(door));
   }
+  return segments;
+}
+
+function occlusionSegments(scene: ArtProofScene): Segment[] {
+  const segments = wallAndDoorSegments(scene);
   for (const item of scene.furniture) {
     if (!item.blocksSight || item.isDestroyed) continue;
     const { x, y, w, h } = item;
@@ -994,6 +1013,44 @@ function occlusionSegments(scene: ArtProofScene): Segment[] {
   return segments;
 }
 
+function normalizeAngle(angle: number): number {
+  return Math.atan2(Math.sin(angle), Math.cos(angle));
+}
+
+/**
+ * Un punto es visible si está cerca del operador, dentro de un charco de luz
+ * (aplique/chimenea) o dentro del cono de linterna con línea de visión libre.
+ * Evita que muebles y actores de salas a oscuras floten sobre el mapa.
+ */
+function createVisibilityTest(scene: ArtProofScene, sightSegments: Segment[]) {
+  const player = scene.player;
+  if (!player) return () => true;
+  const litSconces = scene.sconces.filter((sconce) => !sconce.isDestroyed && sconce.isOn !== false);
+  const fireplaces = scene.furniture
+    .filter((item) => item.id.includes('kamin') && !item.isDestroyed)
+    .map((item) => ({ x: item.x + item.w / 2, y: item.y + item.h * 0.86 }));
+
+  return (x: number, y: number): boolean => {
+    const dx = x - player.x;
+    const dy = y - player.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist <= 80) return true;
+
+    for (const sconce of litSconces) {
+      if (Math.hypot(x - sconce.x, y - sconce.y) <= sconce.radius * 0.85) return true;
+    }
+    for (const fire of fireplaces) {
+      if (Math.hypot(x - fire.x, y - fire.y) <= 185) return true;
+    }
+
+    if (dist > 270) return false;
+    if (Math.abs(normalizeAngle(Math.atan2(dy, dx) - player.angle)) > 0.44) return false;
+
+    const t = rayHit(player.x, player.y, dx / dist, dy / dist, dist, sightSegments);
+    return t >= dist - 1;
+  };
+}
+
 function drawLighting(
   ctx: CanvasRenderingContext2D,
   scene: ArtProofScene,
@@ -1004,15 +1061,19 @@ function drawLighting(
   if (!lightCtx) return;
   const lctx = lightCtx;
 
+  // En misiones nocturnas se rebaja la oscuridad base y se sube la luz
+  // ambiental para que los muros sigan leyéndose fuera del cono.
+  const night = scene.nightMode || scene.missionMode === 'SCHWECHAT';
+
   lctx.setTransform(1, 0, 0, 1, 0, 0);
   lctx.clearRect(0, 0, PROOF_W, PROOF_H);
-  lctx.fillStyle = 'rgba(6, 10, 18, 0.8)';
+  lctx.fillStyle = night ? 'rgba(6, 10, 18, 0.74)' : 'rgba(6, 10, 18, 0.8)';
   lctx.fillRect(0, 0, PROOF_W, PROOF_H);
   lctx.globalCompositeOperation = 'destination-out';
   lctx.translate(PROOF_W / 2 - cam.x, PROOF_H / 2 - cam.y);
 
   // Luz ambiental mínima: la escena se lee sin linterna
-  lctx.fillStyle = 'rgba(0, 0, 0, 0.16)';
+  lctx.fillStyle = night ? 'rgba(0, 0, 0, 0.24)' : 'rgba(0, 0, 0, 0.16)';
   lctx.fillRect(cam.x - PROOF_W / 2, cam.y - PROOF_H / 2, PROOF_W, PROOF_H);
 
   const segments = occlusionSegments(scene);
@@ -1143,9 +1204,15 @@ const TOPDOWN_COLORS: Record<string, { body: string; helmet: string; visor: stri
   HOSTAGE: { body: '#6B7280', helmet: '#9CA3AF', visor: '#E5E7EB', weapon: '#374151' },
 };
 
-function drawActors(ctx: CanvasRenderingContext2D, scene: ArtProofScene, time: number) {
+function drawActors(
+  ctx: CanvasRenderingContext2D,
+  scene: ArtProofScene,
+  time: number,
+  isVisible: (x: number, y: number) => boolean
+) {
   const actors = [...scene.actors].sort((a, b) => a.y - b.y);
   for (const actor of actors) {
+    if (!isVisible(actor.x, actor.y)) continue;
     const moving = Math.hypot(actor.vx ?? 0, actor.vy ?? 0) > 6;
     const colors = TOPDOWN_COLORS[actor.role] ?? TOPDOWN_COLORS.SUSPECT;
     const wobble = moving ? Math.sin(time * 12 + actor.x * 0.05) * 0.04 : 0;
@@ -1299,8 +1366,9 @@ export function renderArtProof(scene: ArtProofScene): void {
   // Casquillos y marcas de impacto persistentes del motor
   drawFloorDecals(bctx, scene.decals);
 
-  drawFurniture(bctx, scene, time);
-  drawActors(bctx, scene, time);
+  const isVisible = createVisibilityTest(scene, wallAndDoorSegments(scene));
+  drawFurniture(bctx, scene, time, isVisible);
+  drawActors(bctx, scene, time, isVisible);
   drawWalls(bctx, scene, view);
 
   bctx.restore();
