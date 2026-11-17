@@ -3,10 +3,11 @@
  *
  * Objetivo: demostrar el mismo juego con arte de píxeles real (tileset + sprites
  * dibujados a mano), sombras proyectadas y un pase de luz suave, renderizado a
- * una resolución interna de 480x270 y escalado por enteros.
+ * una resolución interna de 480x270 presentada a la escala de la ventana.
  *
  * No toca la simulación: sólo lee el estado que ya existe en el motor.
- * Se activa con `?art=proof` (opcional `&focus=salon` para encuadrar el salón).
+ * Se activa con `?art=proof`. Opcionales: `&focus=salon` para encuadrar el salón
+ * y `&scale=int` para forzar escala entera con letterbox centrado.
  *
  * REGLAS DE PROYECCIÓN CENITAL (invariantes del módulo)
  *
@@ -434,6 +435,11 @@ function readParams(): URLSearchParams {
 
 export function isArtProofRequested(): boolean {
   return readParams().get('art') === 'proof';
+}
+
+/** `&scale=int`: escala entera y letterbox, para capturas sin remuestreo. */
+export function isIntegerScaleRequested(): boolean {
+  return readParams().get('scale') === 'int';
 }
 
 /* ------------------------------------------------------------------ */
@@ -1285,8 +1291,8 @@ function chargeAnchor(
 /* Plantado de C4                                                      */
 /* ------------------------------------------------------------------ */
 
-// Texto de 3x5 píxeles: el buffer se escala por enteros y una fuente del
-// sistema se ve sucia a 480x270.
+// Texto de 3x5 píxeles: a 480x270 una fuente del sistema se ve sucia y no
+// sobrevive al reescalado.
 const PIXEL_GLYPHS: Record<string, string[]> = {
   '0': ['111', '101', '101', '101', '111'],
   '1': ['010', '110', '010', '010', '111'],
@@ -1907,7 +1913,7 @@ function present(
   target.drawImage(source, ox, oy, drawW, drawH);
 
   // Viñeta y grano a resolución de pantalla: dentro del buffer de 480x270 el
-  // escalado por enteros los convierte en bloques de 2x2.
+  // reescalado los convertiría en bloques de arte.
   target.save();
   target.beginPath();
   target.rect(ox, oy, drawW, drawH);
@@ -2008,13 +2014,12 @@ export function renderArtProof(scene: ArtProofScene): void {
 
   drawLighting(bctx, scene, cam, time);
 
-  const canvas = ctx.canvas;
-  // Escala fraccionaria: ocupa el ancho disponible manteniendo el 16:9. El
-  // remuestreo sigue siendo nearest-neighbor, así que no hay blur, pero los
-  // píxeles de arte dejan de medir un número entero de píxeles de pantalla.
-  const scale = Math.max(
-    1,
-    Math.min(canvas.width / PROOF_W, canvas.height / PROOF_H)
-  );
-  present(ctx, bctx.canvas, scale, `ART PROOF · 480×270 ×${scale.toFixed(2)} · ${scene.missionMode}`, time);
+  // Escala fraccionaria: ocupa el ancho disponible respetando el 16:9. Sin blur
+  // (nearest-neighbor), pero el píxel de arte ya no mide un entero de pantalla.
+  // Con `&scale=int` se recorta a entero y el letterbox queda centrado.
+  const integerScale = isIntegerScaleRequested();
+  const fit = Math.min(ctx.canvas.width / PROOF_W, ctx.canvas.height / PROOF_H);
+  const scale = Math.max(1, integerScale ? Math.floor(fit) : fit);
+  const factor = integerScale ? `${Math.round(scale)}` : scale.toFixed(2);
+  present(ctx, bctx.canvas, scale, `ART PROOF · 480×270 ×${factor} · ${scene.missionMode}`, time);
 }

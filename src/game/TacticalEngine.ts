@@ -211,7 +211,7 @@ export class TacticalEngine extends TacticalEngineCore {
     const ctx = this.ctx;
 
     // Prueba de arte opcional (?art=proof): pinta la escena con tileset, sprites
-    // y luz suave a 480x270 escalado por enteros. Sólo cambia el dibujo.
+    // y luz suave a 480x270 reescalado a la ventana. Sólo cambia el dibujo.
     if (isArtProofRequested()) {
       renderArtProof({
         ctx,
