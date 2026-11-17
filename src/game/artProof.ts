@@ -2009,9 +2009,12 @@ export function renderArtProof(scene: ArtProofScene): void {
   drawLighting(bctx, scene, cam, time);
 
   const canvas = ctx.canvas;
+  // Escala fraccionaria: ocupa el ancho disponible manteniendo el 16:9. El
+  // remuestreo sigue siendo nearest-neighbor, así que no hay blur, pero los
+  // píxeles de arte dejan de medir un número entero de píxeles de pantalla.
   const scale = Math.max(
     1,
-    Math.floor(Math.min(canvas.width / PROOF_W, canvas.height / PROOF_H))
+    Math.min(canvas.width / PROOF_W, canvas.height / PROOF_H)
   );
-  present(ctx, bctx.canvas, scale, `ART PROOF · 480×270 ×${scale} · ${scene.missionMode}`, time);
+  present(ctx, bctx.canvas, scale, `ART PROOF · 480×270 ×${scale.toFixed(2)} · ${scene.missionMode}`, time);
 }
