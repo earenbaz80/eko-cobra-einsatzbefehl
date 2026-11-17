@@ -17,6 +17,7 @@ import type {
   WallSegment,
   WallSconceLight,
 } from './types';
+import type { FloorDecal } from './TacticalEngineCore';
 
 const PROOF_W = 480;
 const PROOF_H = 270;
@@ -377,6 +378,7 @@ interface ArtProofScene {
   furniture: FurnitureItem[];
   actors: ActorEntity[];
   sconces: WallSconceLight[];
+  decals: FloorDecal[];
   player?: ActorEntity;
   camX: number;
   camY: number;
@@ -463,6 +465,30 @@ function drawFloors(ctx: CanvasRenderingContext2D, scene: ArtProofScene, view: {
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
     ctx.lineWidth = 1;
     ctx.strokeRect(room.x + 0.5, room.y + 0.5, room.w - 1, room.h - 1);
+    ctx.restore();
+  }
+}
+
+function drawFloorDecals(ctx: CanvasRenderingContext2D, decals: FloorDecal[]) {
+  for (const decal of decals) {
+    if (decal.type !== 'CASING' && decal.type !== 'SCORCH' && decal.type !== 'DEBRIS') continue;
+    ctx.save();
+    ctx.translate(decal.x, decal.y);
+    ctx.rotate(decal.angle);
+    ctx.globalAlpha = decal.alpha;
+    ctx.fillStyle = decal.color;
+    if (decal.type === 'CASING') {
+      // Casquillo dorado: rectángulo pequeño con brillo en un extremo
+      const r = decal.radius;
+      ctx.fillRect(-r, -r * decal.aspect, r * 2, r * 2 * decal.aspect);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+      ctx.fillRect(-r, -r * decal.aspect, r, r * 2 * decal.aspect);
+    } else {
+      // Marca de impacto / esquirla: mancha elíptica orientada
+      ctx.beginPath();
+      ctx.ellipse(0, 0, decal.radius, decal.radius * decal.aspect, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.restore();
   }
 }
@@ -1269,6 +1295,9 @@ export function renderArtProof(scene: ArtProofScene): void {
   if (salon && scene.missionMode === 'TIROL') {
     drawRug(bctx, salon.x + 190, salon.y + 190, 210, 130);
   }
+
+  // Casquillos y marcas de impacto persistentes del motor
+  drawFloorDecals(bctx, scene.decals);
 
   drawFurniture(bctx, scene, time);
   drawActors(bctx, scene, time);
