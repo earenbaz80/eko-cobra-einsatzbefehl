@@ -25,6 +25,7 @@
  */
 
 import type {
+  ActiveC4Charge,
   ActorEntity,
   DoorEntity,
   FurnitureItem,
@@ -391,6 +392,7 @@ interface ArtProofScene {
   walls: WallSegment[];
   doors: DoorEntity[];
   windows: ExteriorWindowSection[];
+  charges: ActiveC4Charge[];
   furniture: FurnitureItem[];
   actors: ActorEntity[];
   sconces: WallSconceLight[];
@@ -1192,6 +1194,54 @@ function drawDoor(ctx: CanvasRenderingContext2D, door: DoorEntity) {
   ctx.restore();
 }
 
+/** Carga C4 vista desde arriba: estuche, flejes y LED de armado. */
+function drawCharge(
+  ctx: CanvasRenderingContext2D,
+  charge: ActiveC4Charge,
+  view: { x0: number; y0: number; x1: number; y1: number },
+  time: number
+) {
+  if (charge.x < view.x0 || charge.x > view.x1 || charge.y < view.y0 || charge.y > view.y1) return;
+
+  ctx.save();
+  ctx.translate(charge.x, charge.y);
+
+  // Sombra de contacto
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+  ctx.fillRect(-6, -4, 14, 10);
+
+  // Estuche y carga
+  ctx.fillStyle = '#1E293B';
+  ctx.fillRect(-7, -5, 14, 10);
+  ctx.fillStyle = '#D9A21B';
+  ctx.fillRect(-6, -4, 12, 8);
+
+  // Flejes que la sujetan a la hoja
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+  ctx.fillRect(-6, -1, 12, 2);
+  ctx.fillRect(-4.6, -4, 1.2, 8);
+  ctx.fillRect(3.4, -4, 1.2, 8);
+
+  // Detonador
+  ctx.fillStyle = '#0F172A';
+  ctx.fillRect(5, -2, 3, 4);
+
+  // LED armado: parpadeo seco, legible a 480x270
+  const ledOn = Math.floor(time * 3) % 2 === 0;
+  if (ledOn) {
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.28)';
+    ctx.beginPath();
+    ctx.arc(6.5, 0, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = ledOn ? '#EF4444' : '#7F1D1D';
+  ctx.beginPath();
+  ctx.arc(6.5, 0, 1.6, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
 function drawWalls(ctx: CanvasRenderingContext2D, scene: ArtProofScene, view: { x0: number; y0: number; x1: number; y1: number }) {
   const snowCap = scene.missionMode === 'TIROL';
 
@@ -1789,6 +1839,9 @@ export function renderArtProof(scene: ArtProofScene): void {
   drawFurniture(bctx, scene, time, isVisible);
   drawActors(bctx, scene, time, isVisible);
   drawWalls(bctx, scene, view);
+  for (const charge of scene.charges) {
+    drawCharge(bctx, charge, view, time);
+  }
 
   bctx.restore();
 
