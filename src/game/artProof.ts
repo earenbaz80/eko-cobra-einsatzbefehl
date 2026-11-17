@@ -32,7 +32,7 @@ import type {
   WallSegment,
   WallSconceLight,
 } from './types';
-import type { FloorDecal, SnowFootprint } from './TacticalEngineCore';
+import type { ExteriorWindowSection, FloorDecal, SnowFootprint } from './TacticalEngineCore';
 
 const PROOF_W = 480;
 const PROOF_H = 270;
@@ -390,6 +390,7 @@ interface ArtProofScene {
   rooms: RoomZone[];
   walls: WallSegment[];
   doors: DoorEntity[];
+  windows: ExteriorWindowSection[];
   furniture: FurnitureItem[];
   actors: ActorEntity[];
   sconces: WallSconceLight[];
@@ -1048,6 +1049,173 @@ function nudgeOutOfSolids(x: number, y: number, solids: SolidRect[], margin: num
   return { x: px, y: py };
 }
 
+/**
+ * Ventana en planta: el vano es una ranura en el muro con vidrio y marcos, no
+ * una cara con reflejos. Rota solo si se rompió el vidrio.
+ */
+function drawWindow(
+  ctx: CanvasRenderingContext2D,
+  win: ExteriorWindowSection,
+  view: { x0: number; y0: number; x1: number; y1: number }
+) {
+  if (Math.max(win.x1, win.x2) < view.x0 || Math.min(win.x1, win.x2) > view.x1) return;
+  if (Math.max(win.y1, win.y2) < view.y0 || Math.min(win.y1, win.y2) > view.y1) return;
+
+  const length = Math.hypot(win.x2 - win.x1, win.y2 - win.y1);
+  if (length < 2) return;
+  const angle = Math.atan2(win.y2 - win.y1, win.x2 - win.x1);
+
+  ctx.save();
+  ctx.translate(win.x1, win.y1);
+  ctx.rotate(angle);
+
+  // Vano
+  ctx.fillStyle = '#0A1018';
+  ctx.fillRect(0, -3.5, length, 7);
+
+  if (win.isBreached) {
+    // Vidrio roto: borde astillado y esquirlas en el suelo al pie del vano
+    ctx.strokeStyle = 'rgba(203, 213, 225, 0.5)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 4; i++) {
+      const bx = (i + 0.5) * (length / 4);
+      ctx.beginPath();
+      ctx.moveTo(bx - 2, -4);
+      ctx.lineTo(bx, -2);
+      ctx.lineTo(bx - 1, 1);
+      ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(226, 240, 255, 0.45)';
+    for (let i = 0; i < 5; i++) {
+      ctx.fillRect((i + 0.4) * (length / 5), 4 + (i % 2) * 2, 1.6, 1.1);
+    }
+  } else {
+    // Vidrio y marcos
+    ctx.fillStyle = 'rgba(125, 211, 252, 0.22)';
+    ctx.fillRect(1.5, -2.5, length - 3, 5);
+    ctx.fillStyle = 'rgba(226, 240, 255, 0.35)';
+    ctx.fillRect(1.5, -2.5, Math.max(3, length * 0.22), 1);
+    ctx.fillStyle = '#8194A8';
+    ctx.fillRect(0.5, -3.5, 1.6, 7);
+    ctx.fillRect(length - 2.1, -3.5, 1.6, 7);
+    ctx.fillRect(length * 0.5 - 0.6, -3.5, 1.2, 7);
+
+    // Impactos acumulados: fisuras en el vidrio
+    if (win.damageHits > 0) {
+      ctx.strokeStyle = 'rgba(226, 240, 255, 0.55)';
+      ctx.lineWidth = 0.7;
+      const fisuras = Math.min(3, win.damageHits);
+      for (let i = 0; i < fisuras; i++) {
+        const cx = length * (0.3 + i * 0.2);
+        ctx.beginPath();
+        ctx.moveTo(cx - 3, -1.5);
+        ctx.lineTo(cx, 0);
+        ctx.lineTo(cx + 2.5, 1.8);
+        ctx.stroke();
+      }
+    }
+  }
+
+  ctx.restore();
+}
+
+/**
+ * Puerta en planta: umbral, arco de barrido y estado. La hoja nunca se dibuja
+ * con pomo en una cara: el pomo es una marca en su canto.
+ */
+function drawDoor(ctx: CanvasRenderingContext2D, door: DoorEntity) {
+  const leaf = doorLeafSegment(door);
+  const length = Math.hypot(door.x2 - door.x1, door.y2 - door.y1);
+  const angle = Math.atan2(leaf.y2 - leaf.y1, leaf.x2 - leaf.x1);
+  const opening = Math.atan2(door.y2 - door.y1, door.x2 - door.x1);
+
+  // Umbral: el hueco de paso es suelo, se ve desde arriba
+  ctx.save();
+  ctx.translate(door.x1, door.y1);
+  ctx.rotate(opening);
+  ctx.fillStyle = 'rgba(148, 163, 184, 0.18)';
+  ctx.fillRect(0, -5, length, 10);
+  ctx.strokeStyle = 'rgba(15, 23, 42, 0.55)';
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(0, -5);
+  ctx.lineTo(length, -5);
+  ctx.moveTo(0, 5);
+  ctx.lineTo(length, 5);
+  ctx.stroke();
+  ctx.fillStyle = '#3B2418';
+  ctx.fillRect(-1.5, -3, 3, 6);
+  ctx.restore();
+
+  // Arco de barrido: símbolo de plano, marca el recorrido de la hoja
+  if (!door.isDestroyed) {
+    let delta = door.openAngle - door.closedAngle;
+    while (delta > Math.PI) delta -= Math.PI * 2;
+    while (delta < -Math.PI) delta += Math.PI * 2;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(203, 213, 225, 0.38)';
+    ctx.lineWidth = 0.8;
+    ctx.setLineDash([2, 2]);
+    ctx.beginPath();
+    ctx.arc(door.hingeX, door.hingeY, length, door.closedAngle, door.closedAngle + delta, delta < 0);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Marco
+  ctx.fillStyle = '#3B2418';
+  ctx.fillRect(door.x1 - 2, door.y1 - 3, 4, 6);
+  ctx.fillRect(door.x2 - 2, door.y2 - 3, 4, 6);
+
+  if (door.isDestroyed) {
+    // Sin hoja: quicio astillado y restos en el umbral
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
+    ctx.fillRect(door.hingeX - 1, door.hingeY - 4, 2, 8);
+    ctx.fillStyle = 'rgba(120, 84, 54, 0.7)';
+    ctx.fillRect(door.hingeX + 4, door.hingeY - 1, 3, 1.5);
+    return;
+  }
+
+  const breached = door.isBreached;
+  const leafLength = breached ? length * 0.45 : length;
+
+  ctx.save();
+  ctx.translate(leaf.x1, leaf.y1);
+  ctx.rotate(angle);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+  ctx.fillRect(0, 1, leafLength, 5);
+  ctx.fillStyle = breached ? '#4A2E1C' : '#5A3A24';
+  ctx.fillRect(0, -3, leafLength, 6);
+  ctx.fillStyle = breached ? '#7A522E' : '#8B5A34';
+  ctx.fillRect(1, -2, Math.max(1, leafLength - 3), 1);
+  ctx.fillStyle = '#2A1810';
+  ctx.fillRect(0, 2, leafLength, 1);
+
+  // Pomo y cerradura: marcas de canto, no objetos de una cara vertical
+  ctx.fillStyle = door.isLocked ? '#D97706' : '#D6A24A';
+  ctx.fillRect(Math.max(1, leafLength - 4), -1, 2, 2);
+  if (door.isLocked) {
+    ctx.fillStyle = 'rgba(217, 119, 6, 0.85)';
+    ctx.fillRect(Math.max(1, leafLength - 5.5), -2.5, 1, 5);
+  }
+
+  // Brecha: hoja recortada y astillas
+  if (breached) {
+    ctx.strokeStyle = 'rgba(12, 8, 5, 0.85)';
+    ctx.lineWidth = 0.8;
+    for (let i = 0; i < 3; i++) {
+      const bx = leafLength * (0.45 + i * 0.15);
+      ctx.beginPath();
+      ctx.moveTo(bx, -3);
+      ctx.lineTo(bx + 2, 0);
+      ctx.lineTo(bx - 1, 3);
+      ctx.stroke();
+    }
+  }
+
+  ctx.restore();
+}
+
 function drawWalls(ctx: CanvasRenderingContext2D, scene: ArtProofScene, view: { x0: number; y0: number; x1: number; y1: number }) {
   const snowCap = scene.missionMode === 'TIROL';
 
@@ -1092,31 +1260,11 @@ function drawWalls(ctx: CanvasRenderingContext2D, scene: ArtProofScene, view: { 
     ctx.restore();
   }
 
+  for (const win of scene.windows) {
+    drawWindow(ctx, win, view);
+  }
   for (const door of scene.doors) {
-    const leaf = doorLeafSegment(door);
-    const length = Math.hypot(leaf.x2 - leaf.x1, leaf.y2 - leaf.y1);
-    const angle = Math.atan2(leaf.y2 - leaf.y1, leaf.x2 - leaf.x1);
-
-    // Marco
-    ctx.fillStyle = '#3B2418';
-    ctx.fillRect(door.x1 - 2, door.y1 - 3, 4, 6);
-    ctx.fillRect(door.x2 - 2, door.y2 - 3, 4, 6);
-
-    ctx.save();
-    ctx.translate(leaf.x1, leaf.y1);
-    ctx.rotate(angle);
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-    ctx.fillRect(0, 1, length, 5);
-    ctx.fillStyle = '#5A3A24';
-    ctx.fillRect(0, -3, length, 6);
-    ctx.fillStyle = '#8B5A34';
-    ctx.fillRect(1, -2, length - 3, 1);
-    ctx.fillStyle = '#2A1810';
-    ctx.fillRect(0, 2, length, 1);
-    // Pomo
-    ctx.fillStyle = '#D6A24A';
-    ctx.fillRect(length - 5, -1, 2, 2);
-    ctx.restore();
+    drawDoor(ctx, door);
   }
 }
 
