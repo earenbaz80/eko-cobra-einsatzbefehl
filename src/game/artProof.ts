@@ -1175,8 +1175,9 @@ function drawDoor(ctx: CanvasRenderingContext2D, door: DoorEntity) {
   ctx.fillStyle = '#2A1810';
   ctx.fillRect(0, 2, leafLength, 1);
 
-  // Pomo y cerradura: marcas de canto, no objetos de una cara vertical
-  ctx.fillStyle = door.isLocked ? '#D97706' : '#D6A24A';
+  // Pomo y cerradura: marcas de canto, no objetos de una cara vertical. El
+  // acero separa el pomo del amarillo del C4, que se planta en la misma hoja.
+  ctx.fillStyle = door.isLocked ? '#B4751F' : '#94A3B8';
   ctx.fillRect(Math.max(1, leafLength - 4), -1, 2, 2);
   if (door.isLocked) {
     ctx.fillStyle = 'rgba(217, 119, 6, 0.85)';
@@ -1311,16 +1312,26 @@ function drawPixelText(
   }
 }
 
-/** Barra y porcentaje del plantado, pegados al objetivo mientras dura el gesto. */
+/**
+ * Barra y porcentaje del plantado. La placa se dibuja del lado del operador y
+ * corrida a lo largo de la hoja, para que nunca caiga al otro lado del listón
+ * ni tape el estuche.
+ */
 function drawPlantProgress(
   ctx: CanvasRenderingContext2D,
-  anchor: { x: number; y: number },
+  anchor: { x: number; y: number; angle: number },
   ratio: number
 ) {
   const label = `C4 ${Math.round(ratio * 100)}%`;
   const width = Math.max(34, pixelTextWidth(label) + 6);
-  const x = Math.round(anchor.x - width / 2);
-  const y = Math.round(anchor.y - 26);
+  // Con este ángulo el canto del operador queda en -y local: la normal exterior
+  // y la tangente de la hoja dan un punto a su lado, junto al estuche.
+  const outwardX = Math.sin(anchor.angle);
+  const outwardY = -Math.cos(anchor.angle);
+  const alongX = Math.cos(anchor.angle);
+  const alongY = Math.sin(anchor.angle);
+  const x = Math.round(anchor.x + outwardX * 10 + alongX * 32 - width / 2);
+  const y = Math.round(anchor.y + outwardY * 10 + alongY * 32 - 6);
 
   ctx.fillStyle = 'rgba(8, 12, 17, 0.86)';
   ctx.fillRect(x, y, width, 13);
@@ -1354,13 +1365,19 @@ function drawHeldCharge(
   ctx.translate(x, y);
   ctx.rotate(angle);
   ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
-  ctx.fillRect(-4, -2.6, 8.4, 6);
+  ctx.fillRect(-4.2, -3.4, 9.2, 8.6);
   ctx.fillStyle = '#0B1220';
-  ctx.fillRect(-4.3, -3.4, 8.6, 6);
+  ctx.fillRect(-4.6, -4.6, 9.2, 8.6);
   ctx.fillStyle = '#D9A21B';
-  ctx.fillRect(-3.5, -2.7, 6.9, 4.6);
+  ctx.fillRect(-3.8, -3.8, 2.9, 6);
+  ctx.fillRect(0.9, -3.8, 2.9, 6);
+  ctx.fillStyle = '#F2C14E';
+  ctx.fillRect(-3.8, -3.8, 2.9, 1.1);
+  ctx.fillRect(0.9, -3.8, 2.9, 1.1);
+  ctx.fillStyle = 'rgba(148, 163, 184, 0.8)';
+  ctx.fillRect(-0.9, -4.6, 1.8, 8.6);
   ctx.fillStyle = Math.floor(time * 6) % 2 === 0 ? '#EF4444' : '#7F1D1D';
-  ctx.fillRect(2.6, -2, 1.2, 1.2);
+  ctx.fillRect(-1.9, -5.4, 1.6, 1);
   ctx.restore();
 }
 
@@ -1387,10 +1404,10 @@ function drawPlanting(
   ctx.rotate(anchor.angle);
   ctx.fillStyle = 'rgba(239, 68, 68, 0.55)';
   for (const corner of [
-    { x: -4.2, y: -6.4 },
-    { x: 3.2, y: -6.4 },
-    { x: -4.2, y: -1 },
-    { x: 3.2, y: -1 },
+    { x: -4.7, y: -7.3 },
+    { x: 4.6, y: -7.3 },
+    { x: -4.7, y: 1.5 },
+    { x: 4.6, y: 1.5 },
   ]) {
     ctx.fillRect(corner.x, corner.y, 1, 1);
   }
@@ -1411,8 +1428,9 @@ function drawPlanting(
 }
 
 /**
- * Carga C4 en planta: el estuche va al costado del listón, sobre la cara que
- * mira al operador; la cincha corta lo abraza y el detonador asoma por fuera.
+ * Carga C4 en planta: el estuche se apoya en la cara del listón que mira al
+ * operador y se mete un píxel en la hoja; la cincha cruza el listón entero
+ * hasta el canto opuesto y el detonador queda del lado del operador.
  */
 function drawCharge(
   ctx: CanvasRenderingContext2D,
@@ -1431,44 +1449,49 @@ function drawCharge(
   const cos = Math.cos(anchor.angle);
   const sin = Math.sin(anchor.angle);
   ctx.fillStyle = 'rgba(0, 0, 0, 0.32)';
-  ctx.fillRect(-4.2 + 1.6 * cos + 2 * sin, -7.4 - 1.6 * sin + 2 * cos, 8.4, 7.4);
+  ctx.fillRect(-4.6 + 1.6 * cos + 2 * sin, -7.2 - 1.6 * sin + 2 * cos, 9.2, 8.6);
 
-  // Cuerpo fuera del canto del listón (el anclaje está en su cara), con
-  // contorno oscuro para que la silueta no se funda con la hoja.
+  // Cuerpo sobre la cara del listón: el anclaje está en su canto y el estuche
+  // se mete 1.4 px en la hoja, así se apoya en la puerta y no flota al lado.
   ctx.fillStyle = '#0B1220';
-  ctx.fillRect(-4.2, -6.4, 8.4, 6.4);
+  ctx.fillRect(-4.6, -7.2, 9.2, 8.6);
   ctx.fillStyle = '#1E293B';
-  ctx.fillRect(-3.5, -5.7, 7, 5.5);
+  ctx.fillRect(-3.9, -6.5, 7.8, 7.4);
   // Dos bloques de explosivo con un hueco en medio: lectura de carga, no caja.
   ctx.fillStyle = '#D9A21B';
-  ctx.fillRect(-3.1, -5.3, 2.6, 4.4);
-  ctx.fillRect(0.5, -5.3, 2.6, 4.4);
+  ctx.fillRect(-3.4, -6, 2.9, 6);
+  ctx.fillRect(0.5, -6, 2.9, 6);
   ctx.fillStyle = '#F2C14E';
-  ctx.fillRect(-3.1, -5.3, 2.6, 0.9);
-  ctx.fillRect(0.5, -5.3, 2.6, 0.9);
+  ctx.fillRect(-3.4, -6, 2.9, 1.1);
+  ctx.fillRect(0.5, -6, 2.9, 1.1);
 
-  // Una sola cincha corta que cruza el listón, con su hebilla.
-  ctx.fillStyle = 'rgba(203, 213, 225, 0.7)';
-  ctx.fillRect(-0.9, -0.5, 1.8, 3.2);
-  ctx.fillStyle = 'rgba(100, 116, 139, 0.9)';
-  ctx.fillRect(-1.2, 0.7, 2.4, 1.1);
-
-  // Detonador en el canto exterior, con el LED que se ve desde arriba.
+  // Cincha: pasa por encima del estuche y cruza el listón hasta el canto
+  // opuesto, para que se lea abrazada a la hoja desde cualquier lado.
+  ctx.fillStyle = 'rgba(148, 163, 184, 0.6)';
+  ctx.fillRect(-0.8, -7.2, 1.6, 14);
+  ctx.fillStyle = 'rgba(226, 232, 240, 0.4)';
+  ctx.fillRect(-0.8, -7.2, 1.6, 1);
   ctx.fillStyle = '#0B1220';
-  ctx.fillRect(-1.8, -7.5, 3.6, 1.7);
+  ctx.fillRect(-1.4, -1.6, 2.8, 2.4);
+  ctx.fillStyle = '#64748B';
+  ctx.fillRect(-1.2, -1.4, 2.4, 2);
+
+  // Detonador en el canto exterior, de cara al operador, con su LED.
+  ctx.fillStyle = '#0B1220';
+  ctx.fillRect(-1.9, -8.4, 3.8, 1.4);
   ctx.fillStyle = '#334155';
-  ctx.fillRect(-1.4, -7.3, 2.8, 1.2);
+  ctx.fillRect(-1.5, -8.2, 3, 1);
 
   const ledOn = Math.floor(time * 3) % 2 === 0;
   if (ledOn) {
-    ctx.fillStyle = 'rgba(239, 68, 68, 0.35)';
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.26)';
     ctx.beginPath();
-    ctx.arc(0, -6.7, 3.4, 0, Math.PI * 2);
+    ctx.arc(0, -7.6, 2.2, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.fillStyle = ledOn ? '#EF4444' : '#7F1D1D';
   ctx.beginPath();
-  ctx.arc(0, -6.7, 1.4, 0, Math.PI * 2);
+  ctx.arc(0, -7.6, 1.1, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.restore();
