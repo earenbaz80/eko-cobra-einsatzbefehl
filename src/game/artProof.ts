@@ -1354,7 +1354,9 @@ function drawPlantProgress(
   // anclaje en dirección -outward. Queda igual en cualquier puerta o ventana.
   const rightX = outwardY;
   const rightY = -outwardX;
-  const lateral = CHARGE_HALF_WIDTH + PLATE_GAP + width / 2;
+  // Huella de la placa sobre la tangente: en vertical apoya el alto, no el ancho.
+  const tangentReach = Math.abs(outwardY) * (width / 2) + Math.abs(outwardX) * (height / 2);
+  const lateral = CHARGE_HALF_WIDTH + PLATE_GAP + tangentReach;
   const x = Math.round(anchor.x + outwardX * outward + rightX * lateral - width / 2);
   const y = Math.round(anchor.y + outwardY * outward + rightY * lateral - height / 2);
 
