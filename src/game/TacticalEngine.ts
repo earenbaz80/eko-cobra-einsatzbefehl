@@ -229,7 +229,9 @@ export class TacticalEngine extends TacticalEngineCore {
         player: this.getPlayer(),
         camX: this.camX,
         camY: this.camY,
-        missionMode: this.missionMode
+        missionMode: this.missionMode,
+        primaryWeapon: this.plan.primaryWeapon,
+        activeTool: this.activeTool
       });
       return;
     }

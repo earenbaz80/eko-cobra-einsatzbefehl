@@ -18,8 +18,8 @@
  *    Un impacto deja chispas, polvo y escombro en el suelo, no un cráter en el muro.
  * 4. El suelo es el único plano que admite marcas persistentes: casquillos,
  *    escombros y huellas.
- * 5. La postura y la silueta comunican estado (tumbado = neutralizado, arma en el
- *    suelo = sin amenaza); el color nunca es el único portador de esa información.
+ * 5. La silueta del sprite original comunica estado (rendido, arrestado,
+ *    neutralizado); el color nunca es el único portador de esa información.
  * 6. Todo elemento nuevo debe justificarse con esa cámara cenital; si necesita
  *    una vista lateral, no pertenece a este render.
  */
@@ -29,11 +29,13 @@ import type {
   ActorEntity,
   DoorEntity,
   FurnitureItem,
+  PrimaryWeaponId,
   RoomZone,
   WallSegment,
   WallSconceLight,
 } from './types';
 import type { ExteriorWindowSection, FloorDecal, SnowFootprint } from './TacticalEngineCore';
+import { drawPixelArtActor } from './pixelSprites';
 
 const PROOF_W = 480;
 const PROOF_H = 270;
@@ -403,6 +405,8 @@ interface ArtProofScene {
   camX: number;
   camY: number;
   missionMode: string;
+  primaryWeapon: PrimaryWeaponId;
+  activeTool: 'PRIMARY' | 'TASER' | 'GADGET';
 }
 
 function resolveCamera(scene: ArtProofScene): { x: number; y: number } {
@@ -1549,28 +1553,9 @@ function drawDustMotes(
 /* Actores                                                             */
 /* ------------------------------------------------------------------ */
 
-const TOPDOWN_COLORS: Record<string, { body: string; helmet: string; visor: string; weapon: string }> = {
-  PLAYER: { body: '#1E3A5F', helmet: '#334155', visor: '#93C5FD', weapon: '#0F172A' },
-  SQUAD: { body: '#1E293B', helmet: '#475569', visor: '#94A3B8', weapon: '#0F172A' },
-  SUSPECT: { body: '#3F2A1B', helmet: '#4E3524', visor: '#FCA5A5', weapon: '#1C1917' },
-  HOSTAGE: { body: '#6B7280', helmet: '#9CA3AF', visor: '#E5E7EB', weapon: '#374151' },
-};
-
-/** Arma fuera de las manos: siempre en el suelo, nunca flotando junto al cuerpo. */
-function drawDroppedWeapon(
-  ctx: CanvasRenderingContext2D,
-  color: string,
-  length: number,
-  tilt: number
-) {
-  ctx.save();
-  ctx.rotate(tilt);
-  ctx.fillStyle = color;
-  ctx.fillRect(6, 7, length, 2.4);
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
-  ctx.fillRect(6, 7, length, 0.8);
-  ctx.restore();
-}
+// Sprites originales del juego: en el buffer de 480x270 se dibujan a la mitad
+// (26 px), el tamaño de referencia que ocupan en la vista táctica.
+const ACTOR_SCALE = 0.5;
 
 function drawActors(
   ctx: CanvasRenderingContext2D,
@@ -1578,152 +1563,22 @@ function drawActors(
   time: number,
   isVisible: (x: number, y: number) => boolean
 ) {
-  // Los cuerpos en el suelo se dibujan antes que los que siguen en pie, para que
-  // la escena se lea de abajo hacia arriba y no se tapen entre ellos.
-  const rank = (actor: ActorEntity) =>
-    actor.state === 'DEAD' ? 0 : actor.state === 'INCAPACITATED' ? 1 : 2;
+  // Los cuerpos en el suelo van primero para no tapar a los que siguen en pie.
+  const rank = (actor: ActorEntity) => (actor.state === 'DEAD' ? 0 : 1);
   const actors = [...scene.actors].sort((a, b) => rank(a) - rank(b) || a.y - b.y);
 
   for (const actor of actors) {
     if (!isVisible(actor.x, actor.y)) continue;
-    const colors = TOPDOWN_COLORS[actor.role] ?? TOPDOWN_COLORS.SUSPECT;
-    const dead = actor.state === 'DEAD';
-    const wounded = actor.state === 'INCAPACITATED';
-    const surrendered = actor.state === 'SURRENDERED' || actor.state === 'ARRESTED';
-    const downed = dead || wounded;
-    const moving = !downed && Math.hypot(actor.vx ?? 0, actor.vy ?? 0) > 6;
-    const wobble = moving ? Math.sin(time * 12 + actor.x * 0.05) * 0.04 : 0;
-
-    // Sombra elíptica: un cuerpo tendido ocupa más huella que uno de pie
-    drawShadow(
-      ctx,
-      actor.x,
-      actor.y + 2,
-      dead ? 13 : wounded ? 12 : moving ? 11 : 10,
-      downed ? 7 : 6,
-      dead ? 0.38 : 0.5
-    );
-
     ctx.save();
     ctx.translate(actor.x, actor.y);
-    ctx.rotate(actor.angle + wobble);
-    ctx.globalAlpha = dead ? 0.62 : wounded ? 0.8 : 1;
-
-    if (downed) {
-      drawDroppedWeapon(ctx, colors.weapon, dead ? 12 : 10, dead ? 1.2 : 0.9);
-
-      if (dead) {
-        // Boca abajo: torso corto, extremidades abiertas y casco caído al costado.
-        ctx.fillStyle = colors.body;
-        ctx.beginPath();
-        ctx.ellipse(0, 0, 8.5, 5.5, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.ellipse(-0.5, -7, 5, 2.2, -0.45, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.ellipse(-0.5, 7, 5, 2.2, 0.45, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.ellipse(-8.5, -3, 4.2, 2, 0.3, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.ellipse(-8.5, 3, 4.2, 2, -0.3, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = colors.helmet;
-        ctx.beginPath();
-        ctx.arc(5, -7.5, 3.6, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-      } else {
-        // Herido: acurrucado, una mano en el torso y una pierna arrastrada.
-        ctx.fillStyle = colors.body;
-        ctx.beginPath();
-        ctx.ellipse(0, 0, 7.5, 6, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.ellipse(5.5, -4, 3.2, 2, 0.4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.ellipse(-7, 2.5, 4.2, 2.2, 0.5, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = colors.helmet;
-        ctx.beginPath();
-        ctx.arc(1.5, -3.5, 4.4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-
-        // Pulso tenue: herido, no neutralizado
-        const pulse = 0.32 + Math.sin(time * 4 + actor.x * 0.1) * 0.14;
-        ctx.strokeStyle = `rgba(248, 113, 113, ${pulse})`;
-        ctx.lineWidth = 0.8;
-        ctx.beginPath();
-        ctx.arc(0, 0, 9.5, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-    } else {
-      // Cuerpo (hombros) visto desde arriba
-      ctx.fillStyle = colors.body;
-      ctx.beginPath();
-      ctx.ellipse(0, 0, 9, 7, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      // Casco
-      ctx.fillStyle = colors.helmet;
-      ctx.beginPath();
-      ctx.arc(0, 0, 5.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
-      ctx.stroke();
-
-      if (surrendered) {
-        // Rendido: arma en el suelo y manos visibles por delante del casco.
-        drawDroppedWeapon(ctx, colors.weapon, 10, 1.05);
-        ctx.fillStyle = '#C9A27F';
-        ctx.beginPath();
-        ctx.arc(7.5, -5.6, 1.9, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(7.5, 5.6, 1.9, 0, Math.PI * 2);
-        ctx.fill();
-      } else {
-        // Visor frontal (indica dirección)
-        ctx.fillStyle = colors.visor;
-        ctx.fillRect(3.5, -2, 4, 4);
-
-        // Arma (apunta hacia +X tras la rotación)
-        ctx.fillStyle = colors.weapon;
-        ctx.fillRect(7, -1.6, 13, 3.2);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
-        ctx.fillRect(7, -1.6, 13, 1);
-      }
-    }
-
-    // Sombreado de 4 tonos: oscurece el lado derecho/inferior
-    ctx.globalCompositeOperation = 'source-atop';
-    const shade = ctx.createRadialGradient(2, 2, 1, 0, 0, 12);
-    shade.addColorStop(0, 'rgba(0, 0, 0, 0)');
-    shade.addColorStop(1, 'rgba(0, 0, 0, 0.45)');
-    ctx.fillStyle = shade;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, downed ? 13 : 9, downed ? 10 : 7, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalCompositeOperation = 'source-over';
-
+    // Mismo criterio que la vista táctica: los operadores resuelven la dirección
+    // con la hoja de 8 direcciones y el resto gira con su ángulo.
+    if (actor.role !== 'PLAYER' && actor.role !== 'SQUAD') ctx.rotate(actor.angle);
+    ctx.scale(ACTOR_SCALE, ACTOR_SCALE);
+    drawPixelArtActor(ctx, actor, scene.primaryWeapon, scene.activeTool, time);
     ctx.restore();
   }
 }
-
 /* ------------------------------------------------------------------ */
 /* Post-proceso y presentación                                         */
 /* ------------------------------------------------------------------ */
