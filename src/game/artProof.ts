@@ -1199,34 +1199,61 @@ function drawDoor(ctx: CanvasRenderingContext2D, door: DoorEntity) {
 }
 
 /**
- * Carga C4 en planta: la banda abraza la hoja por su cara superior y solo el
- * detonador asoma por el canto, que es lo único que se vería desde arriba.
+ * Dónde se apoya la carga: el punto medio de la hoja o del vano, que es la
+ * superficie que abraza. Si no reconoce su puerta o ventana conserva el punto
+ * que ya da el motor.
+ */
+function chargeAnchor(
+  scene: ArtProofScene,
+  charge: ActiveC4Charge
+): { x: number; y: number; angle: number } {
+  if (charge.isWindow) {
+    const win = scene.windows.find((item) => item.id === charge.windowId);
+    if (win) {
+      const angle = Math.atan2(win.y2 - win.y1, win.x2 - win.x1);
+      return {
+        x: (win.x1 + win.x2) / 2,
+        y: (win.y1 + win.y2) / 2,
+        // Media vuelta cuando hace falta para que el detonador asome por la cara
+        // interior, la única que ve el operador.
+        angle: Math.sin(win.normalAngle - angle) < 0 ? angle + Math.PI : angle,
+      };
+    }
+  } else {
+    const door = scene.doors.find((item) => item.id === charge.doorId);
+    if (door && !door.isDestroyed) {
+      const leaf = doorLeafSegment(door);
+      return {
+        x: (leaf.x1 + leaf.x2) / 2,
+        y: (leaf.y1 + leaf.y2) / 2,
+        angle: Math.atan2(leaf.y2 - leaf.y1, leaf.x2 - leaf.x1),
+      };
+    }
+  }
+  return { x: charge.x, y: charge.y, angle: 0 };
+}
+
+/**
+ * Carga C4 en planta: la banda abraza la hoja o el vano por su cara superior y
+ * solo el detonador asoma por el canto, lo único que se vería desde arriba.
  */
 function drawCharge(
   ctx: CanvasRenderingContext2D,
-  charge: ActiveC4Charge,
+  anchor: { x: number; y: number; angle: number },
   view: { x0: number; y0: number; x1: number; y1: number },
-  time: number,
-  door: DoorEntity | undefined
+  time: number
 ) {
-  // La marca se ancla al punto medio de la hoja: una caja recta en el centro de
-  // la puerta desbordaba el canto y se leía como un objeto apoyado encima. Las
-  // cargas de ventana no tienen hoja y conservan el punto que ya da el motor.
-  const leaf = door && !door.isDestroyed ? doorLeafSegment(door) : null;
-  const x = leaf ? (leaf.x1 + leaf.x2) / 2 : charge.x;
-  const y = leaf ? (leaf.y1 + leaf.y2) / 2 : charge.y;
-  if (x < view.x0 || x > view.x1 || y < view.y0 || y > view.y1) return;
-  const angle = leaf ? Math.atan2(leaf.y2 - leaf.y1, leaf.x2 - leaf.x1) : 0;
+  if (anchor.x < view.x0 || anchor.x > view.x1 || anchor.y < view.y0 || anchor.y > view.y1) return;
 
   ctx.save();
-  ctx.translate(x, y);
+  ctx.translate(anchor.x, anchor.y);
 
   // Sombra de contacto: cae hacia abajo-derecha como el resto del pase, así que
   // no gira con la hoja.
   ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
   ctx.fillRect(-1.2, -2.1, 6.4, 9.2);
 
-  ctx.rotate(angle);
+  ctx.rotate(anchor.angle);
 
   // Banda que abraza la hoja sin desbordar su plano
   ctx.fillStyle = '#1E293B';
@@ -1722,8 +1749,7 @@ export function renderArtProof(scene: ArtProofScene): void {
   drawActors(bctx, scene, time, isVisible);
   drawWalls(bctx, scene, view);
   for (const charge of scene.charges) {
-    const door = scene.doors.find((d) => d.id === charge.doorId);
-    drawCharge(bctx, charge, view, time, door);
+    drawCharge(bctx, chargeAnchor(scene, charge), view, time);
   }
 
   bctx.restore();
