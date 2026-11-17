@@ -32,6 +32,7 @@ import {
 } from './types';
 import { CAMERA_ZOOM, TacticalEngineCore } from './TacticalEngineCore';
 import { ART } from './artDirection';
+import { isArtProofRequested, renderArtProof } from './artProof';
 
 /**
  * Capa de dibujo del motor táctico.
@@ -208,6 +209,26 @@ export class TacticalEngine extends TacticalEngineCore {
 
   public render() {
     const ctx = this.ctx;
+
+    // Prueba de arte opcional (?art=proof): pinta la escena con tileset, sprites
+    // y luz suave a 480x270 escalado por enteros. Sólo cambia el dibujo.
+    if (isArtProofRequested()) {
+      renderArtProof({
+        ctx,
+        rooms: this.rooms,
+        walls: this.walls,
+        doors: this.doors,
+        furniture: this.furniture,
+        actors: this.actors,
+        sconces: this.wallSconces,
+        player: this.getPlayer(),
+        camX: this.camX,
+        camY: this.camY,
+        missionMode: this.missionMode
+      });
+      return;
+    }
+
     // Draw in CSS pixels so the backing store can be scaled by devicePixelRatio.
     ctx.setTransform(this.renderScale, 0, 0, this.renderScale, 0, 0);
     const width = this.viewWidth;
