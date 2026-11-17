@@ -220,6 +220,7 @@ export class TacticalEngine extends TacticalEngineCore {
         doors: this.doors,
         windows: this.exteriorWindows,
         charges: this.c4.charges,
+        planting: this.c4.planting,
         furniture: this.furniture,
         actors: this.actors,
         sconces: this.wallSconces,

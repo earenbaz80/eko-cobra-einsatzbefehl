@@ -36,6 +36,7 @@ import type {
 } from './types';
 import type { ExteriorWindowSection, FloorDecal, SnowFootprint } from './TacticalEngineCore';
 import { drawPixelArtActor } from './pixelSprites';
+import type { C4PlantingState } from './c4Charges';
 
 const PROOF_W = 480;
 const PROOF_H = 270;
@@ -395,6 +396,7 @@ interface ArtProofScene {
   doors: DoorEntity[];
   windows: ExteriorWindowSection[];
   charges: ActiveC4Charge[];
+  planting?: C4PlantingState;
   furniture: FurnitureItem[];
   actors: ActorEntity[];
   sconces: WallSconceLight[];
@@ -1198,44 +1200,219 @@ function drawDoor(ctx: CanvasRenderingContext2D, door: DoorEntity) {
   ctx.restore();
 }
 
+/** Lo mínimo que necesita el render para situar una carga. */
+interface ChargeTarget {
+  x: number;
+  y: number;
+  doorId?: string;
+  windowId?: string;
+  isWindow: boolean;
+  face?: { x: number; y: number };
+}
+
+/** Mitad del grosor del listón: hoja de puerta y vano de ventana. */
+const DOOR_HALF = 3;
+const WINDOW_HALF = 3.5;
+
 /**
- * Dónde se apoya la carga: el punto medio de la hoja o del vano, que es la
- * superficie que abraza. Si no reconoce su puerta o ventana conserva el punto
- * que ya da el motor.
+ * Dónde se apoya la carga: al costado del listón (en planta la hoja o el vano
+ * son un canto estrecho), sobre la cara que mira al operador que la colocó.
+ * Si no reconoce su puerta o ventana conserva el punto que da el motor.
  */
 function chargeAnchor(
   scene: ArtProofScene,
-  charge: ActiveC4Charge
+  target: ChargeTarget
 ): { x: number; y: number; angle: number } {
-  if (charge.isWindow) {
-    const win = scene.windows.find((item) => item.id === charge.windowId);
+  const face = target.face;
+
+  // La normal base es el lado "arriba" local del listón; el operador elige el
+  // canto y el anclaje cae sobre esa cara, no encima del canto.
+  const sideAnchor = (mx: number, my: number, angle: number, half: number) => {
+    const nx = Math.sin(angle);
+    const ny = -Math.cos(angle);
+    const finalAngle = face && face.x * nx + face.y * ny < 0 ? angle + Math.PI : angle;
+    const ox = Math.sin(finalAngle);
+    const oy = -Math.cos(finalAngle);
+    return { x: mx + ox * half, y: my + oy * half, angle: finalAngle };
+  };
+
+  if (target.isWindow) {
+    const win = scene.windows.find((item) => item.id === target.windowId);
     if (win) {
       const angle = Math.atan2(win.y2 - win.y1, win.x2 - win.x1);
-      return {
-        x: (win.x1 + win.x2) / 2,
-        y: (win.y1 + win.y2) / 2,
-        // Media vuelta cuando hace falta para que el detonador asome por la cara
-        // interior, la única que ve el operador.
-        angle: Math.sin(win.normalAngle - angle) < 0 ? angle + Math.PI : angle,
-      };
+      const mx = (win.x1 + win.x2) / 2;
+      const my = (win.y1 + win.y2) / 2;
+      if (!face) {
+        // Sin operador registrado, el estuche va del lado interior: la única
+        // cara del vano que ve el jugador desde dentro.
+        const ix = Math.cos(win.normalAngle);
+        const iy = Math.sin(win.normalAngle);
+        return { x: mx + ix * WINDOW_HALF, y: my + iy * WINDOW_HALF, angle: Math.atan2(ix, -iy) };
+      }
+      return sideAnchor(mx, my, angle, WINDOW_HALF);
     }
   } else {
-    const door = scene.doors.find((item) => item.id === charge.doorId);
+    const door = scene.doors.find((item) => item.id === target.doorId);
     if (door && !door.isDestroyed) {
       const leaf = doorLeafSegment(door);
-      return {
-        x: (leaf.x1 + leaf.x2) / 2,
-        y: (leaf.y1 + leaf.y2) / 2,
-        angle: Math.atan2(leaf.y2 - leaf.y1, leaf.x2 - leaf.x1),
-      };
+      const angle = Math.atan2(leaf.y2 - leaf.y1, leaf.x2 - leaf.x1);
+      return sideAnchor((leaf.x1 + leaf.x2) / 2, (leaf.y1 + leaf.y2) / 2, angle, DOOR_HALF);
     }
   }
-  return { x: charge.x, y: charge.y, angle: 0 };
+  return { x: target.x, y: target.y, angle: 0 };
+}
+
+/* ------------------------------------------------------------------ */
+/* Plantado de C4                                                      */
+/* ------------------------------------------------------------------ */
+
+// Texto de 3x5 píxeles: el buffer se escala por enteros y una fuente del
+// sistema se ve sucia a 480x270.
+const PIXEL_GLYPHS: Record<string, string[]> = {
+  '0': ['111', '101', '101', '101', '111'],
+  '1': ['010', '110', '010', '010', '111'],
+  '2': ['111', '001', '111', '100', '111'],
+  '3': ['111', '001', '111', '001', '111'],
+  '4': ['101', '101', '111', '001', '001'],
+  '5': ['111', '100', '111', '001', '111'],
+  '6': ['111', '100', '111', '101', '111'],
+  '7': ['111', '001', '001', '001', '001'],
+  '8': ['111', '101', '111', '101', '111'],
+  '9': ['111', '101', '111', '001', '111'],
+  '%': ['101', '001', '010', '100', '101'],
+  C: ['111', '100', '100', '100', '111'],
+  ' ': ['000', '000', '000', '000', '000'],
+};
+
+function pixelTextWidth(text: string): number {
+  return text.length * 4 - 1;
+}
+
+function drawPixelText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  color: string
+) {
+  ctx.fillStyle = color;
+  const top = Math.round(y);
+  let cursor = Math.round(x);
+  for (const char of text) {
+    const glyph = PIXEL_GLYPHS[char];
+    if (glyph) {
+      for (let row = 0; row < 5; row++) {
+        for (let col = 0; col < 3; col++) {
+          if (glyph[row][col] === '1') ctx.fillRect(cursor + col, top + row, 1, 1);
+        }
+      }
+    }
+    cursor += 4;
+  }
+}
+
+/** Barra y porcentaje del plantado, pegados al objetivo mientras dura el gesto. */
+function drawPlantProgress(
+  ctx: CanvasRenderingContext2D,
+  anchor: { x: number; y: number },
+  ratio: number
+) {
+  const label = `C4 ${Math.round(ratio * 100)}%`;
+  const width = Math.max(34, pixelTextWidth(label) + 6);
+  const x = Math.round(anchor.x - width / 2);
+  const y = Math.round(anchor.y - 26);
+
+  ctx.fillStyle = 'rgba(8, 12, 17, 0.86)';
+  ctx.fillRect(x, y, width, 13);
+  ctx.fillStyle = 'rgba(239, 68, 68, 0.85)';
+  ctx.fillRect(x, y, width, 1);
+  ctx.fillRect(x, y + 12, width, 1);
+  ctx.fillRect(x, y, 1, 13);
+  ctx.fillRect(x + width - 1, y, 1, 13);
+
+  const barW = width - 4;
+  ctx.fillStyle = '#1E293B';
+  ctx.fillRect(x + 2, y + 2, barW, 3);
+  ctx.fillStyle = '#EF4444';
+  ctx.fillRect(x + 2, y + 2, Math.round(barW * ratio), 3);
+  // Ticks: el relleno se lee como gauge aunque la luz apague el color.
+  ctx.fillStyle = 'rgba(8, 12, 17, 0.55)';
+  for (let tick = 4; tick < barW; tick += 4) ctx.fillRect(x + 2 + tick, y + 2, 1, 3);
+
+  drawPixelText(ctx, label, x + (width - pixelTextWidth(label)) / 2, y + 6, '#FCA5A5');
+}
+
+/** La carga en las manos, unas décimas antes de quedar apoyada. */
+function drawHeldCharge(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  angle: number,
+  time: number
+) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+  ctx.fillRect(-4, -2.6, 8.4, 6);
+  ctx.fillStyle = '#0B1220';
+  ctx.fillRect(-4.3, -3.4, 8.6, 6);
+  ctx.fillStyle = '#D9A21B';
+  ctx.fillRect(-3.5, -2.7, 6.9, 4.6);
+  ctx.fillStyle = Math.floor(time * 6) % 2 === 0 ? '#EF4444' : '#7F1D1D';
+  ctx.fillRect(2.6, -2, 1.2, 1.2);
+  ctx.restore();
 }
 
 /**
- * Carga C4 en planta: la banda abraza la hoja o el vano por su cara superior y
- * solo el detonador asoma por el canto, lo único que se vería desde arriba.
+ * Gesto de plantado: la caja sale de las manos del operador y viaja al anclaje,
+ * donde el hueco destino y la barra marcan el progreso hasta armarla.
+ */
+function drawPlanting(
+  ctx: CanvasRenderingContext2D,
+  scene: ArtProofScene,
+  anchor: { x: number; y: number; angle: number },
+  view: { x0: number; y0: number; x1: number; y1: number },
+  time: number
+) {
+  const planting = scene.planting;
+  if (!planting) return;
+  if (anchor.x < view.x0 || anchor.x > view.x1 || anchor.y < view.y0 || anchor.y > view.y1) return;
+
+  const ratio = Math.min(1, planting.progress / planting.maxProgress);
+
+  // Hueco destino: cuatro esquinas marcan dónde va a quedar el estuche.
+  ctx.save();
+  ctx.translate(anchor.x, anchor.y);
+  ctx.rotate(anchor.angle);
+  ctx.fillStyle = 'rgba(239, 68, 68, 0.55)';
+  for (const corner of [
+    { x: -4.2, y: -6.4 },
+    { x: 3.2, y: -6.4 },
+    { x: -4.2, y: -1 },
+    { x: 3.2, y: -1 },
+  ]) {
+    ctx.fillRect(corner.x, corner.y, 1, 1);
+  }
+  ctx.restore();
+
+  const player = scene.player;
+  if (player && player.state !== 'DEAD' && Math.hypot(player.x - anchor.x, player.y - anchor.y) < 130) {
+    const dx = anchor.x - player.x;
+    const dy = anchor.y - player.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    const t = ratio * ratio * (3 - 2 * ratio);
+    const handX = player.x + (dx / dist) * 8;
+    const handY = player.y + (dy / dist) * 8;
+    drawHeldCharge(ctx, handX + (anchor.x - handX) * t, handY + (anchor.y - handY) * t, anchor.angle, time);
+  }
+
+  drawPlantProgress(ctx, anchor, ratio);
+}
+
+/**
+ * Carga C4 en planta: el estuche va al costado del listón, sobre la cara que
+ * mira al operador; la cincha corta lo abraza y el detonador asoma por fuera.
  */
 function drawCharge(
   ctx: CanvasRenderingContext2D,
@@ -1247,40 +1424,51 @@ function drawCharge(
 
   ctx.save();
   ctx.translate(anchor.x, anchor.y);
-
-  // Sombra de contacto: cae hacia abajo-derecha como el resto del pase, así que
-  // no gira con la hoja.
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
-  ctx.fillRect(-1.2, -2.1, 6.4, 9.2);
-
   ctx.rotate(anchor.angle);
 
-  // Banda que abraza la hoja sin desbordar su plano
+  // Sombra al pie del estuche: cae hacia abajo-derecha en coordenadas del mundo
+  // aunque el estuche gire con la hoja, así que se gira el offset al revés.
+  const cos = Math.cos(anchor.angle);
+  const sin = Math.sin(anchor.angle);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.32)';
+  ctx.fillRect(-4.2 + 1.6 * cos + 2 * sin, -7.4 - 1.6 * sin + 2 * cos, 8.4, 7.4);
+
+  // Cuerpo fuera del canto del listón (el anclaje está en su cara), con
+  // contorno oscuro para que la silueta no se funda con la hoja.
+  ctx.fillStyle = '#0B1220';
+  ctx.fillRect(-4.2, -6.4, 8.4, 6.4);
   ctx.fillStyle = '#1E293B';
-  ctx.fillRect(-3.2, -4.6, 6.4, 9.2);
+  ctx.fillRect(-3.5, -5.7, 7, 5.5);
+  // Dos bloques de explosivo con un hueco en medio: lectura de carga, no caja.
   ctx.fillStyle = '#D9A21B';
-  ctx.fillRect(-2.4, -3.9, 4.8, 7.8);
+  ctx.fillRect(-3.1, -5.3, 2.6, 4.4);
+  ctx.fillRect(0.5, -5.3, 2.6, 4.4);
+  ctx.fillStyle = '#F2C14E';
+  ctx.fillRect(-3.1, -5.3, 2.6, 0.9);
+  ctx.fillRect(0.5, -5.3, 2.6, 0.9);
 
-  // Flejes sobre la cara superior de la hoja
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-  ctx.fillRect(-3.2, -4.6, 6.4, 0.9);
-  ctx.fillRect(-3.2, 3.7, 6.4, 0.9);
+  // Una sola cincha corta que cruza el listón, con su hebilla.
+  ctx.fillStyle = 'rgba(203, 213, 225, 0.7)';
+  ctx.fillRect(-0.9, -0.5, 1.8, 3.2);
+  ctx.fillStyle = 'rgba(100, 116, 139, 0.9)';
+  ctx.fillRect(-1.2, 0.7, 2.4, 1.1);
 
-  // Detonador en el canto, el único volumen que asoma al plano
-  ctx.fillStyle = '#0F172A';
-  ctx.fillRect(-1.2, 4.6, 3.4, 2.6);
+  // Detonador en el canto exterior, con el LED que se ve desde arriba.
+  ctx.fillStyle = '#0B1220';
+  ctx.fillRect(-1.8, -7.5, 3.6, 1.7);
+  ctx.fillStyle = '#334155';
+  ctx.fillRect(-1.4, -7.3, 2.8, 1.2);
 
-  // LED armado: parpadeo seco, legible a 480x270
   const ledOn = Math.floor(time * 3) % 2 === 0;
   if (ledOn) {
-    ctx.fillStyle = 'rgba(239, 68, 68, 0.3)';
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.35)';
     ctx.beginPath();
-    ctx.arc(0.5, 5.9, 3.2, 0, Math.PI * 2);
+    ctx.arc(0, -6.7, 3.4, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.fillStyle = ledOn ? '#EF4444' : '#7F1D1D';
   ctx.beginPath();
-  ctx.arc(0.5, 5.9, 1.3, 0, Math.PI * 2);
+  ctx.arc(0, -6.7, 1.4, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.restore();
@@ -1613,6 +1801,17 @@ function drawActors(
     ctx.save();
     ctx.translate(actor.x, actor.y);
 
+    // Plantando: se inclina hacia el objetivo y agacha el cuerpo, para que el
+    // gesto se lea aunque el sprite no tenga una pose propia de plantado.
+    if (!dead && scene.planting && actor.role === 'PLAYER') {
+      const anchor = chargeAnchor(scene, scene.planting);
+      const dx = anchor.x - actor.x;
+      const dy = anchor.y - actor.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      ctx.translate((dx / dist) * 2.5, (dy / dist) * 2.5);
+      ctx.scale(0.95, 0.95);
+    }
+
     // Neutralizado: el sprite de pie no se distingue de un sospechoso armado,
     // así que el cuerpo se tiende de lado y deja su charco en el suelo.
     if (dead) {
@@ -1750,6 +1949,9 @@ export function renderArtProof(scene: ArtProofScene): void {
   drawWalls(bctx, scene, view);
   for (const charge of scene.charges) {
     drawCharge(bctx, chargeAnchor(scene, charge), view, time);
+  }
+  if (scene.planting) {
+    drawPlanting(bctx, scene, chargeAnchor(scene, scene.planting), view, time);
   }
 
   bctx.restore();

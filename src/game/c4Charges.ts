@@ -1,4 +1,4 @@
-import type { ActiveC4Charge, ActorEntity } from './types';
+import type { ActiveC4Charge, ActorEntity, Vec2 } from './types';
 
 export const C4_PLANT_SECONDS = 1.7;
 export const C4_SAFE_RADIUS = 190;
@@ -10,6 +10,8 @@ export interface C4PlantTarget {
   doorId?: string;
   windowId?: string;
   isWindow: boolean;
+  /** Dirección del objetivo hacia el operador que coloca la carga. */
+  face?: Vec2;
 }
 
 export interface C4PlantingState extends C4PlantTarget {
@@ -61,8 +63,16 @@ export class C4ChargeSystem {
       return false;
     }
 
+    const player = deps.getPlayer();
+    const reach = player ? Math.hypot(player.x - target.x, player.y - target.y) : 0;
+    const face =
+      player && reach > 1
+        ? { x: (player.x - target.x) / reach, y: (player.y - target.y) / reach }
+        : undefined;
+
     this.planting = {
       ...target,
+      face,
       progress: 0,
       maxProgress: C4_PLANT_SECONDS,
     };
@@ -121,6 +131,7 @@ export class C4ChargeSystem {
       doorId: planting.doorId,
       windowId: planting.windowId,
       isWindow: planting.isWindow,
+      face: planting.face,
       phase: 'ARMED',
       safeToDetonate: false,
     });

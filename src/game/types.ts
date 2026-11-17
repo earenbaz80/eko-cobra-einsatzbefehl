@@ -687,6 +687,8 @@ export interface ActiveC4Charge {
   doorId?: string;
   windowId?: string;
   isWindow: boolean;
+  /** Dirección del objetivo hacia el operador que la plantó; el render pone el estuche a ese lado. */
+  face?: Vec2;
   phase: 'ARMED' | 'DETONATING';
   /** El motor calcula este valor para la HUD al emitir el snapshot. */
   safeToDetonate: boolean;
