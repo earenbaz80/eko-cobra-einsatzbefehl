@@ -17,3 +17,6 @@ coverage/
 # Captura, traza e informe del humo fallido (el CI lo sube como artifact)
 .smoke-fallos/
 backups/
+
+# Capturas de trabajo del art proof (iteración local, no documentación)
+docs/prueba-arte-*.png
