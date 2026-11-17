@@ -977,6 +977,22 @@ export function renderExteriorStreetsAndStairwell(ctx: CanvasRenderingContext2D)
   // East sidewalk (along Loggia outer balustrade): spans x: 1150..1186, y: 360..756 (36px wide)
   ctx.fillRect(1150, 360, 36, 396);
 
+  // Curb drop shadow on the asphalt side (depth)
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(54, 63);
+  ctx.lineTo(1076, 63);
+  ctx.moveTo(53, 64);
+  ctx.lineTo(53, 757);
+  ctx.moveTo(54, 757);
+  ctx.lineTo(1187, 757);
+  ctx.moveTo(1187, 360);
+  ctx.lineTo(1187, 757);
+  ctx.moveTo(1077, 63);
+  ctx.lineTo(1077, 361);
+  ctx.stroke();
+
   // Granite curb bevel borders around the building sidewalks
   ctx.strokeStyle = '#64748B';
   ctx.lineWidth = 2.5;
@@ -2417,17 +2433,168 @@ export function renderExteriorStreetsAndStairwell(ctx: CanvasRenderingContext2D)
   ctx.font = 'bold 11px "JetBrains Mono", monospace';
   ctx.fillText('🛡 POLIZEIINSPEKTION GRAZ-LEND', 115, 920);
 
-  // Parked Police Patrol Vehicle (Polizei-Einsatzwagen) outside on parking bay
+  // Parked Police Patrol Vehicle (Ford Crown Victoria Police Interceptor - EKO Cobra)
+  // Top-down view, parked in the East parking bay (Conrad-von-Hötzendorf-Straße)
   ctx.save();
   ctx.translate(340, 845);
-  ctx.fillStyle = '#CBD5E1'; // Silver body
+
+  // Drop shadow under the car
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+  ctx.fillRect(-23, -12, 47, 25);
+
+  // Tires (4 wheels)
+  ctx.fillStyle = '#0B0F17';
+  ctx.fillRect(-19, -13, 9, 4); // front-left
+  ctx.fillRect(-19, 9, 9, 4); // front-right
+  ctx.fillRect(10, -13, 9, 4); // rear-left
+  ctx.fillRect(10, 9, 9, 4); // rear-right
+  // Wheel hubs
+  ctx.fillStyle = '#334155';
+  ctx.fillRect(-17, -12, 5, 2);
+  ctx.fillRect(-17, 10, 5, 2);
+  ctx.fillRect(12, -12, 5, 2);
+  ctx.fillRect(12, 10, 5, 2);
+
+  // Body (dark navy/black police cruiser)
+  ctx.fillStyle = '#0F172A';
   ctx.fillRect(-22, -11, 44, 22);
-  ctx.fillStyle = '#1D4ED8'; // Austrian Blue Police stripes
-  ctx.fillRect(-20, -11, 40, 4);
-  ctx.fillRect(-20, 7, 40, 4);
-  ctx.fillStyle = '#EF4444'; // Red chevron accent
-  ctx.fillRect(14, -8, 5, 16);
-  // La barra LED azul se dibuja en la capa animada.
+  // Body highlight (roof panel)
+  ctx.fillStyle = '#1E293B';
+  ctx.fillRect(-18, -8, 36, 16);
+
+  // Windshield (front)
+  ctx.fillStyle = 'rgba(56, 189, 248, 0.35)';
+  ctx.fillRect(14, -8, 8, 16);
+  ctx.strokeStyle = '#0F172A';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(14, -8, 8, 16);
+
+  // Rear window
+  ctx.fillStyle = 'rgba(56, 189, 248, 0.28)';
+  ctx.fillRect(-20, -8, 6, 16);
+  ctx.strokeRect(-20, -8, 6, 16);
+
+  // Side windows
+  ctx.fillStyle = 'rgba(56, 189, 248, 0.22)';
+  ctx.fillRect(-12, -10, 20, 3); // left side window
+  ctx.fillRect(-12, 7, 20, 3); // right side window
+
+  // Austrian Police stripes (blue + red chevron)
+  ctx.fillStyle = '#1D4ED8';
+  ctx.fillRect(-18, -11, 36, 3);
+  ctx.fillRect(-18, 8, 36, 3);
+  ctx.fillStyle = '#EF4444';
+  ctx.fillRect(16, -8, 4, 16);
+
+  // POLIZEI text on hood (small)
+  ctx.fillStyle = '#F8FAFC';
+  ctx.font = 'bold 6px "JetBrains Mono", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('POLIZEI', 2, 2);
+
+  // Roof light bar (LED) - blue/red
+  ctx.fillStyle = '#1E293B';
+  ctx.fillRect(-4, -3, 8, 6);
+  ctx.fillStyle = '#3B82F6';
+  ctx.fillRect(-3, -2, 3, 4);
+  ctx.fillStyle = '#EF4444';
+  ctx.fillRect(0, -2, 3, 4);
+  // Light bar glow
+  ctx.fillStyle = 'rgba(59, 130, 246, 0.35)';
+  ctx.fillRect(-4, -4, 10, 8);
+
+  // Push bar (front bumper)
+  ctx.fillStyle = '#64748B';
+  ctx.fillRect(22, -9, 3, 18);
+  ctx.fillStyle = '#94A3B8';
+  ctx.fillRect(23, -6, 2, 12);
+
+  // Headlights
+  ctx.fillStyle = '#FEF08A';
+  ctx.fillRect(20, -10, 3, 4);
+  ctx.fillRect(20, 6, 3, 4);
+  // Taillights
+  ctx.fillStyle = '#EF4444';
+  ctx.fillRect(-22, -10, 3, 4);
+  ctx.fillRect(-22, 6, 3, 4);
+
+  ctx.restore();
+
+  // Parked Police Patrol Vehicle #2 (Polizei - daytime cruiser) on North street
+  ctx.save();
+  ctx.translate(600, 50);
+
+  // Drop shadow
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+  ctx.fillRect(-23, -12, 47, 25);
+
+  // Tires
+  ctx.fillStyle = '#0B0F17';
+  ctx.fillRect(-19, -13, 9, 4);
+  ctx.fillRect(-19, 9, 9, 4);
+  ctx.fillRect(10, -13, 9, 4);
+  ctx.fillRect(10, 9, 9, 4);
+  ctx.fillStyle = '#334155';
+  ctx.fillRect(-17, -12, 5, 2);
+  ctx.fillRect(-17, 10, 5, 2);
+  ctx.fillRect(12, -12, 5, 2);
+  ctx.fillRect(12, 10, 5, 2);
+
+  // Body (white daytime cruiser)
+  ctx.fillStyle = '#F1F5F9';
+  ctx.fillRect(-22, -11, 44, 22);
+  ctx.fillStyle = '#E2E8F0';
+  ctx.fillRect(-18, -8, 36, 16);
+
+  // Windshield
+  ctx.fillStyle = 'rgba(56, 189, 248, 0.30)';
+  ctx.fillRect(14, -8, 8, 16);
+  ctx.strokeStyle = '#94A3B8';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(14, -8, 8, 16);
+  // Rear window
+  ctx.fillStyle = 'rgba(56, 189, 248, 0.22)';
+  ctx.fillRect(-20, -8, 6, 16);
+  ctx.strokeRect(-20, -8, 6, 16);
+  // Side windows
+  ctx.fillStyle = 'rgba(56, 189, 248, 0.18)';
+  ctx.fillRect(-12, -10, 20, 3);
+  ctx.fillRect(-12, 7, 20, 3);
+
+  // Blue stripes (Polizei)
+  ctx.fillStyle = '#1D4ED8';
+  ctx.fillRect(-18, -11, 36, 4);
+  ctx.fillRect(-18, 7, 36, 4);
+
+  // POLIZEI text
+  ctx.fillStyle = '#1D4ED8';
+  ctx.font = 'bold 7px "JetBrains Mono", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('POLIZEI', 2, 2);
+
+  // Roof light bar
+  ctx.fillStyle = '#1E293B';
+  ctx.fillRect(-4, -3, 8, 6);
+  ctx.fillStyle = '#3B82F6';
+  ctx.fillRect(-3, -2, 3, 4);
+  ctx.fillStyle = '#EF4444';
+  ctx.fillRect(0, -2, 3, 4);
+  ctx.fillStyle = 'rgba(59, 130, 246, 0.30)';
+  ctx.fillRect(-4, -4, 10, 8);
+
+  // Push bar
+  ctx.fillStyle = '#64748B';
+  ctx.fillRect(22, -9, 3, 18);
+
+  // Headlights
+  ctx.fillStyle = '#FEF08A';
+  ctx.fillRect(20, -10, 3, 4);
+  ctx.fillRect(20, 6, 3, 4);
+  // Taillights
+  ctx.fillStyle = '#EF4444';
+  ctx.fillRect(-22, -10, 3, 4);
+  ctx.fillRect(-22, 6, 3, 4);
+
   ctx.restore();
 
   // Building S3: "Tabak-Trafik & Wohnhaus" (x: 450 to 830, y: 885 to 1250)
@@ -2631,12 +2798,37 @@ export function renderExteriorAnimatedDetails(ctx: CanvasRenderingContext2D, ela
   ctx.fillRect(357, -148.5, 22, 7);
   ctx.restore();
 
-  // Barra LED del coche de policía.
+  // Barra LED del coche de policía (East parking bay).
   const blueFlash = Math.sin(elapsedSeconds * 8) > 0;
   ctx.save();
   ctx.translate(340, 845);
+  const redFlash = Math.sin(elapsedSeconds * 8 + Math.PI) > 0;
   ctx.fillStyle = blueFlash ? '#38BDF8' : '#1D4ED8';
-  ctx.fillRect(-6, -4, 12, 8);
+  ctx.fillRect(-3, -2, 3, 4);
+  ctx.fillStyle = redFlash ? '#EF4444' : '#7F1D1D';
+  ctx.fillRect(0, -2, 3, 4);
+  ctx.fillStyle = blueFlash ? 'rgba(56, 189, 248, 0.55)' : 'rgba(29, 78, 216, 0.35)';
+  ctx.fillRect(-4, -3, 8, 6);
+  ctx.restore();
+
+  // Barra LED del coche de policía #2 (North street) + luces intermitentes.
+  const blueFlash2 = Math.sin(elapsedSeconds * 7 + 1.2) > 0;
+  const redFlash2 = Math.sin(elapsedSeconds * 7 + Math.PI + 1.2) > 0;
+  ctx.save();
+  ctx.translate(600, 50);
+  ctx.fillStyle = blueFlash2 ? '#38BDF8' : '#1D4ED8';
+  ctx.fillRect(-3, -2, 3, 4);
+  ctx.fillStyle = redFlash2 ? '#EF4444' : '#7F1D1D';
+  ctx.fillRect(0, -2, 3, 4);
+  ctx.fillStyle = blueFlash2 ? 'rgba(56, 189, 248, 0.55)' : 'rgba(29, 78, 216, 0.35)';
+  ctx.fillRect(-4, -3, 8, 6);
+  // Headlights blink
+  const headBlink = Math.sin(elapsedSeconds * 2.5) > 0.6;
+  if (headBlink) {
+    ctx.fillStyle = 'rgba(254, 240, 138, 0.6)';
+    ctx.fillRect(19, -11, 5, 6);
+    ctx.fillRect(19, 5, 5, 6);
+  }
   ctx.restore();
 
   // Ventanas del edificio de viviendas con parpadeo de TV.

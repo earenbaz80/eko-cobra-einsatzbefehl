@@ -11,6 +11,64 @@ class TacticalSoundEngine {
   private ambientGain: GainNode | null = null;
   private lastHeartbeatTimestamp: number = 0;
 
+  // Optional MP3 samples loaded from public/sounds/. null = tried and failed.
+  private sampleBuffers: Map<string, AudioBuffer | null> = new Map();
+  private sampleLoading: Set<string> = new Set();
+
+  private sampleUrl(name: string): string {
+    const base = import.meta.env.BASE_URL ?? '/';
+    const normalizedBase = base.endsWith('/') ? base : `${base}/`;
+    return `${normalizedBase}sounds/${name}.mp3`;
+  }
+
+  /** Fire-and-forget preload of an optional sample. Safe to call repeatedly. */
+  private preloadSample(name: string) {
+    if (this.sampleBuffers.has(name) || this.sampleLoading.has(name)) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    this.sampleLoading.add(name);
+    fetch(this.sampleUrl(name))
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.arrayBuffer();
+      })
+      .then((buf) => ctx.decodeAudioData(buf))
+      .then((decoded) => {
+        this.sampleBuffers.set(name, decoded);
+      })
+      .catch(() => {
+        this.sampleBuffers.set(name, null);
+      })
+      .finally(() => {
+        this.sampleLoading.delete(name);
+      });
+  }
+
+  /** Plays a loaded sample if available. Returns true when played. */
+  private playSampleBuffer(name: string, gainValue: number, panValue: number): boolean {
+    const ctx = this.ensureContext();
+    if (!ctx) return false;
+    const buffer = this.sampleBuffers.get(name);
+    if (buffer === undefined) {
+      // Not yet attempted: kick off load and fall back to procedural this time.
+      this.preloadSample(name);
+      return false;
+    }
+    if (!buffer) return false; // failed earlier
+    const now = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    const gain = ctx.createGain();
+    gain.gain.value = this.muted ? 0 : gainValue;
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = panValue;
+    src.connect(gain);
+    gain.connect(panner);
+    panner.connect(ctx.destination);
+    src.start(now);
+    return true;
+  }
+
   private ensureContext(): AudioContext | null {
     if (this.muted || typeof window === 'undefined') return null;
     if (!this.ctx) {
@@ -48,6 +106,13 @@ class TacticalSoundEngine {
 
   public isRadioAudioEnabled(): boolean {
     return this.radioAudioEnabled;
+  }
+
+  /** Preload optional ambient samples (fire-and-forget). Safe without the files. */
+  public preloadAmbientSamples() {
+    this.preloadSample('police-siren');
+    this.preloadSample('ambulance');
+    this.preloadSample('radio-static');
   }
 
   public setMuted(mute: boolean) {
@@ -154,6 +219,127 @@ class TacticalSoundEngine {
       this.ambientGain.disconnect();
       this.ambientGain = null;
     }
+  }
+
+  /**
+   * Sirena de patrulla lejana (wail de dos tonos) para dar ambiente urbano.
+   * Procedural, sin dependencias externas; volumen bajo para no tapar el juego.
+   */
+  public playPoliceSirenPassing() {
+    if (this.playSampleBuffer('police-siren', 0.35, 0.35)) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const duration = 3.6;
+
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = 0.35;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 1100;
+    filter.Q.value = 1.4;
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.05, now + 0.25);
+    gain.gain.setValueAtTime(0.05, now + duration - 0.6);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    // Wail: alterna entre dos tonos con barrido suave.
+    osc.frequency.setValueAtTime(660, now);
+    osc.frequency.linearRampToValueAtTime(880, now + 0.9);
+    osc.frequency.linearRampToValueAtTime(660, now + 1.8);
+    osc.frequency.linearRampToValueAtTime(880, now + 2.7);
+    osc.frequency.linearRampToValueAtTime(660, now + duration);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(panner);
+    panner.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + duration + 0.05);
+  }
+
+  /** Ambulancia (two-tone hi-lo) distante. */
+  public playAmbulancePassing() {
+    if (this.playSampleBuffer('ambulance', 0.3, -0.4)) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const duration = 3.0;
+
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = -0.4;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 900;
+    filter.Q.value = 1.2;
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.045, now + 0.2);
+    gain.gain.setValueAtTime(0.045, now + duration - 0.5);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    // Two-tone: 770 Hz / 620 Hz alternando.
+    const step = 0.45;
+    let t = now;
+    let high = true;
+    while (t < now + duration) {
+      osc.frequency.setValueAtTime(high ? 770 : 620, t);
+      t += step;
+      high = !high;
+    }
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(panner);
+    panner.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + duration + 0.05);
+  }
+
+  /** Estática de radio TETRA ambiental (sólo si el audio de radio está activo). */
+  public playRadioCommsAmbient() {
+    if (!this.radioAudioEnabled) return;
+    if (this.playSampleBuffer('radio-static', 0.2, 0)) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const duration = 1.4;
+
+    const bufferSize = Math.floor(ctx.sampleRate * duration);
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * 0.6;
+    }
+
+    const noise = ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 1800;
+    filter.Q.value = 2.5;
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.025, now + 0.08);
+    gain.gain.setValueAtTime(0.025, now + duration - 0.2);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    noise.start(now);
+    noise.stop(now + duration + 0.05);
   }
 
   private stopRainAmbience() {

@@ -1093,17 +1093,37 @@ function renderHighDetailCharacterLayers(
     const jacketColor = isMarkus ? '#7F1D1D' : isMilan ? '#365314' : '#374151';
     const rigColor = isMarkus ? '#1E293B' : isMilan ? '#1F2937' : '#111827';
 
-    // Chest rig / Webbing straps on suspects
+    // Chest rig / Webbing straps on suspects (shaded for better definition)
     ctx.fillStyle = rigColor;
     ctx.fillRect(-5, -9, 10, 18);
+    // Rim highlight on left edge of rig
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.fillRect(-5, -9, 2, 18);
+    // Shadow on right edge of rig
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.fillRect(3, -9, 2, 18);
     ctx.fillStyle = jacketColor;
     ctx.fillRect(-6, -12, 8, 5);
     ctx.fillRect(-6, 7, 8, 5);
+    // Jacket shading: darker lower half, highlight on shoulders
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+    ctx.fillRect(-6, -7, 8, 19);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+    ctx.fillRect(-6, -12, 8, 3);
 
     // Suspect Head, Hair & Facial Detail (Balaclava for Markus, Beard/Stubble for Milan, Hoodie for Lukas)
     ctx.fillStyle = '#D6A78A';
     ctx.beginPath();
     ctx.arc(0, 0, 6.4, 0, Math.PI * 2);
+    ctx.fill();
+    // Rim highlight on head for better definition
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+    ctx.beginPath();
+    ctx.arc(-1.2, -1.6, 3.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+    ctx.beginPath();
+    ctx.arc(1.6, 1.6, 3.0, 0, Math.PI * 2);
     ctx.fill();
 
     if (isMarkus) {
@@ -1117,6 +1137,10 @@ function renderHighDetailCharacterLayers(
       ctx.fillStyle = '#090D16';
       ctx.fillRect(4.0, -2.8, 1.4, 1.6);
       ctx.fillRect(4.0, 1.2, 1.4, 1.6);
+      // Nose bridge shadow & mouth slit for better definition
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+      ctx.fillRect(3.0, -0.6, 1.2, 1.2);
+      ctx.fillRect(3.0, 2.0, 2.0, 0.8);
     } else {
       // Hair crown & directional eyes
       ctx.fillStyle = isMilan ? '#78350F' : '#1F2937';
@@ -1127,6 +1151,14 @@ function renderHighDetailCharacterLayers(
       ctx.fillStyle = '#090D16';
       ctx.fillRect(3.8, -3.0, 1.5, 1.5);
       ctx.fillRect(3.8, 1.5, 1.5, 1.5);
+      // Nose & mouth for better facial definition
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.fillRect(4.2, -0.4, 1.0, 1.6);
+      ctx.fillRect(3.6, 2.2, 2.2, 0.8);
+      // Eyebrow shading
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.fillRect(3.4, -3.6, 2.0, 0.6);
+      ctx.fillRect(3.4, 0.9, 2.0, 0.6);
     }
 
     // Armed vs Surrendered vs Arrested hand & weapon details
@@ -1163,9 +1195,15 @@ function renderHighDetailCharacterLayers(
     const outfitCollar = isJulia ? '#E0F2FE' : '#F5D0FE';
     const hairColor = isJulia ? '#FACC15' : '#92400E';
 
-    // Shoulders & Layered Collar/Cardigan
+    // Shoulders & Layered Collar/Cardigan (shaded for definition)
     ctx.fillStyle = outfitMain;
     ctx.fillRect(-6, -11, 10, 22);
+    // Rim highlight on left shoulder
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.10)';
+    ctx.fillRect(-6, -11, 2, 22);
+    // Shadow on right side
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+    ctx.fillRect(2, -11, 2, 22);
     ctx.fillStyle = outfitCollar;
     ctx.fillRect(1, -5, 3.5, 10);
 
@@ -1184,6 +1222,14 @@ function renderHighDetailCharacterLayers(
     ctx.fillStyle = '#090D16';
     ctx.fillRect(3.6, -2.8, 1.4, 1.4);
     ctx.fillRect(3.6, 1.4, 1.4, 1.4);
+    // Nose & mouth for better facial definition
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.fillRect(4.0, -0.4, 1.0, 1.6);
+    ctx.fillRect(3.4, 2.2, 2.4, 0.8);
+    // Eyebrow shading
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.fillRect(3.2, -3.4, 2.0, 0.6);
+    ctx.fillRect(3.2, 0.8, 2.0, 0.6);
 
     if (actor.state === 'ARRESTED') {
       // Escorted / Secured posture with protective green evacuate wristband

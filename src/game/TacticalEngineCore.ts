@@ -481,6 +481,7 @@ export class TacticalEngineCore {
   protected exteriorBreachSurgeTimer: number = 0;
   protected exteriorBreachMaxDuration: number = 14.0;
   protected radio: RadioFeed = new RadioFeed();
+  protected ambientAudioTimers: number[] = [];
   protected pointLights: DynamicPointLight[] = [];
   protected acousticIndicators: AcousticEdgeIndicator[] = [];
   protected playerDarknessTimer: number = 0;
@@ -685,6 +686,7 @@ public nightMode: boolean = false;
   }
 
   public resetMission(newPlan?: MissionPlan) {
+    this.clearAmbientAudioTimers();
     this.staticScene = undefined;
     if (newPlan) {
       this.plan = newPlan;
@@ -870,8 +872,18 @@ public nightMode: boolean = false;
     this.aplicarEstado('START');
     soundEngine.startRainAmbience();
     soundEngine.startAmbientDrone();
+    soundEngine.preloadAmbientSamples();
     soundEngine.playTetraRadioTransmission('info', 46);
     this.radio.txTimer = 2.1;
+
+    // Ambiente urbano: sirena de patrulla y ambulancia distantes, más estática de radio.
+    // Se registran los ids para poder cancelarlos en reset/destroy.
+    this.clearAmbientAudioTimers();
+    this.ambientAudioTimers.push(
+      window.setTimeout(() => soundEngine.playPoliceSirenPassing(), 2000),
+      window.setTimeout(() => soundEngine.playAmbulancePassing(), 7500),
+      window.setTimeout(() => soundEngine.playRadioCommsAmbient(), 4000),
+    );
 
     if (this.missionMode === 'TIROL') {
       this.pushRadio(
@@ -4468,6 +4480,26 @@ public nightMode: boolean = false;
     if (hitActor) {
       const hitZone = this.computeBallisticHitZone(shooter, hitActor, endX, endY);
       this.spawnActorImpactEffects(hitActor, endX, endY, angle, isTaser, hitZone);
+      // Visual hit confirmation for the player's shots (no mechanics change).
+      if (shooter.role === 'PLAYER') {
+        this.refractionRings.push({
+          x: endX,
+          y: endY,
+          radius: 4,
+          maxRadius: 46,
+          alpha: 0.85,
+          strength: 0.6,
+        });
+        this.impactPopups.push({
+          x: endX,
+          y: endY - 14,
+          vy: -55,
+          text: 'TREFFER',
+          color: '#FBBF24',
+          life: 0.55,
+          maxLife: 0.55,
+        });
+      }
       this.resolveProjectileHit(shooter, hitActor, damage, isTaser, hitZone, angle);
 
       // Over-penetration / graze environmental mark on wall or furniture closely behind hit actor
@@ -9089,7 +9121,19 @@ public nightMode: boolean = false;
     return siguiente;
   }
 
+  protected clearAmbientAudioTimers() {
+    for (const id of this.ambientAudioTimers) {
+      try {
+        window.clearTimeout(id);
+      } catch {
+        // ignore
+      }
+    }
+    this.ambientAudioTimers = [];
+  }
+
   public destroy() {
+    this.clearAmbientAudioTimers();
     this.aplicarEstado('RETURN_TO_TITLE');
     this.heldKeys.clear();
     this.isEmittingHudSnapshot = false;
