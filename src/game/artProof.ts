@@ -1198,49 +1198,62 @@ function drawDoor(ctx: CanvasRenderingContext2D, door: DoorEntity) {
   ctx.restore();
 }
 
-/** Carga C4 vista desde arriba: estuche, flejes y LED de armado. */
+/**
+ * Carga C4 en planta: la banda abraza la hoja por su cara superior y solo el
+ * detonador asoma por el canto, que es lo único que se vería desde arriba.
+ */
 function drawCharge(
   ctx: CanvasRenderingContext2D,
   charge: ActiveC4Charge,
   view: { x0: number; y0: number; x1: number; y1: number },
-  time: number
+  time: number,
+  door: DoorEntity | undefined
 ) {
-  if (charge.x < view.x0 || charge.x > view.x1 || charge.y < view.y0 || charge.y > view.y1) return;
+  // La marca se ancla al punto medio de la hoja: una caja recta en el centro de
+  // la puerta desbordaba el canto y se leía como un objeto apoyado encima. Las
+  // cargas de ventana no tienen hoja y conservan el punto que ya da el motor.
+  const leaf = door && !door.isDestroyed ? doorLeafSegment(door) : null;
+  const x = leaf ? (leaf.x1 + leaf.x2) / 2 : charge.x;
+  const y = leaf ? (leaf.y1 + leaf.y2) / 2 : charge.y;
+  if (x < view.x0 || x > view.x1 || y < view.y0 || y > view.y1) return;
+  const angle = leaf ? Math.atan2(leaf.y2 - leaf.y1, leaf.x2 - leaf.x1) : 0;
 
   ctx.save();
-  ctx.translate(charge.x, charge.y);
+  ctx.translate(x, y);
 
-  // Sombra de contacto
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-  ctx.fillRect(-6, -4, 14, 10);
+  // Sombra de contacto: cae hacia abajo-derecha como el resto del pase, así que
+  // no gira con la hoja.
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+  ctx.fillRect(-1.2, -2.1, 6.4, 9.2);
 
-  // Estuche y carga
+  ctx.rotate(angle);
+
+  // Banda que abraza la hoja sin desbordar su plano
   ctx.fillStyle = '#1E293B';
-  ctx.fillRect(-7, -5, 14, 10);
+  ctx.fillRect(-3.2, -4.6, 6.4, 9.2);
   ctx.fillStyle = '#D9A21B';
-  ctx.fillRect(-6, -4, 12, 8);
+  ctx.fillRect(-2.4, -3.9, 4.8, 7.8);
 
-  // Flejes que la sujetan a la hoja
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
-  ctx.fillRect(-6, -1, 12, 2);
-  ctx.fillRect(-4.6, -4, 1.2, 8);
-  ctx.fillRect(3.4, -4, 1.2, 8);
+  // Flejes sobre la cara superior de la hoja
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+  ctx.fillRect(-3.2, -4.6, 6.4, 0.9);
+  ctx.fillRect(-3.2, 3.7, 6.4, 0.9);
 
-  // Detonador
+  // Detonador en el canto, el único volumen que asoma al plano
   ctx.fillStyle = '#0F172A';
-  ctx.fillRect(5, -2, 3, 4);
+  ctx.fillRect(-1.2, 4.6, 3.4, 2.6);
 
   // LED armado: parpadeo seco, legible a 480x270
   const ledOn = Math.floor(time * 3) % 2 === 0;
   if (ledOn) {
-    ctx.fillStyle = 'rgba(239, 68, 68, 0.28)';
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.3)';
     ctx.beginPath();
-    ctx.arc(6.5, 0, 4, 0, Math.PI * 2);
+    ctx.arc(0.5, 5.9, 3.2, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.fillStyle = ledOn ? '#EF4444' : '#7F1D1D';
   ctx.beginPath();
-  ctx.arc(6.5, 0, 1.6, 0, Math.PI * 2);
+  ctx.arc(0.5, 5.9, 1.3, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.restore();
@@ -1577,6 +1590,7 @@ function drawActors(
     ctx.restore();
   }
 }
+
 /* ------------------------------------------------------------------ */
 /* Post-proceso y presentación                                         */
 /* ------------------------------------------------------------------ */
@@ -1693,7 +1707,8 @@ export function renderArtProof(scene: ArtProofScene): void {
   drawActors(bctx, scene, time, isVisible);
   drawWalls(bctx, scene, view);
   for (const charge of scene.charges) {
-    drawCharge(bctx, charge, view, time);
+    const door = scene.doors.find((d) => d.id === charge.doorId);
+    drawCharge(bctx, charge, view, time, door);
   }
 
   bctx.restore();
