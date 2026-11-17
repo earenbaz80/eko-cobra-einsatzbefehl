@@ -17,7 +17,7 @@ import type {
   WallSegment,
   WallSconceLight,
 } from './types';
-import type { EnvironmentImpactMark, FloorDecal } from './TacticalEngineCore';
+import type { FloorDecal } from './TacticalEngineCore';
 
 const PROOF_W = 480;
 const PROOF_H = 270;
@@ -379,7 +379,6 @@ interface ArtProofScene {
   actors: ActorEntity[];
   sconces: WallSconceLight[];
   decals: FloorDecal[];
-  surfaceImpacts: EnvironmentImpactMark[];
   nightMode: boolean;
   player?: ActorEntity;
   camX: number;
@@ -997,70 +996,6 @@ function drawWalls(ctx: CanvasRenderingContext2D, scene: ArtProofScene, view: { 
   }
 }
 
-function drawSurfaceImpacts(
-  ctx: CanvasRenderingContext2D,
-  impacts: EnvironmentImpactMark[],
-  cam: { x: number; y: number }
-) {
-  for (const imp of impacts) {
-    if (Math.hypot(imp.x - cam.x, imp.y - cam.y) > 750) continue;
-
-    const isDoor = imp.surfaceKind === 'DOOR';
-    ctx.save();
-    ctx.translate(imp.x, imp.y);
-
-    // Grietas radiales
-    ctx.strokeStyle = isDoor
-      ? 'rgba(251, 191, 36, 0.85)'
-      : imp.surfaceKind === 'FURNITURE'
-        ? 'rgba(15, 23, 42, 0.85)'
-        : 'rgba(226, 232, 240, 0.78)';
-    ctx.lineWidth = 1;
-    for (const crack of imp.cracks) {
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(Math.cos(crack.angle) * crack.len, Math.sin(crack.angle) * crack.len);
-      ctx.stroke();
-    }
-
-    // Anillo de polvo / quemadura
-    ctx.fillStyle = isDoor
-      ? 'rgba(146, 64, 14, 0.88)'
-      : imp.surfaceKind === 'FURNITURE'
-        ? 'rgba(30, 41, 59, 0.85)'
-        : 'rgba(71, 85, 105, 0.9)';
-    ctx.beginPath();
-    ctx.arc(0, 0, imp.craterRadius * 1.45, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Estela del proyectil
-    const backAngle = imp.bulletAngle + Math.PI;
-    ctx.strokeStyle = 'rgba(15, 23, 42, 0.72)';
-    ctx.lineWidth = 1.4;
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(Math.cos(backAngle) * 6.5, Math.sin(backAngle) * 6.5);
-    ctx.stroke();
-
-    // Agujero central
-    ctx.fillStyle = '#020617';
-    ctx.beginPath();
-    ctx.arc(0, 0, imp.craterRadius * 0.8, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Brasa caliente que se apaga
-    if (imp.emberTimer > 0) {
-      const ember = imp.emberTimer / 1.8;
-      ctx.fillStyle = `rgba(251, 146, 60, ${ember * 0.95})`;
-      ctx.beginPath();
-      ctx.arc(0, 0, imp.craterRadius * 0.7 * ember + 0.8, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    ctx.restore();
-  }
-}
-
 /* ------------------------------------------------------------------ */
 /* Iluminación                                                         */
 /* ------------------------------------------------------------------ */
@@ -1489,7 +1424,6 @@ export function renderArtProof(scene: ArtProofScene): void {
   drawFurniture(bctx, scene, time, isVisible);
   drawActors(bctx, scene, time, isVisible);
   drawWalls(bctx, scene, view);
-  drawSurfaceImpacts(bctx, scene.surfaceImpacts, cam);
 
   bctx.restore();
 

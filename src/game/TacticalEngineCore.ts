@@ -161,17 +161,6 @@ export interface FloorDecal {
   aspect: number;
 }
 
-export interface EnvironmentImpactMark {
-  x: number;
-  y: number;
-  bulletAngle: number;
-  surfaceKind: 'WALL' | 'DOOR' | 'FURNITURE';
-  surfaceColor?: string;
-  craterRadius: number;
-  emberTimer: number;
-  cracks: { angle: number; len: number }[];
-}
-
 export interface ImpactShockRing {
   x: number;
   y: number;
@@ -461,7 +450,6 @@ export class TacticalEngineCore {
   protected traces: BulletTrace[] = [];
   protected particles: Particle[] = [];
   protected decals: FloorDecal[] = [];
-  protected surfaceImpacts: EnvironmentImpactMark[] = [];
   protected impactRings: ImpactShockRing[] = [];
   protected refractionRings: RefractionShockwave[] = [];
   protected snowFootprints: SnowFootprint[] = [];
@@ -755,7 +743,6 @@ public nightMode: boolean = false;
     this.traces = [];
     this.particles = [];
     this.decals = [];
-    this.surfaceImpacts = [];
     this.impactRings = [];
     this.impactPopups = [];
     this.shoutWaves = [];
@@ -4932,27 +4919,6 @@ public nightMode: boolean = false;
       aspect: 0.5 + Math.random() * 0.4,
     });
 
-    // 4. Persistent Environmental Bullet Crater, Radial Stress Cracks & Hot Ballistic Ember on Wall/Door/Furniture
-    if (this.surfaceImpacts.length > 240) this.surfaceImpacts.shift();
-    const crackCount = surfaceKind === 'WALL' ? 4 + Math.floor(Math.random() * 3) : 3;
-    const cracks: { angle: number; len: number }[] = [];
-    for (let c = 0; c < crackCount; c++) {
-      cracks.push({
-        angle: (c / crackCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.65,
-        len: 4.5 + Math.random() * (surfaceKind === 'WALL' ? 7.5 : 5.5),
-      });
-    }
-    this.surfaceImpacts.push({
-      x,
-      y,
-      bulletAngle,
-      surfaceKind,
-      surfaceColor,
-      craterRadius: surfaceKind === 'WALL' ? 3.2 + Math.random() * 1.4 : 2.6 + Math.random() * 1.2,
-      emberTimer: 1.8,
-      cracks,
-    });
-
     this.impactRings.push({
       x,
       y,
@@ -6342,12 +6308,6 @@ public nightMode: boolean = false;
       ring.alpha -= dt * 4.2;
     }
     this.impactRings = this.impactRings.filter((r) => r.alpha > 0.02);
-
-    for (const imp of this.surfaceImpacts) {
-      if (imp.emberTimer > 0) {
-        imp.emberTimer = Math.max(0, imp.emberTimer - dt);
-      }
-    }
 
     for (const pop of this.impactPopups) {
       pop.y += pop.vy * dt;

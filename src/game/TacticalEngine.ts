@@ -222,7 +222,6 @@ export class TacticalEngine extends TacticalEngineCore {
         actors: this.actors,
         sconces: this.wallSconces,
         decals: this.decals,
-        surfaceImpacts: this.surfaceImpacts,
         nightMode: this.nightMode,
         player: this.getPlayer(),
         camX: this.camX,
@@ -879,9 +878,6 @@ export class TacticalEngine extends TacticalEngineCore {
       }
       renderBattlemapFurnitureItem(ctx, item);
     }
-
-    // Render persistent bullet impact marks on furniture surfaces
-    this.renderSurfaceImpactMarks(ctx, 'FURNITURE');
 
     // Render tactical acoustic noise ripple waves expanding across the map
     this.renderAcousticNoiseRings(ctx);
@@ -1699,9 +1695,8 @@ export class TacticalEngine extends TacticalEngineCore {
       ctx.restore();
     }
 
-    // Render persistent bullet craters, radial stress cracks & wood splinters on Walls and Doors
-    this.renderSurfaceImpactMarks(ctx, 'WALL');
-    this.renderSurfaceImpactMarks(ctx, 'DOOR');
+    // Los muros y las puertas son superficies verticales: en vista cenital no
+    // se les ve el agujero. Su impacto ya deja chispas, polvo y escombros.
 
     // Render Wall-Mounted Sconce Lamp Fixtures (Wandlampen) along corridors
     this.renderWallSconceFixtures(ctx);
@@ -1970,72 +1965,6 @@ export class TacticalEngine extends TacticalEngineCore {
         ctx.fillText(label, lightSwitch.x, lightSwitch.y - 16);
         ctx.restore();
       }
-    }
-  }
-
-  private renderSurfaceImpactMarks(
-    ctx: CanvasRenderingContext2D,
-    filterKind: 'WALL' | 'DOOR' | 'FURNITURE'
-  ) {
-    for (const imp of this.surfaceImpacts) {
-      if (imp.surfaceKind !== filterKind) continue;
-      // Viewport spatial culling: Skip rendering offscreen bullet impacts
-      if (Math.hypot(imp.x - this.camX, imp.y - this.camY) > 750) continue;
-
-      ctx.save();
-      ctx.translate(imp.x, imp.y);
-
-      // 1. Radial stress fracture cracks / wood splinters around the bullet crater
-      ctx.strokeStyle =
-        imp.surfaceKind === 'DOOR'
-          ? 'rgba(251, 191, 36, 0.85)'
-          : imp.surfaceKind === 'FURNITURE'
-            ? 'rgba(15, 23, 42, 0.85)'
-            : 'rgba(226, 232, 240, 0.78)';
-      ctx.lineWidth = 1.1;
-      for (const crack of imp.cracks) {
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(Math.cos(crack.angle) * crack.len, Math.sin(crack.angle) * crack.len);
-        ctx.stroke();
-      }
-
-      // 2. Outer pulverized spall / scorch ring
-      ctx.fillStyle =
-        imp.surfaceKind === 'DOOR'
-          ? 'rgba(146, 64, 14, 0.88)'
-          : imp.surfaceKind === 'FURNITURE'
-            ? 'rgba(30, 41, 59, 0.85)'
-            : 'rgba(71, 85, 105, 0.9)';
-      ctx.beginPath();
-      ctx.arc(0, 0, imp.craterRadius * 1.45, 0, Math.PI * 2);
-      ctx.fill();
-
-      // 3. Directional ballistic lead-smear / scorch streak
-      const backAng = imp.bulletAngle + Math.PI;
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.72)';
-      ctx.lineWidth = 1.8;
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(Math.cos(backAng) * 6.5, Math.sin(backAng) * 6.5);
-      ctx.stroke();
-
-      // 4. Deep dark bullet entry hole core
-      ctx.fillStyle = '#020617';
-      ctx.beginPath();
-      ctx.arc(0, 0, imp.craterRadius * 0.8, 0, Math.PI * 2);
-      ctx.fill();
-
-      // 5. Hot glowing kinetic friction ember that cools down after impact
-      if (imp.emberTimer > 0) {
-        const emberRatio = imp.emberTimer / 1.8;
-        ctx.fillStyle = `rgba(251, 146, 60, ${emberRatio * 0.95})`;
-        ctx.beginPath();
-        ctx.arc(0, 0, imp.craterRadius * 0.7 * emberRatio + 0.8, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      ctx.restore();
     }
   }
 
