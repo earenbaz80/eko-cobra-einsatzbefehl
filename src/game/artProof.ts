@@ -477,22 +477,25 @@ function drawFloors(ctx: CanvasRenderingContext2D, scene: ArtProofScene, view: {
 
 function drawFloorDecals(ctx: CanvasRenderingContext2D, decals: FloorDecal[]) {
   for (const decal of decals) {
-    if (decal.type !== 'CASING' && decal.type !== 'SCORCH' && decal.type !== 'DEBRIS') continue;
+    const isCasing = decal.type === 'CASING';
+    // Sangre y otros decals quedan fuera del proof táctico.
+    if (!isCasing && decal.type !== 'DEBRIS') continue;
+
+    const halfHeight = decal.radius * decal.aspect;
     ctx.save();
     ctx.translate(decal.x, decal.y);
     ctx.rotate(decal.angle);
     ctx.globalAlpha = decal.alpha;
     ctx.fillStyle = decal.color;
-    if (decal.type === 'CASING') {
-      // Casquillo dorado: rectángulo pequeño con brillo en un extremo
-      const r = decal.radius;
-      ctx.fillRect(-r, -r * decal.aspect, r * 2, r * 2 * decal.aspect);
+    if (isCasing) {
+      // Casquillo dorado con brillo en un extremo
+      ctx.fillRect(-decal.radius, -halfHeight, decal.radius * 2, halfHeight * 2);
       ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
-      ctx.fillRect(-r, -r * decal.aspect, r, r * 2 * decal.aspect);
+      ctx.fillRect(-decal.radius, -halfHeight, decal.radius, halfHeight * 2);
     } else {
-      // Marca de impacto / esquirla: mancha elíptica orientada
+      // Esquirla / resto de impacto
       ctx.beginPath();
-      ctx.ellipse(0, 0, decal.radius, decal.radius * decal.aspect, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, decal.radius, halfHeight, 0, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();
