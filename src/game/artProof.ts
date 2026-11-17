@@ -269,7 +269,7 @@ const FIRE_ART_B = art(
 
 type Pose = 'S' | 'SE' | 'E' | 'NE' | 'N';
 
-const BODY_ART: Record<Pose, string[]> = {
+export const BODY_ART: Record<Pose, string[]> = {
   S: [
     '................',
     '.....kkkkkk.....',
@@ -402,7 +402,7 @@ const BODY_ART: Record<Pose, string[]> = {
   ],
 };
 
-const ROLE_PALETTE: Record<string, Record<string, string>> = {
+export const ROLE_PALETTE: Record<string, Record<string, string>> = {
   PLAYER: {
     k: '#070B11',
     h: '#1E293B',
@@ -529,20 +529,20 @@ function getTile(name: string, variant = 0): HTMLCanvasElement {
   return canvas;
 }
 
-const SPRITE_SCALE = 2;
-const LEG_TOP = 18 * SPRITE_SCALE;
+export const SPRITE_SCALE = 2;
+export const LEG_TOP = 18 * SPRITE_SCALE;
 
 /** Ciclo de 4 fases: [pierna izq, pierna der, bob del tronco]. */
-const WALK_CYCLE: Array<[number, number, number]> = [
+export const WALK_CYCLE: Array<[number, number, number]> = [
   [2, -2, 2],
   [0, 0, 0],
   [-2, 2, 2],
   [0, 0, 0],
 ];
 
-const IDLE_FRAME = 1;
+export const IDLE_FRAME = 1;
 
-function getBody(role: string, pose: Pose): HTMLCanvasElement {
+export function getBody(role: string, pose: Pose): HTMLCanvasElement {
   const key = `body:${role}:${pose}`;
   const cached = spriteCache.get(key);
   if (cached) return cached;
@@ -554,7 +554,7 @@ function getBody(role: string, pose: Pose): HTMLCanvasElement {
   return canvas;
 }
 
-function buildWalkFrame(base: HTMLCanvasElement, leftOff: number, rightOff: number, bob: number): HTMLCanvasElement {
+export function buildWalkFrame(base: HTMLCanvasElement, leftOff: number, rightOff: number, bob: number): HTMLCanvasElement {
   const width = base.width;
   const height = base.height;
   const legHeight = height - LEG_TOP;
@@ -583,7 +583,7 @@ function buildWalkFrame(base: HTMLCanvasElement, leftOff: number, rightOff: numb
   return canvas;
 }
 
-function getActorFrame(role: string, pose: Pose, frame: number): HTMLCanvasElement {
+export function getActorFrame(role: string, pose: Pose, frame: number): HTMLCanvasElement {
   const key = `${role}:${pose}:${frame}`;
   const cached = spriteCache.get(key);
   if (cached) return cached;
@@ -1427,7 +1427,7 @@ function drawDustMotes(
 /* Actores                                                             */
 /* ------------------------------------------------------------------ */
 
-function poseForAngle(angle: number): { pose: Pose; flip: boolean } {
+export function poseForAngle(angle: number): { pose: Pose; flip: boolean } {
   const normalized = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
   const sector = Math.round(normalized / (Math.PI / 4)) % 8;
   switch (sector) {
@@ -1450,47 +1450,63 @@ function poseForAngle(angle: number): { pose: Pose; flip: boolean } {
   }
 }
 
+const TOPDOWN_COLORS: Record<string, { body: string; helmet: string; visor: string; weapon: string }> = {
+  PLAYER: { body: '#1E3A5F', helmet: '#334155', visor: '#93C5FD', weapon: '#0F172A' },
+  SQUAD: { body: '#1E293B', helmet: '#475569', visor: '#94A3B8', weapon: '#0F172A' },
+  SUSPECT: { body: '#3F2A1B', helmet: '#4E3524', visor: '#FCA5A5', weapon: '#1C1917' },
+  HOSTAGE: { body: '#6B7280', helmet: '#9CA3AF', visor: '#E5E7EB', weapon: '#374151' },
+};
+
 function drawActors(ctx: CanvasRenderingContext2D, scene: ArtProofScene, time: number) {
   const actors = [...scene.actors].sort((a, b) => a.y - b.y);
   for (const actor of actors) {
-    const { pose, flip } = poseForAngle(actor.angle);
     const moving = Math.hypot(actor.vx ?? 0, actor.vy ?? 0) > 6;
-    const frame = moving ? Math.floor(time * 9 + actor.x * 0.01) % WALK_CYCLE.length : IDLE_FRAME;
-    const sprite = getActorFrame(actor.role, pose, frame);
-    const facingLeft = flip;
-    const bob = moving ? 0 : Math.sin(time * 1.6 + actor.x * 0.05) * 0.5;
+    const colors = TOPDOWN_COLORS[actor.role] ?? TOPDOWN_COLORS.SUSPECT;
+    const wobble = moving ? Math.sin(time * 12 + actor.x * 0.05) * 0.04 : 0;
 
-    drawShadow(ctx, actor.x, actor.y + 4, moving ? 11 : 10, 4, 0.55);
+    // Sombra elíptica (vista cenital)
+    drawShadow(ctx, actor.x, actor.y + 2, moving ? 11 : 10, 6, 0.5);
 
     ctx.save();
-    ctx.translate(actor.x, actor.y - Math.round(sprite.height / 2) + bob);
-    if (facingLeft) ctx.scale(-1, 1);
-    // Halo oscuro de 1px: separa la silueta del suelo
-    ctx.globalAlpha = 0.55;
-    for (const [ox, oy] of [
-      [-1, 0],
-      [1, 0],
-      [0, -1],
-      [0, 1],
-    ]) {
-      ctx.drawImage(sprite, -sprite.width / 2 + ox, oy);
-    }
-    ctx.globalAlpha = 1;
-    ctx.drawImage(sprite, -sprite.width / 2, 0);
+    ctx.translate(actor.x, actor.y);
+    ctx.rotate(actor.angle + wobble);
 
-    // Sombreado de 4 tonos (cel shading): oscurece el lado derecho del sprite
+    // Cuerpo (hombros) visto desde arriba
+    ctx.fillStyle = colors.body;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 9, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Casco
+    ctx.fillStyle = colors.helmet;
+    ctx.beginPath();
+    ctx.arc(0, 0, 5.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.stroke();
+
+    // Visor frontal (indica dirección)
+    ctx.fillStyle = colors.visor;
+    ctx.fillRect(3.5, -2, 4, 4);
+
+    // Arma (apunta hacia +X tras la rotación)
+    ctx.fillStyle = colors.weapon;
+    ctx.fillRect(7, -1.6, 13, 3.2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+    ctx.fillRect(7, -1.6, 13, 1);
+
+    // Sombreado de 4 tonos: oscurece el lado derecho/inferior
     ctx.globalCompositeOperation = 'source-atop';
-    const shadeGrad = ctx.createLinearGradient(
-      -sprite.width / 2,
-      0,
-      sprite.width / 2,
-      0
-    );
-    shadeGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
-    shadeGrad.addColorStop(0.55, 'rgba(0, 0, 0, 0.12)');
-    shadeGrad.addColorStop(1, 'rgba(0, 0, 0, 0.42)');
-    ctx.fillStyle = shadeGrad;
-    ctx.fillRect(-sprite.width / 2, 0, sprite.width, sprite.height);
+    const shade = ctx.createRadialGradient(2, 2, 1, 0, 0, 12);
+    shade.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    shade.addColorStop(1, 'rgba(0, 0, 0, 0.45)');
+    ctx.fillStyle = shade;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 9, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
     ctx.globalCompositeOperation = 'source-over';
 
     ctx.restore();
