@@ -7,6 +7,21 @@
  *
  * No toca la simulación: sólo lee el estado que ya existe en el motor.
  * Se activa con `?art=proof` (opcional `&focus=salon` para encuadrar el salón).
+ *
+ * REGLAS DE PROYECCIÓN CENITAL (invariantes del módulo)
+ *
+ * 1. Solo se dibuja lo que una cámara mirando hacia abajo vería. Las caras
+ *    verticales (muro, hoja de puerta, canto de mueble) no existen en el plano.
+ * 2. La altura no se pinta como lateral: se insinúa con la huella del objeto,
+ *    su sombra de contacto y el AO de las esquinas.
+ * 3. Prohibido dibujar agujeros, grietas, pomos o herrajes en una cara vertical.
+ *    Un impacto deja chispas, polvo y escombro en el suelo, no un cráter en el muro.
+ * 4. El suelo es el único plano que admite marcas persistentes: casquillos,
+ *    escombros y huellas.
+ * 5. La postura y la silueta comunican estado (tumbado = neutralizado, arma en el
+ *    suelo = sin amenaza); el color nunca es el único portador de esa información.
+ * 6. Todo elemento nuevo debe justificarse con esa cámara cenital; si necesita
+ *    una vista lateral, no pertenece a este render.
  */
 
 import type {
@@ -17,7 +32,7 @@ import type {
   WallSegment,
   WallSconceLight,
 } from './types';
-import type { FloorDecal } from './TacticalEngineCore';
+import type { FloorDecal, SnowFootprint } from './TacticalEngineCore';
 
 const PROOF_W = 480;
 const PROOF_H = 270;
@@ -379,6 +394,7 @@ interface ArtProofScene {
   actors: ActorEntity[];
   sconces: WallSconceLight[];
   decals: FloorDecal[];
+  footprints: SnowFootprint[];
   nightMode: boolean;
   player?: ActorEntity;
   camX: number;
@@ -499,6 +515,114 @@ function drawFloorDecals(ctx: CanvasRenderingContext2D, decals: FloorDecal[], so
       ctx.ellipse(0, 0, decal.radius, halfHeight, 0, 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.restore();
+  }
+}
+
+/** Baldosa que pisa un punto del mundo, para decidir cómo se lee una huella. */
+function floorTileAt(scene: ArtProofScene, x: number, y: number): string {
+  for (const room of scene.rooms) {
+    if (x >= room.x && x <= room.x + room.w && y >= room.y && y <= room.y + room.h) {
+      return floorTileFor(room, scene.missionMode);
+    }
+  }
+  return scene.missionMode === 'TIROL' ? 'snow' : 'concrete';
+}
+
+interface DustScuff {
+  x: number;
+  y: number;
+  angle: number;
+  born: number;
+}
+
+const DUST_LIFE = 3.2;
+const DUST_MAX = 140;
+let dustTrail: DustScuff[] = [];
+let dustMission = '';
+let lastDustAt = -1;
+
+/**
+ * Polvo levantado al caminar en interiores. El motor solo registra huellas en
+ * la nieve del Tirol, así que este rastro vive en el render y se deriva del
+ * movimiento del operador: no toca la simulación ni el estado guardado.
+ */
+function updateDustTrail(scene: ArtProofScene, time: number) {
+  if (dustMission !== scene.missionMode) {
+    dustTrail = [];
+    dustMission = scene.missionMode;
+    lastDustAt = -1;
+  }
+
+  const player = scene.player;
+  if (!player) return;
+
+  const moving = Math.hypot(player.vx ?? 0, player.vy ?? 0) > 18;
+  const indoors = floorTileAt(scene, player.x, player.y) !== 'snow';
+  if (moving && indoors && time - lastDustAt > 0.16) {
+    dustTrail.push({
+      x: player.x + (Math.random() - 0.5) * 5,
+      y: player.y + 2 + (Math.random() - 0.5) * 5,
+      angle: player.angle,
+      born: time,
+    });
+    lastDustAt = time;
+    if (dustTrail.length > DUST_MAX) dustTrail.shift();
+  }
+
+  dustTrail = dustTrail.filter((scuff) => time - scuff.born < DUST_LIFE);
+}
+
+function drawFootprints(
+  ctx: CanvasRenderingContext2D,
+  scene: ArtProofScene,
+  view: { x0: number; y0: number; x1: number; y1: number },
+  time: number
+) {
+  const inView = (x: number, y: number) => x >= view.x0 && x <= view.x1 && y >= view.y0 && y <= view.y1;
+
+  // Huellas del motor: solo se leen como pisada en nieve. En interior quedan
+  // cubiertas por el rastro de polvo, que es el signo correcto sobre madera.
+  for (const footprint of scene.footprints) {
+    if (!inView(footprint.x, footprint.y)) continue;
+    if (floorTileAt(scene, footprint.x, footprint.y) !== 'snow') continue;
+
+    const alpha = Math.min(0.55, footprint.alpha + 0.06);
+    ctx.save();
+    ctx.translate(footprint.x, footprint.y);
+    ctx.rotate(footprint.angle);
+    ctx.fillStyle = `rgba(24, 36, 50, ${alpha})`;
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.ellipse(-2.2, side * 3.1, 3.4, 1.6, side * 0.22, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Borde de nieve removida, un tono más claro que el hoyo
+    ctx.fillStyle = `rgba(226, 236, 246, ${alpha * 0.35})`;
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.ellipse(-2.2, side * 3.1, 2.2, 0.7, side * 0.22, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Rastro tenue de polvo en interiores: se desvanece y nunca compite con actores.
+  for (const scuff of dustTrail) {
+    if (!inView(scuff.x, scuff.y)) continue;
+    const fade = 1 - (time - scuff.born) / DUST_LIFE;
+    if (fade <= 0) continue;
+    ctx.save();
+    ctx.translate(scuff.x, scuff.y);
+    ctx.rotate(scuff.angle);
+    ctx.fillStyle = `rgba(206, 216, 228, ${0.17 * fade})`;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 3.6, 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = `rgba(120, 132, 148, ${0.13 * fade})`;
+    ctx.beginPath();
+    ctx.ellipse(-0.6, 0, 2.2, 1.1, 0, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
   }
 }
@@ -1258,52 +1382,158 @@ const TOPDOWN_COLORS: Record<string, { body: string; helmet: string; visor: stri
   HOSTAGE: { body: '#6B7280', helmet: '#9CA3AF', visor: '#E5E7EB', weapon: '#374151' },
 };
 
+/** Arma fuera de las manos: siempre en el suelo, nunca flotando junto al cuerpo. */
+function drawDroppedWeapon(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  length: number,
+  tilt: number
+) {
+  ctx.save();
+  ctx.rotate(tilt);
+  ctx.fillStyle = color;
+  ctx.fillRect(6, 7, length, 2.4);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+  ctx.fillRect(6, 7, length, 0.8);
+  ctx.restore();
+}
+
 function drawActors(
   ctx: CanvasRenderingContext2D,
   scene: ArtProofScene,
   time: number,
   isVisible: (x: number, y: number) => boolean
 ) {
-  const actors = [...scene.actors].sort((a, b) => a.y - b.y);
+  // Los cuerpos en el suelo se dibujan antes que los que siguen en pie, para que
+  // la escena se lea de abajo hacia arriba y no se tapen entre ellos.
+  const rank = (actor: ActorEntity) =>
+    actor.state === 'DEAD' ? 0 : actor.state === 'INCAPACITATED' ? 1 : 2;
+  const actors = [...scene.actors].sort((a, b) => rank(a) - rank(b) || a.y - b.y);
+
   for (const actor of actors) {
     if (!isVisible(actor.x, actor.y)) continue;
-    const moving = Math.hypot(actor.vx ?? 0, actor.vy ?? 0) > 6;
     const colors = TOPDOWN_COLORS[actor.role] ?? TOPDOWN_COLORS.SUSPECT;
+    const dead = actor.state === 'DEAD';
+    const wounded = actor.state === 'INCAPACITATED';
+    const surrendered = actor.state === 'SURRENDERED' || actor.state === 'ARRESTED';
+    const downed = dead || wounded;
+    const moving = !downed && Math.hypot(actor.vx ?? 0, actor.vy ?? 0) > 6;
     const wobble = moving ? Math.sin(time * 12 + actor.x * 0.05) * 0.04 : 0;
 
-    // Sombra elíptica (vista cenital)
-    drawShadow(ctx, actor.x, actor.y + 2, moving ? 11 : 10, 6, 0.5);
+    // Sombra elíptica: un cuerpo tendido ocupa más huella que uno de pie
+    drawShadow(
+      ctx,
+      actor.x,
+      actor.y + 2,
+      dead ? 13 : wounded ? 12 : moving ? 11 : 10,
+      downed ? 7 : 6,
+      dead ? 0.38 : 0.5
+    );
 
     ctx.save();
     ctx.translate(actor.x, actor.y);
     ctx.rotate(actor.angle + wobble);
+    ctx.globalAlpha = dead ? 0.62 : wounded ? 0.8 : 1;
 
-    // Cuerpo (hombros) visto desde arriba
-    ctx.fillStyle = colors.body;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, 9, 7, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
+    if (downed) {
+      drawDroppedWeapon(ctx, colors.weapon, dead ? 12 : 10, dead ? 1.2 : 0.9);
 
-    // Casco
-    ctx.fillStyle = colors.helmet;
-    ctx.beginPath();
-    ctx.arc(0, 0, 5.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
-    ctx.stroke();
+      if (dead) {
+        // Boca abajo: torso corto, extremidades abiertas y casco caído al costado.
+        ctx.fillStyle = colors.body;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 8.5, 5.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(-0.5, -7, 5, 2.2, -0.45, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(-0.5, 7, 5, 2.2, 0.45, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(-8.5, -3, 4.2, 2, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(-8.5, 3, 4.2, 2, -0.3, 0, Math.PI * 2);
+        ctx.fill();
 
-    // Visor frontal (indica dirección)
-    ctx.fillStyle = colors.visor;
-    ctx.fillRect(3.5, -2, 4, 4);
+        ctx.fillStyle = colors.helmet;
+        ctx.beginPath();
+        ctx.arc(5, -7.5, 3.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      } else {
+        // Herido: acurrucado, una mano en el torso y una pierna arrastrada.
+        ctx.fillStyle = colors.body;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 7.5, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.ellipse(5.5, -4, 3.2, 2, 0.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(-7, 2.5, 4.2, 2.2, 0.5, 0, Math.PI * 2);
+        ctx.fill();
 
-    // Arma (apunta hacia +X tras la rotación)
-    ctx.fillStyle = colors.weapon;
-    ctx.fillRect(7, -1.6, 13, 3.2);
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
-    ctx.fillRect(7, -1.6, 13, 1);
+        ctx.fillStyle = colors.helmet;
+        ctx.beginPath();
+        ctx.arc(1.5, -3.5, 4.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // Pulso tenue: herido, no neutralizado
+        const pulse = 0.32 + Math.sin(time * 4 + actor.x * 0.1) * 0.14;
+        ctx.strokeStyle = `rgba(248, 113, 113, ${pulse})`;
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.arc(0, 0, 9.5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    } else {
+      // Cuerpo (hombros) visto desde arriba
+      ctx.fillStyle = colors.body;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 9, 7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Casco
+      ctx.fillStyle = colors.helmet;
+      ctx.beginPath();
+      ctx.arc(0, 0, 5.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+      ctx.stroke();
+
+      if (surrendered) {
+        // Rendido: arma en el suelo y manos visibles por delante del casco.
+        drawDroppedWeapon(ctx, colors.weapon, 10, 1.05);
+        ctx.fillStyle = '#C9A27F';
+        ctx.beginPath();
+        ctx.arc(7.5, -5.6, 1.9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(7.5, 5.6, 1.9, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // Visor frontal (indica dirección)
+        ctx.fillStyle = colors.visor;
+        ctx.fillRect(3.5, -2, 4, 4);
+
+        // Arma (apunta hacia +X tras la rotación)
+        ctx.fillStyle = colors.weapon;
+        ctx.fillRect(7, -1.6, 13, 3.2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+        ctx.fillRect(7, -1.6, 13, 1);
+      }
+    }
 
     // Sombreado de 4 tonos: oscurece el lado derecho/inferior
     ctx.globalCompositeOperation = 'source-atop';
@@ -1312,7 +1542,7 @@ function drawActors(
     shade.addColorStop(1, 'rgba(0, 0, 0, 0.45)');
     ctx.fillStyle = shade;
     ctx.beginPath();
-    ctx.ellipse(0, 0, 9, 7, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, downed ? 13 : 9, downed ? 10 : 7, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalCompositeOperation = 'source-over';
 
@@ -1324,39 +1554,12 @@ function drawActors(
 /* Post-proceso y presentación                                         */
 /* ------------------------------------------------------------------ */
 
-function drawPost(ctx: CanvasRenderingContext2D, time: number) {
-  ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  const vignette = ctx.createRadialGradient(
-    PROOF_W * 0.5,
-    PROOF_H * 0.5,
-    Math.min(PROOF_W, PROOF_H) * 0.28,
-    PROOF_W * 0.5,
-    PROOF_H * 0.5,
-    Math.max(PROOF_W, PROOF_H) * 0.72
-  );
-  vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
-  vignette.addColorStop(1, 'rgba(2, 5, 12, 0.55)');
-  ctx.fillStyle = vignette;
-  ctx.fillRect(0, 0, PROOF_W, PROOF_H);
-
-  // Grano sutil y estático de cámara
-  ctx.globalAlpha = 0.05;
-  ctx.fillStyle = '#93A4B8';
-  const seed = Math.floor(time * 14) % 97;
-  for (let i = 0; i < 260; i++) {
-    const rx = hash2(i * 3.1 + seed, seed * 1.7) * PROOF_W;
-    const ry = hash2(seed * 2.3, i * 5.7) * PROOF_H;
-    ctx.fillRect(Math.floor(rx), Math.floor(ry), 1, 1);
-  }
-  ctx.restore();
-}
-
 function present(
   target: CanvasRenderingContext2D,
   source: HTMLCanvasElement,
   scale: number,
-  label: string
+  label: string,
+  time: number
 ) {
   const canvas = target.canvas;
   target.save();
@@ -1370,6 +1573,40 @@ function present(
   const ox = Math.floor((canvas.width - drawW) / 2);
   const oy = Math.floor((canvas.height - drawH) / 2);
   target.drawImage(source, ox, oy, drawW, drawH);
+
+  // Viñeta y grano a resolución de pantalla: dentro del buffer de 480x270 el
+  // escalado por enteros los convierte en bloques de 2x2.
+  target.save();
+  target.beginPath();
+  target.rect(ox, oy, drawW, drawH);
+  target.clip();
+
+  const cx = ox + drawW * 0.5;
+  const cy = oy + drawH * 0.5;
+  const vignette = target.createRadialGradient(
+    cx,
+    cy,
+    Math.min(drawW, drawH) * 0.28,
+    cx,
+    cy,
+    Math.max(drawW, drawH) * 0.72
+  );
+  vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
+  vignette.addColorStop(1, 'rgba(2, 5, 12, 0.55)');
+  target.fillStyle = vignette;
+  target.fillRect(ox, oy, drawW, drawH);
+
+  // Grano de 1 píxel real, con la densidad por área del pase anterior
+  target.globalAlpha = 0.05;
+  target.fillStyle = '#93A4B8';
+  const seed = Math.floor(time * 14) % 97;
+  const grain = Math.min(4200, Math.round((drawW * drawH) / 520));
+  for (let i = 0; i < grain; i++) {
+    const rx = ox + hash2(i * 3.1 + seed, seed * 1.7) * drawW;
+    const ry = oy + hash2(seed * 2.3, i * 5.7) * drawH;
+    target.fillRect(Math.floor(rx), Math.floor(ry), 1, 1);
+  }
+  target.restore();
 
   target.font = '600 11px "JetBrains Mono", monospace';
   target.fillStyle = 'rgba(148, 163, 184, 0.85)';
@@ -1417,6 +1654,10 @@ export function renderArtProof(scene: ArtProofScene): void {
     drawRug(bctx, salon.x + 190, salon.y + 190, 210, 130);
   }
 
+  // Huellas en la nieve y rastro tenue de polvo en interiores
+  updateDustTrail(scene, time);
+  drawFootprints(bctx, scene, view, time);
+
   // Casquillos y marcas de impacto persistentes del motor
   drawFloorDecals(bctx, scene.decals, decalSolids(scene));
 
@@ -1428,12 +1669,11 @@ export function renderArtProof(scene: ArtProofScene): void {
   bctx.restore();
 
   drawLighting(bctx, scene, cam, time);
-  drawPost(bctx, time);
 
   const canvas = ctx.canvas;
   const scale = Math.max(
     1,
     Math.floor(Math.min(canvas.width / PROOF_W, canvas.height / PROOF_H))
   );
-  present(ctx, bctx.canvas, scale, `ART PROOF · 480×270 ×${scale} · ${scene.missionMode}`);
+  present(ctx, bctx.canvas, scale, `ART PROOF · 480×270 ×${scale} · ${scene.missionMode}`, time);
 }
