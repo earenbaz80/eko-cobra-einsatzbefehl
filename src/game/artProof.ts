@@ -529,13 +529,14 @@ function getTile(name: string, variant = 0): HTMLCanvasElement {
   return canvas;
 }
 
-const LEG_TOP = 18;
+const SPRITE_SCALE = 2;
+const LEG_TOP = 18 * SPRITE_SCALE;
 
 /** Ciclo de 4 fases: [pierna izq, pierna der, bob del tronco]. */
 const WALK_CYCLE: Array<[number, number, number]> = [
-  [1, -1, 1],
+  [2, -2, 2],
   [0, 0, 0],
-  [-1, 1, 1],
+  [-2, 2, 2],
   [0, 0, 0],
 ];
 
@@ -548,7 +549,7 @@ function getBody(role: string, pose: Pose): HTMLCanvasElement {
   const palette = ROLE_PALETTE[role] ?? ROLE_PALETTE.SUSPECT;
   const isUnarmed = role === 'HOSTAGE';
   const rows = BODY_ART[pose].map((row) => (isUnarmed ? row.replace(/[gG]/g, '.') : row));
-  const canvas = renderArtToCanvas({ rows: pad(rows), map: palette }, 1);
+  const canvas = renderArtToCanvas({ rows: pad(rows), map: palette }, SPRITE_SCALE);
   spriteCache.set(key, canvas);
   return canvas;
 }
@@ -1168,6 +1169,22 @@ function drawWalls(ctx: CanvasRenderingContext2D, scene: ArtProofScene, view: { 
     // Base en sombra
     ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
     ctx.fillRect(x, y + h - 3, w, 3);
+
+    // AO en esquinas/uniones de muros (oscurece los encuentros entre muros)
+    ctx.save();
+    for (const pt of [
+      { px: wall.x1, py: wall.y1 },
+      { px: wall.x2, py: wall.y2 },
+    ]) {
+      const g = ctx.createRadialGradient(pt.px, pt.py, 0, pt.px, pt.py, 16);
+      g.addColorStop(0, 'rgba(0, 0, 0, 0.6)');
+      g.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(pt.px, pt.py, 16, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   for (const door of scene.doors) {
@@ -1383,6 +1400,30 @@ function hexToRgba(hex: string, alpha: number): string {
 }
 
 /* ------------------------------------------------------------------ */
+/* Partículas                                                          */
+/* ------------------------------------------------------------------ */
+
+function drawDustMotes(
+  ctx: CanvasRenderingContext2D,
+  cam: { x: number; y: number },
+  time: number
+) {
+  const x0 = cam.x - PROOF_W / 2;
+  const y0 = cam.y - PROOF_H / 2;
+  const x1 = cam.x + PROOF_W / 2;
+  const y1 = cam.y + PROOF_H / 2;
+  ctx.save();
+  for (let i = 0; i < 150; i++) {
+    const rx = x0 + hash2(i * 13.7 + time * 0.17, i * 2.3) * (x1 - x0);
+    const ry = y0 + hash2(i * 9.1, time * 0.17 + i * 1.7) * (y1 - y0);
+    const a = 0.06 + hash2(i * 4.1, i * 6.7) * 0.14;
+    ctx.fillStyle = `rgba(190, 205, 220, ${a.toFixed(3)})`;
+    ctx.fillRect(Math.floor(rx), Math.floor(ry), 1, 1);
+  }
+  ctx.restore();
+}
+
+/* ------------------------------------------------------------------ */
 /* Actores                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -1419,10 +1460,10 @@ function drawActors(ctx: CanvasRenderingContext2D, scene: ArtProofScene, time: n
     const facingLeft = flip;
     const bob = moving ? 0 : Math.sin(time * 1.6 + actor.x * 0.05) * 0.5;
 
-    drawShadow(ctx, actor.x, actor.y + 3, moving ? 9.5 : 8.5, 3.4, 0.55);
+    drawShadow(ctx, actor.x, actor.y + 4, moving ? 11 : 10, 4, 0.55);
 
     ctx.save();
-    ctx.translate(actor.x, actor.y - 12 + bob);
+    ctx.translate(actor.x, actor.y - Math.round(sprite.height / 2) + bob);
     if (facingLeft) ctx.scale(-1, 1);
     // Halo oscuro de 1px: separa la silueta del suelo
     ctx.globalAlpha = 0.55;
@@ -1436,6 +1477,22 @@ function drawActors(ctx: CanvasRenderingContext2D, scene: ArtProofScene, time: n
     }
     ctx.globalAlpha = 1;
     ctx.drawImage(sprite, -sprite.width / 2, 0);
+
+    // Sombreado de 4 tonos (cel shading): oscurece el lado derecho del sprite
+    ctx.globalCompositeOperation = 'source-atop';
+    const shadeGrad = ctx.createLinearGradient(
+      -sprite.width / 2,
+      0,
+      sprite.width / 2,
+      0
+    );
+    shadeGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    shadeGrad.addColorStop(0.55, 'rgba(0, 0, 0, 0.12)');
+    shadeGrad.addColorStop(1, 'rgba(0, 0, 0, 0.42)');
+    ctx.fillStyle = shadeGrad;
+    ctx.fillRect(-sprite.width / 2, 0, sprite.width, sprite.height);
+    ctx.globalCompositeOperation = 'source-over';
+
     ctx.restore();
   }
 }
@@ -1530,6 +1587,9 @@ export function renderArtProof(scene: ArtProofScene): void {
   bctx.translate(PROOF_W / 2 - cam.x, PROOF_H / 2 - cam.y);
 
   drawFloors(bctx, scene, view);
+
+  // Partículas de polvo flotante (ambientales)
+  drawDustMotes(bctx, cam, time);
 
   // Alfombra bajo el salón
   const salon = scene.rooms.find((room) => room.id === 'ALPEN_SALON');
