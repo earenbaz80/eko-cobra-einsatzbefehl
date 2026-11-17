@@ -222,6 +222,7 @@ export class TacticalEngine extends TacticalEngineCore {
         actors: this.actors,
         sconces: this.wallSconces,
         decals: this.decals,
+        surfaceImpacts: this.surfaceImpacts,
         nightMode: this.nightMode,
         player: this.getPlayer(),
         camX: this.camX,
