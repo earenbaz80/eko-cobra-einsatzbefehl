@@ -193,6 +193,48 @@ const DOOR_ART = art(
   ]
 );
 
+const ASPHALT_ART = art(
+  { a: '#181E25', b: '#1F262E', c: '#0E1318', d: '#262E37' },
+  [
+    'abaaaaba',
+    'aaaaadaa',
+    'baaaaaab',
+    'aaaabaaa',
+    'adaaaaaa',
+    'aaaacaaa',
+    'baaaaadb',
+    'aaaaaaba',
+  ]
+);
+
+const CONCRETE_ART = art(
+  { a: '#2F3741', b: '#3A434E', c: '#262D35', d: '#454F5B' },
+  [
+    'aaaaaaab',
+    'aadaaaaa',
+    'aaaaacaa',
+    'baaaaaaa',
+    'aaaabaaa',
+    'aadaaaaa',
+    'aaaaaaad',
+    'baaaaaba',
+  ]
+);
+
+const TILE_ART = art(
+  { a: '#3C4652', b: '#48535F', c: '#2A323C', d: '#555F6C' },
+  [
+    'cccccccc',
+    'cdbbbbbc',
+    'cabbbbbc',
+    'cabbbbbc',
+    'cabbbbbc',
+    'cabbbbbc',
+    'cabbbbbc',
+    'cccccccc',
+  ]
+);
+
 const FIRE_ART = art(
   { a: '#F59E0B', b: '#FDE68A', c: '#DC2626', d: '#7C2D12', e: '#B45309' },
   [
@@ -419,6 +461,9 @@ const TILES: Record<string, PixelArt[]> = {
   bed: [BED_ART],
   door: [DOOR_ART],
   fire: [FIRE_ART, FIRE_ART_B],
+  asphalt: [ASPHALT_ART],
+  concrete: [CONCRETE_ART],
+  tile: [TILE_ART],
 };
 
 function getTile(name: string, variant = 0): HTMLCanvasElement {
@@ -573,13 +618,31 @@ export function isArtProofRequested(): boolean {
 /* Escenario                                                           */
 /* ------------------------------------------------------------------ */
 
+const WOOD_ROOMS = ['SALON', 'SUITE', 'WOHNKUECHE', 'WOHNUNG', 'BUERO'];
+const TILE_ROOMS = ['BADEZIMMER', 'LABOR', 'KONTROLLRAUM', 'TURBINE', 'VIP_LOUNGE', 'SCHALTERHALLE'];
+const CONCRETE_ROOMS = [
+  'GLEIS',
+  'BAHNSTEIG',
+  'PLATFORM',
+  'GEPAECK',
+  'LAGERHALLE',
+  'HANGAR',
+  'TUNNEL',
+  'STELLWERK',
+  'STIEGENHAUS',
+  'VORRAUM',
+  'VORPLATZ',
+];
+
 function floorTileFor(room: RoomZone, missionMode: string): string {
-  if (room.id.includes('EXTERIOR') || room.id.includes('TERRACE')) {
-    return missionMode === 'TIROL' ? 'snow' : 'stone';
+  const id = room.id;
+  if (id.includes('EXTERIOR') || id.includes('TERRACE')) {
+    return missionMode === 'TIROL' ? 'snow' : 'asphalt';
   }
-  if (room.id.includes('OBSERVATORIUM')) return 'stone';
-  if (room.id.includes('SALON')) return 'wood';
-  if (room.id.includes('SUITE')) return 'wood';
+  if (id.includes('OBSERVATORIUM')) return 'stone';
+  if (WOOD_ROOMS.some((key) => id.includes(key))) return 'wood';
+  if (TILE_ROOMS.some((key) => id.includes(key))) return 'tile';
+  if (CONCRETE_ROOMS.some((key) => id.includes(key))) return 'concrete';
   return 'stone';
 }
 
@@ -588,6 +651,9 @@ function drawFloors(ctx: CanvasRenderingContext2D, scene: ArtProofScene, view: {
     snow: '#C6D4E2',
     wood: '#4E3826',
     stone: '#2A3441',
+    asphalt: '#181E25',
+    concrete: '#2F3741',
+    tile: '#3C4652',
   };
 
   for (const room of scene.rooms) {
@@ -773,6 +839,137 @@ function drawCrate(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
   bevelBox(ctx, x, y, w, h, 'rgba(150, 110, 70, 0.5)', 'rgba(0, 0, 0, 0.6)');
 }
 
+function drawTable(ctx: CanvasRenderingContext2D, item: FurnitureItem, metal = false) {
+  const { x, y, w, h } = item;
+  fillTiles(ctx, metal ? 'metal' : 'wood', x, y, w, h, { x0: x, y0: y, x1: x + w, y1: y + h });
+  ctx.fillStyle = metal ? 'rgba(120, 140, 160, 0.22)' : 'rgba(150, 108, 70, 0.22)';
+  ctx.fillRect(x + 2, y + 2, w - 4, Math.max(3, h * 0.18));
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+  ctx.fillRect(x, y + h - 4, w, 4);
+  bevelBox(ctx, x, y, w, h, metal ? 'rgba(150, 170, 190, 0.45)' : 'rgba(170, 126, 84, 0.5)', 'rgba(0, 0, 0, 0.6)');
+}
+
+function drawShelf(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
+  const { x, y, w, h } = item;
+  fillTiles(ctx, 'wood', x, y, w, h, { x0: x, y0: y, x1: x + w, y1: y + h });
+  // Baldaños y bultos
+  const shelves = Math.max(2, Math.floor(h / 22));
+  for (let i = 0; i < shelves; i++) {
+    const sy = y + 4 + i * ((h - 8) / shelves);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.fillRect(x + 2, sy + 5, w - 4, 2);
+    ctx.fillStyle = 'rgba(140, 100, 64, 0.75)';
+    ctx.fillRect(x + 2, sy, w - 4, 2);
+    // Cajas/objetos sobre el baldaño
+    const items = Math.max(1, Math.floor(w / 26));
+    for (let k = 0; k < items; k++) {
+      const bx = x + 5 + k * ((w - 10) / items);
+      ctx.fillStyle = k % 2 === 0 ? '#5B4A38' : '#37505E';
+      ctx.fillRect(bx, sy - 7, Math.min(12, (w - 10) / items - 3), 6);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+      ctx.fillRect(bx, sy - 7, Math.min(12, (w - 10) / items - 3), 1);
+    }
+  }
+  bevelBox(ctx, x, y, w, h, 'rgba(160, 118, 78, 0.5)', 'rgba(0, 0, 0, 0.65)');
+}
+
+function drawBench(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
+  const { x, y, w, h } = item;
+  const horizontal = w >= h;
+  fillTiles(ctx, 'wood', x, y, w, h, { x0: x, y0: y, x1: x + w, y1: y + h });
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+  if (horizontal) ctx.fillRect(x, y, w, Math.max(5, h * 0.28));
+  else ctx.fillRect(x, y, Math.max(5, w * 0.28), h);
+  ctx.fillStyle = 'rgba(150, 170, 190, 0.35)';
+  if (horizontal) ctx.fillRect(x + 1, y + h - 2, w - 2, 1);
+  else ctx.fillRect(x + w - 2, y + 1, 1, h - 2);
+  bevelBox(ctx, x, y, w, h, 'rgba(170, 130, 90, 0.45)', 'rgba(0, 0, 0, 0.6)');
+}
+
+function drawAppliance(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
+  const { x, y, w, h } = item;
+  fillTiles(ctx, 'metal', x, y, w, h, { x0: x, y0: y, x1: x + w, y1: y + h });
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 4.5, y + 6.5, w - 9, h - 12);
+  // Puerta circular tipo lavadora
+  ctx.beginPath();
+  ctx.arc(x + w * 0.5, y + h * 0.6, Math.min(w, h) * 0.2, 0, Math.PI * 2);
+  ctx.fillStyle = '#14181D';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(140, 160, 180, 0.45)';
+  ctx.stroke();
+  // Piloto
+  ctx.fillStyle = '#4ADE80';
+  ctx.fillRect(x + w - 7, y + 4, 2, 2);
+  bevelBox(ctx, x, y, w, h, 'rgba(160, 180, 200, 0.45)', 'rgba(0, 0, 0, 0.65)');
+}
+
+function drawTank(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
+  const { x, y, w, h } = item;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const r = Math.min(w, h) / 2;
+  ctx.save();
+  ctx.fillStyle = '#8A3B1F';
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255, 180, 120, 0.25)';
+  ctx.beginPath();
+  ctx.arc(cx - r * 0.25, cy - r * 0.25, r * 0.55, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#2A1208';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r - 1, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = '#C7D2DE';
+  ctx.fillRect(cx - 3, cy - r - 3, 6, 6);
+  ctx.restore();
+}
+
+function drawPlant(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
+  const { x, y, w, h } = item;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  ctx.save();
+  ctx.fillStyle = '#2F3A2A';
+  ctx.beginPath();
+  ctx.arc(cx, cy, Math.min(w, h) * 0.42, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#3E5140';
+  for (let i = 0; i < 5; i++) {
+    const angle = (i / 5) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.ellipse(
+      cx + Math.cos(angle) * w * 0.16,
+      cy + Math.sin(angle) * h * 0.16,
+      w * 0.16,
+      h * 0.11,
+      angle,
+      0,
+      Math.PI * 2
+    );
+    ctx.fill();
+  }
+  ctx.fillStyle = '#6B4A2E';
+  ctx.beginPath();
+  ctx.arc(cx, cy, Math.min(w, h) * 0.16, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawPallet(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
+  const { x, y, w, h } = item;
+  fillTiles(ctx, 'wood', x, y, w, h, { x0: x, y0: y, x1: x + w, y1: y + h });
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+  for (let i = 1; i < 4; i++) ctx.fillRect(x, y + (h * i) / 4 - 1, w, 2);
+  ctx.strokeStyle = 'rgba(30, 20, 12, 0.7)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+}
+
 function drawFurniture(ctx: CanvasRenderingContext2D, scene: ArtProofScene, time: number) {
   const items = [...scene.furniture].sort((a, b) => a.y + a.h - (b.y + b.h));
   for (const item of items) {
@@ -785,14 +982,30 @@ function drawFurniture(ctx: CanvasRenderingContext2D, scene: ArtProofScene, time
       Math.max(4, item.h * 0.16),
       0.32
     );
+    const label = item.label.toLowerCase();
+    const spriteId = item.spriteId ?? '';
+
     if (item.id.includes('kamin')) {
       drawFireplace(ctx, item, time);
-    } else if (item.spriteId === 'SOFA_2SEAT' || item.label.toLowerCase().includes('sof')) {
+    } else if (spriteId === 'SOFA_2SEAT' || label.includes('sof') || label.includes('sessel')) {
       drawSofa(ctx, item);
-    } else if (item.label.toLowerCase().includes('fuerte')) {
+    } else if (label.includes('fuerte') || label.includes('tresor')) {
       drawSafe(ctx, item);
-    } else if (item.spriteId === 'BED_DOUBLE' || item.label.toLowerCase().includes('cama')) {
+    } else if (spriteId === 'BED_DOUBLE' || label.includes('cama')) {
       drawBed(ctx, item);
+    } else if (/estanter|schrank|regal|racks|panel/.test(label)) {
+      drawShelf(ctx, item);
+    } else if (/banco|asientos|treppe|mostrador|küchenzeile|ku chenzeile/.test(label)) {
+      drawBench(ctx, item);
+    } else if (/kühlschrank|kuehlschrank|washer|washing|refriger|waschbecken/.test(label)) {
+      drawAppliance(ctx, item);
+    } else if (/palets|pallet|tanque|propano|combustible/.test(label)) {
+      if (/tanque|propano|combustible/.test(label)) drawTank(ctx, item);
+      else drawPallet(ctx, item);
+    } else if (/palme|planta/.test(label)) {
+      drawPlant(ctx, item);
+    } else if (/mesa|tisch|table|comunicaciones|síntesis|sinopsis/.test(label)) {
+      drawTable(ctx, item);
     } else {
       drawCrate(ctx, item);
     }

@@ -16,3 +16,4 @@ coverage/
 
 # Captura, traza e informe del humo fallido (el CI lo sube como artifact)
 .smoke-fallos/
+backups/
