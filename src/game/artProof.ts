@@ -1553,9 +1553,8 @@ function drawDustMotes(
 /* Actores                                                             */
 /* ------------------------------------------------------------------ */
 
-// Sprites originales del juego: en el buffer de 480x270 se dibujan a la mitad
-// (26 px), el tamaño de referencia que ocupan en la vista táctica.
-const ACTOR_SCALE = 0.5;
+// `drawPixelArtActor` pinta el sprite a su tamaño de mundo (48 px) y una puerta mide 70,
+// así que el agente ocupa algo más de la mitad del hueco, como en la vista táctica.
 
 function drawActors(
   ctx: CanvasRenderingContext2D,
@@ -1574,7 +1573,6 @@ function drawActors(
     // Mismo criterio que la vista táctica: los operadores resuelven la dirección
     // con la hoja de 8 direcciones y el resto gira con su ángulo.
     if (actor.role !== 'PLAYER' && actor.role !== 'SQUAD') ctx.rotate(actor.angle);
-    ctx.scale(ACTOR_SCALE, ACTOR_SCALE);
     drawPixelArtActor(ctx, actor, scene.primaryWeapon, scene.activeTool, time);
     ctx.restore();
   }
