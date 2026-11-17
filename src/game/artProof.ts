@@ -520,27 +520,25 @@ function drawFloorDecals(ctx: CanvasRenderingContext2D, decals: FloorDecal[], so
   }
 }
 
-/** Baldosa que pisa un punto del mundo, para decidir cómo se lee una huella. */
-function floorTileAt(scene: ArtProofScene, x: number, y: number): string {
-  for (const room of scene.rooms) {
-    if (x >= room.x && x <= room.x + room.w && y >= room.y && y <= room.y + room.h) {
-      return floorTileFor(room, scene.missionMode);
-    }
-  }
-  return scene.missionMode === 'TIROL' ? 'snow' : 'concrete';
+/** Nieve bajo un punto: decide si una marca se lee como pisada o como polvo. */
+function isSnowAt(scene: ArtProofScene, x: number, y: number): boolean {
+  const room = scene.rooms.find(
+    (zone) => x >= zone.x && x <= zone.x + zone.w && y >= zone.y && y <= zone.y + zone.h
+  );
+  if (!room) return scene.missionMode === 'TIROL';
+  return floorTileFor(room, scene.missionMode) === 'snow';
 }
 
 interface DustScuff {
   x: number;
   y: number;
-  angle: number;
   born: number;
 }
 
 const DUST_LIFE = 3.2;
-const DUST_MAX = 140;
+const DUST_INTERVAL = 0.16;
 let dustTrail: DustScuff[] = [];
-let dustMission = '';
+let dustSession: ActorEntity[] | null = null;
 let lastDustAt = -1;
 
 /**
@@ -549,29 +547,25 @@ let lastDustAt = -1;
  * movimiento del operador: no toca la simulación ni el estado guardado.
  */
 function updateDustTrail(scene: ArtProofScene, time: number) {
-  if (dustMission !== scene.missionMode) {
+  // `resetMission` reconstruye el array de actores en cada partida nueva.
+  if (dustSession !== scene.actors) {
+    dustSession = scene.actors;
     dustTrail = [];
-    dustMission = scene.missionMode;
     lastDustAt = -1;
   }
 
-  const player = scene.player;
-  if (!player) return;
-
-  const moving = Math.hypot(player.vx ?? 0, player.vy ?? 0) > 18;
-  const indoors = floorTileAt(scene, player.x, player.y) !== 'snow';
-  if (moving && indoors && time - lastDustAt > 0.16) {
-    dustTrail.push({
-      x: player.x + (Math.random() - 0.5) * 5,
-      y: player.y + 2 + (Math.random() - 0.5) * 5,
-      angle: player.angle,
-      born: time,
-    });
-    lastDustAt = time;
-    if (dustTrail.length > DUST_MAX) dustTrail.shift();
-  }
-
   dustTrail = dustTrail.filter((scuff) => time - scuff.born < DUST_LIFE);
+
+  const player = scene.player;
+  if (!player || isSnowAt(scene, player.x, player.y)) return;
+  const moving = Math.hypot(player.vx ?? 0, player.vy ?? 0) > 18;
+  if (!moving || time - lastDustAt < DUST_INTERVAL) return;
+
+  // Dispersión determinista por posición: sin contador ni Math.random.
+  const jitterX = (hash2(player.x * 0.37, player.y * 0.53) - 0.5) * 5;
+  const jitterY = (hash2(player.y * 0.29 + 3.1, player.x * 0.61) - 0.5) * 5;
+  dustTrail.push({ x: player.x + jitterX, y: player.y + 2 + jitterY, born: time });
+  lastDustAt = time;
 }
 
 function drawFootprints(
@@ -582,27 +576,17 @@ function drawFootprints(
 ) {
   const inView = (x: number, y: number) => x >= view.x0 && x <= view.x1 && y >= view.y0 && y <= view.y1;
 
-  // Huellas del motor: solo se leen como pisada en nieve. En interior quedan
-  // cubiertas por el rastro de polvo, que es el signo correcto sobre madera.
+  // Huellas del motor: solo se leen como pisada en nieve. En interior las cubre
+  // el rastro de polvo, que es el signo correcto sobre madera.
   for (const footprint of scene.footprints) {
-    if (!inView(footprint.x, footprint.y)) continue;
-    if (floorTileAt(scene, footprint.x, footprint.y) !== 'snow') continue;
-
-    const alpha = Math.min(0.55, footprint.alpha + 0.06);
+    if (!inView(footprint.x, footprint.y) || !isSnowAt(scene, footprint.x, footprint.y)) continue;
     ctx.save();
     ctx.translate(footprint.x, footprint.y);
     ctx.rotate(footprint.angle);
-    ctx.fillStyle = `rgba(24, 36, 50, ${alpha})`;
+    ctx.fillStyle = `rgba(24, 36, 50, ${Math.min(0.5, footprint.alpha)})`;
     for (const side of [-1, 1]) {
       ctx.beginPath();
       ctx.ellipse(-2.2, side * 3.1, 3.4, 1.6, side * 0.22, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    // Borde de nieve removida, un tono más claro que el hoyo
-    ctx.fillStyle = `rgba(226, 236, 246, ${alpha * 0.35})`;
-    for (const side of [-1, 1]) {
-      ctx.beginPath();
-      ctx.ellipse(-2.2, side * 3.1, 2.2, 0.7, side * 0.22, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();
@@ -613,18 +597,10 @@ function drawFootprints(
     if (!inView(scuff.x, scuff.y)) continue;
     const fade = 1 - (time - scuff.born) / DUST_LIFE;
     if (fade <= 0) continue;
-    ctx.save();
-    ctx.translate(scuff.x, scuff.y);
-    ctx.rotate(scuff.angle);
     ctx.fillStyle = `rgba(206, 216, 228, ${0.17 * fade})`;
     ctx.beginPath();
-    ctx.ellipse(0, 0, 3.6, 2, 0, 0, Math.PI * 2);
+    ctx.ellipse(scuff.x, scuff.y, 3.6, 2, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = `rgba(120, 132, 148, ${0.13 * fade})`;
-    ctx.beginPath();
-    ctx.ellipse(-0.6, 0, 2.2, 1.1, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
   }
 }
 
