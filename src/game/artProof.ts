@@ -1581,11 +1581,26 @@ function drawActors(
 
   for (const actor of actors) {
     if (!isVisible(actor.x, actor.y)) continue;
+    const dead = actor.state === 'DEAD';
+
     ctx.save();
     ctx.translate(actor.x, actor.y);
-    // Mismo criterio que la vista táctica: los operadores resuelven la dirección
-    // con la hoja de 8 direcciones y el resto gira con su ángulo.
-    if (actor.role !== 'PLAYER' && actor.role !== 'SQUAD') ctx.rotate(actor.angle);
+
+    // Neutralizado: el sprite de pie no se distingue de un sospechoso armado,
+    // así que el cuerpo se tiende de lado y deja su charco en el suelo.
+    if (dead) {
+      ctx.fillStyle = 'rgba(96, 20, 22, 0.6)';
+      ctx.beginPath();
+      ctx.ellipse(0, 1, 13, 7, actor.angle, 0, Math.PI * 2);
+      ctx.fill();
+      // Tendido: girado con su ángulo, estirado a lo largo y aplastado de lado.
+      ctx.rotate(actor.angle);
+      ctx.scale(0.72, 1.32);
+    } else if (actor.role !== 'PLAYER' && actor.role !== 'SQUAD') {
+      // Los operadores resuelven la dirección con la hoja de 8 direcciones.
+      ctx.rotate(actor.angle);
+    }
+
     drawPixelArtActor(ctx, actor, scene.primaryWeapon, scene.activeTool, time);
     ctx.restore();
   }
