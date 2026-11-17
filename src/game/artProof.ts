@@ -7,7 +7,8 @@
  *
  * No toca la simulación: sólo lee el estado que ya existe en el motor.
  * Se activa con `?art=proof`. Opcionales: `&focus=salon` para encuadrar el salón
- * y `&scale=int` para forzar escala entera con letterbox centrado.
+ * y `&scale=int` para forzar escala entera (el entero más cercano, recortando
+ * el desborde a los lados si hace falta).
  *
  * REGLAS DE PROYECCIÓN CENITAL (invariantes del módulo)
  *
@@ -1950,7 +1951,10 @@ function present(
   target.fillStyle = 'rgba(148, 163, 184, 0.85)';
   target.textAlign = 'left';
   target.textBaseline = 'bottom';
-  target.fillText(label, ox + 8, oy + drawH - 6);
+  // El arte puede desbordar y recortarse: la etiqueta se mantiene en el panel.
+  const labelX = Math.max(8, ox + 8);
+  const labelY = Math.min(canvas.height - 6, Math.max(14, oy + drawH - 6));
+  target.fillText(label, labelX, labelY);
   target.restore();
 }
 
@@ -2016,10 +2020,12 @@ export function renderArtProof(scene: ArtProofScene): void {
 
   // Escala fraccionaria: ocupa el ancho disponible respetando el 16:9. Sin blur
   // (nearest-neighbor), pero el píxel de arte ya no mide un entero de pantalla.
-  // Con `&scale=int` se recorta a entero y el letterbox queda centrado.
+  // Con `&scale=int` se usa el entero más cercano: hacia arriba desborda y el
+  // arte se recorta por igual a los lados, en vez de quedar chico con bandas
+  // enormes (con floor, un panel de 1,98 caía a ×1).
   const integerScale = isIntegerScaleRequested();
   const fit = Math.min(ctx.canvas.width / PROOF_W, ctx.canvas.height / PROOF_H);
-  const scale = Math.max(1, integerScale ? Math.floor(fit) : fit);
+  const scale = Math.max(1, integerScale ? Math.round(fit) : fit);
   const factor = integerScale ? `${Math.round(scale)}` : scale.toFixed(2);
   present(ctx, bctx.canvas, scale, `ART PROOF · 480×270 ×${factor} · ${scene.missionMode}`, time);
 }
