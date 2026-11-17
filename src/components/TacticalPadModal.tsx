@@ -252,6 +252,9 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
     }
   }, [isOpen]);
 
+  // Hook de accesibilidad siempre antes del retorno temprano (reglas de hooks).
+  const dialogRef = useModalA11y(isOpen);
+
   if (!shouldRender) return null;
 
   const pad = hud.tacticalPad;
@@ -287,8 +290,6 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
     const worldY = 60 + relY * 700;
     onAddTacticalMarker(worldX, worldY, selectedMarkerType);
   };
-
-  const dialogRef = useModalA11y(isOpen);
 
   const activeMarkerMeta =
     MARKER_MODES.find((m) => m.type === selectedMarkerType) || MARKER_MODES[0];

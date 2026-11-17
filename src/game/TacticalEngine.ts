@@ -741,20 +741,6 @@ export class TacticalEngine extends TacticalEngineCore {
     ctx.fillStyle = 'rgba(5, 8, 13, 0.40)';
     ctx.fillRect(-500, -500, WORLD_WIDTH + 1000, WORLD_HEIGHT + 1000);
 
-    // Subtle edge vignette to frame the scene and reinforce focus on the apartment
-    const edgeGrad = ctx.createRadialGradient(
-      WORLD_WIDTH * 0.5,
-      WORLD_HEIGHT * 0.5,
-      Math.min(WORLD_WIDTH, WORLD_HEIGHT) * 0.35,
-      WORLD_WIDTH * 0.5,
-      WORLD_HEIGHT * 0.5,
-      Math.max(WORLD_WIDTH, WORLD_HEIGHT) * 0.72
-    );
-    edgeGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
-    edgeGrad.addColorStop(1, 'rgba(2, 6, 12, 0.32)');
-    ctx.fillStyle = edgeGrad;
-    ctx.fillRect(-500, -500, WORLD_WIDTH + 1000, WORLD_HEIGHT + 1000);
-
     ctx.strokeStyle = 'rgba(30, 41, 59, 0.28)';
     ctx.lineWidth = 1;
     const step = 40;
@@ -804,28 +790,13 @@ export class TacticalEngine extends TacticalEngineCore {
       ctx.font = '600 11px "JetBrains Mono", monospace';
       ctx.fillText(room.nameDe, room.x + 14, room.y + 22);
 
-      // Baseboard trim along room walls for better definition
+      // Ambient Occlusion / Soft Corner Shadows inside room
       ctx.save();
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
-      ctx.fillRect(room.x, room.y, room.w, 4); // Top baseboard
-      ctx.fillRect(room.x, room.y + room.h - 4, room.w, 4); // Bottom baseboard
-      ctx.fillRect(room.x, room.y, 4, room.h); // Left baseboard
-      ctx.fillRect(room.x + room.w - 4, room.y, 4, room.h); // Right baseboard
-
-      // Ambient Occlusion / Soft Corner Shadows inside room (stronger at corners)
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.14)';
-      ctx.fillRect(room.x, room.y, 28, room.h); // Left wall shadow
-      ctx.fillRect(room.x + room.w - 28, room.y, 28, room.h); // Right wall shadow
-      ctx.fillRect(room.x, room.y, room.w, 28); // Top wall shadow
-      ctx.fillRect(room.x, room.y + room.h - 28, room.w, 28); // Bottom wall shadow
-
-      // Darker corner pockets
-      const cornerSize = 42;
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
-      ctx.fillRect(room.x, room.y, cornerSize, cornerSize);
-      ctx.fillRect(room.x + room.w - cornerSize, room.y, cornerSize, cornerSize);
-      ctx.fillRect(room.x, room.y + room.h - cornerSize, cornerSize, cornerSize);
-      ctx.fillRect(room.x + room.w - cornerSize, room.y + room.h - cornerSize, cornerSize, cornerSize);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+      ctx.fillRect(room.x, room.y, 15, room.h); // Left wall shadow
+      ctx.fillRect(room.x + room.w - 15, room.y, 15, room.h); // Right wall shadow
+      ctx.fillRect(room.x, room.y, room.w, 15); // Top wall shadow
+      ctx.fillRect(room.x, room.y + room.h - 15, room.w, 15); // Bottom wall shadow
       ctx.restore();
     }
 
@@ -1552,30 +1523,9 @@ export class TacticalEngine extends TacticalEngineCore {
   }
 
   private renderWallsAndDoors(ctx: CanvasRenderingContext2D) {
-    // Drop shadow under walls for depth
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
-    ctx.lineWidth = 12;
-    ctx.lineCap = 'square';
-    for (const w of this.walls) {
-      ctx.beginPath();
-      ctx.moveTo(w.x1 + 1.5, w.y1 + 2);
-      ctx.lineTo(w.x2 + 1.5, w.y2 + 2);
-      ctx.stroke();
-    }
-
-    // Wall body with a top highlight for a 3D-ish definition
     ctx.strokeStyle = '#94A3B8';
     ctx.lineWidth = 8;
-    for (const w of this.walls) {
-      ctx.beginPath();
-      ctx.moveTo(w.x1, w.y1);
-      ctx.lineTo(w.x2, w.y2);
-      ctx.stroke();
-    }
-
-    // Top highlight strip
-    ctx.strokeStyle = 'rgba(226, 232, 240, 0.35)';
-    ctx.lineWidth = 2;
+    ctx.lineCap = 'square';
     for (const w of this.walls) {
       ctx.beginPath();
       ctx.moveTo(w.x1, w.y1);
