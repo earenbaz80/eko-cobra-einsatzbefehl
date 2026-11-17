@@ -18,8 +18,8 @@ import type {
   WallSconceLight,
 } from './types';
 
-export const PROOF_W = 480;
-export const PROOF_H = 270;
+const PROOF_W = 480;
+const PROOF_H = 270;
 
 const TILE = 16; // tamaño de baldosa en unidades de mundo
 const ART_SCALE = 2; // cada píxel de arte mide 2x2 en el buffer
@@ -30,13 +30,9 @@ const ART_SCALE = 2; // cada píxel de arte mide 2x2 en el buffer
 
 type PixelArt = { rows: string[]; map: Record<string, string> };
 
-function pad(rows: string[]): string[] {
-  const width = Math.max(...rows.map((row) => row.length));
-  return rows.map((row) => row.padEnd(width, '.'));
-}
-
 function art(map: Record<string, string>, rows: string[]): PixelArt {
-  return { map, rows: pad(rows) };
+  const width = Math.max(...rows.map((row) => row.length));
+  return { map, rows: rows.map((row) => row.padEnd(width, '.')) };
 }
 
 const SNOW_ART = art(
@@ -123,20 +119,6 @@ const WALL_ART = art(
   ]
 );
 
-const RUG_ART = art(
-  { a: '#4A1220', b: '#571726', c: '#64202F', d: '#3B0E19' },
-  [
-    'dddddddd',
-    'dabbbbad',
-    'dbccccbd',
-    'dbcbbccd',
-    'dbcbbccd',
-    'dbccccbd',
-    'dabbbbad',
-    'dddddddd',
-  ]
-);
-
 const LEATHER_ART = art(
   { a: '#5E241C', b: '#6E2C22', c: '#8A3B2C', d: '#3A1410' },
   [
@@ -176,20 +158,6 @@ const BED_ART = art(
     'dbaaaabd',
     'dbbbbbbd',
     'cccccccc',
-  ]
-);
-
-const DOOR_ART = art(
-  { a: '#3B2418', b: '#5A3A24', c: '#8B5A34', d: '#2A1810' },
-  [
-    '.dddddd.',
-    '.dbbbbd.',
-    '.dbccbd.',
-    '.dbccbd.',
-    '.dbbbbd.',
-    '.dbccbd.',
-    '.dbbbbd.',
-    '..dddd..',
   ]
 );
 
@@ -269,9 +237,7 @@ const FIRE_ART_B = art(
 
 const tileCache = new Map<string, HTMLCanvasElement>();
 
-let buffer: HTMLCanvasElement | null = null;
 let bufferCtx: CanvasRenderingContext2D | null = null;
-let lightBuffer: HTMLCanvasElement | null = null;
 let lightCtx: CanvasRenderingContext2D | null = null;
 
 function createCanvas(w: number, h: number): HTMLCanvasElement {
@@ -304,11 +270,9 @@ const TILES: Record<string, PixelArt[]> = {
   wood: [WOOD_ART, WOOD_ART_B],
   stone: [STONE_FLOOR_ART],
   wall: [WALL_ART],
-  rug: [RUG_ART],
   leather: [LEATHER_ART],
   metal: [METAL_ART],
   bed: [BED_ART],
-  door: [DOOR_ART],
   fire: [FIRE_ART, FIRE_ART_B],
   asphalt: [ASPHALT_ART],
   concrete: [CONCRETE_ART],
@@ -349,7 +313,7 @@ function fillTiles(
   w: number,
   h: number,
   bounds: { x0: number; y0: number; x1: number; y1: number },
-  options: { variants?: number; tint?: string; alpha?: number } = {}
+  options: { variants?: number } = {}
 ) {
   const x0 = Math.max(x, bounds.x0);
   const y0 = Math.max(y, bounds.y0);
@@ -365,7 +329,6 @@ function fillTiles(
   ctx.beginPath();
   ctx.rect(x0, y0, x1 - x0, y1 - y0);
   ctx.clip();
-  if (options.alpha !== undefined) ctx.globalAlpha = options.alpha;
 
   for (let ty = startY; ty < y1; ty += TILE) {
     for (let tx = startX; tx < x1; tx += TILE) {
@@ -390,10 +353,6 @@ function fillTiles(
     }
   }
 
-  if (options.tint) {
-    ctx.fillStyle = options.tint;
-    ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
-  }
   ctx.restore();
 }
 
@@ -481,23 +440,23 @@ function floorTileFor(room: RoomZone, missionMode: string): string {
   return 'stone';
 }
 
-function drawFloors(ctx: CanvasRenderingContext2D, scene: ArtProofScene, view: { x0: number; y0: number; x1: number; y1: number }) {
-  const baseColor: Record<string, string> = {
-    snow: '#C6D4E2',
-    wood: '#4E3826',
-    stone: '#2A3441',
-    asphalt: '#181E25',
-    concrete: '#2F3741',
-    tile: '#3C4652',
-  };
+const FLOOR_BASE_COLOR: Record<string, string> = {
+  snow: '#C6D4E2',
+  wood: '#4E3826',
+  stone: '#2A3441',
+  asphalt: '#181E25',
+  concrete: '#2F3741',
+  tile: '#3C4652',
+};
 
+function drawFloors(ctx: CanvasRenderingContext2D, scene: ArtProofScene, view: { x0: number; y0: number; x1: number; y1: number }) {
   for (const room of scene.rooms) {
     const tile = floorTileFor(room, scene.missionMode);
     // Base opaca: evita que las esquinas transparentes del patrón dejen huecos
-    ctx.fillStyle = baseColor[tile] ?? '#1B2430';
+    ctx.fillStyle = FLOOR_BASE_COLOR[tile] ?? '#1B2430';
     ctx.fillRect(room.x, room.y, room.w, room.h);
     fillTiles(ctx, tile, room.x, room.y, room.w, room.h, view, {
-      variants: tile === 'snow' ? 2 : tile === 'wood' ? 2 : 1,
+      variants: tile === 'snow' || tile === 'wood' ? 2 : 1,
     });
     // Veta de sombra en el borde interior para dar profundidad a la sala.
     ctx.save();
@@ -606,13 +565,10 @@ function drawSofa(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
   // Cojines
   ctx.strokeStyle = 'rgba(40, 12, 9, 0.75)';
   ctx.lineWidth = 1;
-  const cushionW = w / 2;
-  for (let i = 1; i < 2; i++) {
-    ctx.beginPath();
-    ctx.moveTo(x + cushionW * i, y + h * 0.26);
-    ctx.lineTo(x + cushionW * i, y + h - 3);
-    ctx.stroke();
-  }
+  ctx.beginPath();
+  ctx.moveTo(x + w / 2, y + h * 0.26);
+  ctx.lineTo(x + w / 2, y + h - 3);
+  ctx.stroke();
   ctx.fillStyle = 'rgba(180, 96, 70, 0.22)';
   ctx.fillRect(x + 6, y + h * 0.3, w / 2 - 10, 2);
   ctx.fillRect(x + w / 2 + 4, y + h * 0.3, w / 2 - 10, 2);
@@ -883,10 +839,8 @@ function drawWalls(ctx: CanvasRenderingContext2D, scene: ArtProofScene, view: { 
     if (x + w < view.x0 || x > view.x1 || y + h < view.y0 || y > view.y1) continue;
 
     // Sombra proyectada del muro (hacia abajo-derecha, luz superior izquierda)
-    ctx.save();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
     ctx.fillRect(x + 5, y + 7, w, h);
-    ctx.restore();
 
     fillTiles(ctx, 'wall', x, y, w, h, { x0: x, y0: y, x1: x + w, y1: y + h });
 
@@ -1020,11 +974,8 @@ function drawLighting(
   cam: { x: number; y: number },
   time: number
 ) {
-  if (!lightBuffer) {
-    lightBuffer = createCanvas(PROOF_W, PROOF_H);
-    lightCtx = lightBuffer.getContext('2d');
-  }
-  if (!lightBuffer || !lightCtx) return;
+  if (!lightCtx) lightCtx = createCanvas(PROOF_W, PROOF_H).getContext('2d');
+  if (!lightCtx) return;
   const lctx = lightCtx;
 
   lctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1104,7 +1055,7 @@ function drawLighting(
   lctx.globalCompositeOperation = 'source-over';
 
   // Oscuridad sobre la escena (el buffer de luz ya está en espacio de pantalla)
-  ctx.drawImage(lightBuffer, 0, 0);
+  ctx.drawImage(lctx.canvas, 0, 0);
 
   // Halos cálidos aditivos, en coordenadas de mundo
   ctx.save();
@@ -1112,9 +1063,9 @@ function drawLighting(
   ctx.globalCompositeOperation = 'lighter';
   for (const glow of glowSources) {
     const gradient = ctx.createRadialGradient(glow.x, glow.y, 2, glow.x, glow.y, glow.radius);
-    gradient.addColorStop(0, `${hexToRgba(glow.color, 0.16)}`);
-    gradient.addColorStop(0.5, `${hexToRgba(glow.color, 0.06)}`);
-    gradient.addColorStop(1, `${hexToRgba(glow.color, 0)}`);
+    gradient.addColorStop(0, hexToRgba(glow.color, 0.16));
+    gradient.addColorStop(0.5, hexToRgba(glow.color, 0.06));
+    gradient.addColorStop(1, hexToRgba(glow.color, 0));
     ctx.fillStyle = gradient;
     ctx.beginPath();
     ctx.arc(glow.x, glow.y, glow.radius, 0, Math.PI * 2);
@@ -1146,11 +1097,10 @@ function drawDustMotes(
   const x1 = cam.x + PROOF_W / 2;
   const y1 = cam.y + PROOF_H / 2;
   ctx.save();
+  ctx.fillStyle = 'rgba(190, 205, 220, 0.14)';
   for (let i = 0; i < 150; i++) {
     const rx = x0 + hash2(i * 13.7 + time * 0.17, i * 2.3) * (x1 - x0);
     const ry = y0 + hash2(i * 9.1, time * 0.17 + i * 1.7) * (y1 - y0);
-    const a = 0.06 + hash2(i * 4.1, i * 6.7) * 0.14;
-    ctx.fillStyle = `rgba(190, 205, 220, ${a.toFixed(3)})`;
     ctx.fillRect(Math.floor(rx), Math.floor(ry), 1, 1);
   }
   ctx.restore();
@@ -1159,7 +1109,6 @@ function drawDustMotes(
 /* ------------------------------------------------------------------ */
 /* Actores                                                             */
 /* ------------------------------------------------------------------ */
-
 
 const TOPDOWN_COLORS: Record<string, { body: string; helmet: string; visor: string; weapon: string }> = {
   PLAYER: { body: '#1E3A5F', helmet: '#334155', visor: '#93C5FD', weapon: '#0F172A' },
@@ -1289,11 +1238,8 @@ function present(
 
 export function renderArtProof(scene: ArtProofScene): void {
   const { ctx } = scene;
-  if (!buffer) {
-    buffer = createCanvas(PROOF_W, PROOF_H);
-    bufferCtx = buffer.getContext('2d');
-  }
-  if (!buffer || !bufferCtx) return;
+  if (!bufferCtx) bufferCtx = createCanvas(PROOF_W, PROOF_H).getContext('2d');
+  if (!bufferCtx) return;
 
   const bctx = bufferCtx;
   const time = (typeof performance !== 'undefined' ? performance.now() : 0) / 1000;
@@ -1338,5 +1284,5 @@ export function renderArtProof(scene: ArtProofScene): void {
     1,
     Math.floor(Math.min(canvas.width / PROOF_W, canvas.height / PROOF_H))
   );
-  present(ctx, buffer, scale, `ART PROOF · 480×270 ×${scale} · ${scene.missionMode}`);
+  present(ctx, bctx.canvas, scale, `ART PROOF · 480×270 ×${scale} · ${scene.missionMode}`);
 }
