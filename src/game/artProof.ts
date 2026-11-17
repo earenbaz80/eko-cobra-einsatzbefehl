@@ -475,15 +475,16 @@ function drawFloors(ctx: CanvasRenderingContext2D, scene: ArtProofScene, view: {
   }
 }
 
-function drawFloorDecals(ctx: CanvasRenderingContext2D, decals: FloorDecal[]) {
+function drawFloorDecals(ctx: CanvasRenderingContext2D, decals: FloorDecal[], solids: SolidRect[]) {
   for (const decal of decals) {
     const isCasing = decal.type === 'CASING';
     // Sangre y otros decals quedan fuera del proof táctico.
     if (!isCasing && decal.type !== 'DEBRIS') continue;
 
     const halfHeight = decal.radius * decal.aspect;
+    const position = nudgeOutOfSolids(decal.x, decal.y, solids, decal.radius + 1);
     ctx.save();
-    ctx.translate(decal.x, decal.y);
+    ctx.translate(position.x, position.y);
     ctx.rotate(decal.angle);
     ctx.globalAlpha = decal.alpha;
     ctx.fillStyle = decal.color;
@@ -868,16 +869,66 @@ function doorLeafSegment(door: DoorEntity): Segment {
   };
 }
 
+interface SolidRect {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+function wallBounds(wall: WallSegment): { x: number; y: number; w: number; h: number } {
+  const thickness = wall.thickness ?? TILE;
+  const horizontal = Math.abs(wall.y2 - wall.y1) < Math.abs(wall.x2 - wall.x1);
+  return {
+    x: horizontal ? Math.min(wall.x1, wall.x2) : Math.min(wall.x1, wall.x2) - thickness / 2,
+    y: horizontal ? Math.min(wall.y1, wall.y2) - thickness / 2 : Math.min(wall.y1, wall.y2),
+    w: horizontal ? Math.abs(wall.x2 - wall.x1) : thickness,
+    h: horizontal ? thickness : Math.abs(wall.y2 - wall.y1),
+  };
+}
+
+function decalSolids(scene: ArtProofScene): SolidRect[] {
+  const solids: SolidRect[] = [];
+  for (const wall of scene.walls) {
+    const { x, y, w, h } = wallBounds(wall);
+    solids.push({ x0: x, y0: y, x1: x + w, y1: y + h });
+  }
+  for (const item of scene.furniture) {
+    if (item.isDestroyed || (!item.blocksMovement && !item.blocksSight)) continue;
+    solids.push({ x0: item.x, y0: item.y, x1: item.x + item.w, y1: item.y + item.h });
+  }
+  return solids;
+}
+
+/** Saca el decal del interior de muros/muebles para que su capa no lo tape. */
+function nudgeOutOfSolids(x: number, y: number, solids: SolidRect[], margin: number) {
+  let px = x;
+  let py = y;
+  for (let pass = 0; pass < 2; pass++) {
+    let moved = false;
+    for (const solid of solids) {
+      if (px <= solid.x0 || px >= solid.x1 || py <= solid.y0 || py >= solid.y1) continue;
+      const left = px - solid.x0;
+      const right = solid.x1 - px;
+      const top = py - solid.y0;
+      const bottom = solid.y1 - py;
+      const nearest = Math.min(left, right, top, bottom);
+      if (nearest === left) px = solid.x0 - margin;
+      else if (nearest === right) px = solid.x1 + margin;
+      else if (nearest === top) py = solid.y0 - margin;
+      else py = solid.y1 + margin;
+      moved = true;
+    }
+    if (!moved) break;
+  }
+  return { x: px, y: py };
+}
+
 function drawWalls(ctx: CanvasRenderingContext2D, scene: ArtProofScene, view: { x0: number; y0: number; x1: number; y1: number }) {
   const snowCap = scene.missionMode === 'TIROL';
 
   for (const wall of scene.walls) {
-    const thickness = wall.thickness ?? TILE;
-    const horizontal = Math.abs(wall.y2 - wall.y1) < Math.abs(wall.x2 - wall.x1);
-    const x = horizontal ? Math.min(wall.x1, wall.x2) : Math.min(wall.x1, wall.x2) - thickness / 2;
-    const y = horizontal ? Math.min(wall.y1, wall.y2) - thickness / 2 : Math.min(wall.y1, wall.y2);
-    const w = horizontal ? Math.abs(wall.x2 - wall.x1) : thickness;
-    const h = horizontal ? thickness : Math.abs(wall.y2 - wall.y1);
+    const { x, y, w, h } = wallBounds(wall);
 
     if (x + w < view.x0 || x > view.x1 || y + h < view.y0 || y > view.y1) continue;
 
@@ -1367,7 +1418,7 @@ export function renderArtProof(scene: ArtProofScene): void {
   }
 
   // Casquillos y marcas de impacto persistentes del motor
-  drawFloorDecals(bctx, scene.decals);
+  drawFloorDecals(bctx, scene.decals, decalSolids(scene));
 
   const isVisible = createVisibilityTest(scene, wallAndDoorSegments(scene));
   drawFurniture(bctx, scene, time, isVisible);
