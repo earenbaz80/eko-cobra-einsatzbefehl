@@ -98,7 +98,7 @@ await arrancarTraza(contextoNavegador);
 // Listas compartidas: las tres secciones apuntan aquí sus fallos de red y consola.
 const badRequests = [];
 const consoleErrors = [];
-const contexto = { url, origin, badRequests, consoleErrors, semilla: SEMILLA_E2E };
+const contexto = { url, origin, page, badRequests, consoleErrors, semilla: SEMILLA_E2E };
 vigilarPagina(page, { origin, badRequests, consoleErrors });
 
 try {

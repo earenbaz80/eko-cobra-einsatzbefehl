@@ -72,6 +72,45 @@ async function comprobarPublicado(url) {
   console.log('dist total: no aplica en modo remoto');
 }
 
+/**
+ * Peso de arranque: documento, JS y CSS que el navegador descarga para poder
+ * jugar. No es lo mismo que el peso de `dist/` ni que el del entry: mover un
+ * chunk fuera del JS de entrada deja contento a `entradaJs` sin quitarle un byte
+ * al jugador (battlemap y TacticalPadModal ya viajan en el arranque aunque sean
+ * chunks propios). Esta suma es la que no se puede maquillar reacomodando
+ * archivos, así que es la que mide el costo real de abrir el juego.
+ *
+ * Se leen `encodedBodySize` del navegador, que es lo que viajó por la red. Las
+ * fuentes y las imágenes quedan fuera: cuentan JS, CSS y el documento.
+ */
+async function comprobarPesoDeArranque(page, url) {
+  await page.goto(url, { waitUntil: 'load' });
+  await page.waitForTimeout(300);
+  const recursos = await page.evaluate(() =>
+    performance
+      .getEntriesByType('resource')
+      .filter((entrada) => entrada.initiatorType === 'script' || entrada.initiatorType === 'link')
+      .map((entrada) => ({
+        nombre: entrada.name.split('/').pop(),
+        bytes: entrada.encodedBodySize,
+      }))
+  );
+
+  const total = recursos.reduce((suma, recurso) => suma + recurso.bytes, 0);
+  // Una medición vacía pasaría cualquier tope: si no hay recursos o no viajó
+  // ningún byte, el problema es la medición, no el peso.
+  if (recursos.length < 3 || total === 0) {
+    fail(`arranque: no se pudo medir la descarga inicial (${recursos.length} recurso/s, ${total} B)`);
+    return;
+  }
+
+  if (total > PRESUPUESTO.arranque) {
+    fail(`arranque: ${kb(total)} en ${recursos.length} recursos (tope ${kb(PRESUPUESTO.arranque)})`);
+  } else {
+    console.log(`arranque: ${kb(total)} en ${recursos.length} recursos (tope ${kb(PRESUPUESTO.arranque)})`);
+  }
+}
+
 /** Comprueba el build local: mismos topes, leídos de `dist/`. */
 function comprobarBuildLocal() {
   const html = readFileSync(join(DIST, 'index.html'), 'utf8');
@@ -139,7 +178,8 @@ function comprobarBuildLocal() {
 }
 
 /** Sección de entrega: elige la fuente de los pesos según el modo. */
-export async function comprobarEntrega({ url }) {
+export async function comprobarEntrega({ url, page }) {
   if (ES_REMOTO) await comprobarPublicado(url);
   else comprobarBuildLocal();
+  await comprobarPesoDeArranque(page, url);
 }
