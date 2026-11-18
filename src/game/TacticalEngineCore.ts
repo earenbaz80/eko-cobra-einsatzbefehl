@@ -1640,22 +1640,42 @@ public nightMode: boolean = false;
     // Note: Right click (button === 2) opens the tactical squad orders context menu in App.tsx
   }
 
+  /** Botón derecho con movimiento real: sólo entonces se dibuja la guía de arrastre. */
   public isRightDragging: boolean = false;
+  /**
+   * Botón derecho abajo sin haberse movido todavía.
+   *
+   * Un clic no es un arrastre, y confundirlos rompía el menú de puerta en Linux:
+   * ahí el `contextmenu` llega entre el `mousedown` y el `mouseup`, así que marcar
+   * `isRightDragging` al presionar hacía que App.tsx descartara el menú siempre.
+   */
+  private rightClickPending: boolean = false;
+  /** Umbral en píxeles de mundo para distinguir un clic de un arrastre. */
+  private static readonly RIGHT_DRAG_THRESHOLD = 8;
   public rightClickDragStart: Vec2 = { x: 0, y: 0 };
   public rightClickDragCurrent: Vec2 = { x: 0, y: 0 };
 
   public startRightClickDrag(clientX: number, clientY: number) {
     if (this.gameState !== 'PLAYING') return;
     const worldPos = this.screenToWorld(clientX, clientY);
-    this.isRightDragging = true;
+    this.rightClickPending = true;
+    this.isRightDragging = false;
     this.rightClickDragStart = worldPos;
     this.rightClickDragCurrent = worldPos;
   }
 
   public updateRightClickDrag(clientX: number, clientY: number) {
-    if (!this.isRightDragging) return;
+    if (!this.rightClickPending) return;
     const worldPos = this.screenToWorld(clientX, clientY);
     this.rightClickDragCurrent = worldPos;
+    if (
+      Math.hypot(
+        worldPos.x - this.rightClickDragStart.x,
+        worldPos.y - this.rightClickDragStart.y
+      ) > TacticalEngineCore.RIGHT_DRAG_THRESHOLD
+    ) {
+      this.isRightDragging = true;
+    }
   }
 
   public completeRightClickDrag() {
@@ -1698,6 +1718,7 @@ public nightMode: boolean = false;
   public handleMouseUp() {
     this.isDraggingMinimap = false;
     this.isRightDragging = false;
+    this.rightClickPending = false;
   }
 
   protected touchActive: boolean = false;
