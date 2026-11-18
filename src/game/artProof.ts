@@ -36,10 +36,6 @@ function readParams(): URLSearchParams {
   return cachedParams;
 }
 
-export function isArtProofRequested(): boolean {
-  return readParams().get('art') === 'proof';
-}
-
 /** `&scale=int`: escala entera y letterbox, para capturas sin remuestreo. */
 export function isIntegerScaleRequested(): boolean {
   return readParams().get('scale') === 'int';
@@ -60,6 +56,15 @@ export function artProofBufferHash(): string | null {
     hash = Math.imul(hash, 0x01000193);
   }
   return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * Tamaño del buffer interno. El humo lo lee de acá en vez de repetir 640x360:
+ * si el buffer cambia, el guardián de texto del sistema sigue mirando el canvas
+ * correcto en lugar de quedar ciego y pasar en verde.
+ */
+export function artBufferSize(): { width: number; height: number } {
+  return { width: BUFFER_W, height: BUFFER_H };
 }
 
 function resolveCamera(scene: ArtProofScene): { x: number; y: number } {

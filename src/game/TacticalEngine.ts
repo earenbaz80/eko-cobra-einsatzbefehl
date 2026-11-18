@@ -32,7 +32,7 @@ import {
 } from './types';
 import { TacticalEngineCore } from './TacticalEngineCore';
 import { ART } from './artDirection';
-import { isArtProofRequested, renderArtProof } from './artProof';
+import { paseDeArteCargado, precargarPaseDeArte } from './artProofLoader';
 
 /**
  * Capa de dibujo del motor táctico.
@@ -211,9 +211,13 @@ export class TacticalEngine extends TacticalEngineCore {
     const ctx = this.ctx;
 
     // Prueba de arte opcional (?art=proof): pinta la escena con tileset, sprites
-    // y luz suave a 480x270 reescalado a la ventana. Sólo cambia el dibujo.
-    if (isArtProofRequested()) {
-      renderArtProof({
+    // y luz suave a 640x360 reescalado a la ventana. Sólo cambia el dibujo. El
+    // canal está en su propio chunk y se pide una sola vez; fuera de la prueba
+    // no se descarga, y mientras viaja sigue dibujando el pase normal.
+    precargarPaseDeArte();
+    const paseDeArte = paseDeArteCargado();
+    if (paseDeArte) {
+      paseDeArte.renderArtProof({
         ctx,
         rooms: this.rooms,
         walls: this.walls,

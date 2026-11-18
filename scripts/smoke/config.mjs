@@ -50,9 +50,14 @@ export const SEMILLA_E2E_TEXTO = `0x${SEMILLA_E2E.toString(16)}`;
 
 // Topes de peso: un asset de varios MB o un salto del bundle no debería pasar el CI.
 // Los valores salen de lo que ocupa el build con ~3 % de margen (JS de entrada
-// 479 KiB, dist 1675 KiB): ajustados a propósito para que el tope avise antes de
+// 451 KiB, dist 1675 KiB): ajustados a propósito para que el tope avise antes de
 // una subida real, no sólo de un desastre. Si un asset nuevo es legítimo, se sube
 // aquí a mano.
+//
+// `entradaJs` sigue en 490 KiB aunque el entry mide 451: el pase de arte
+// (`?art=proof`) vive ahora en un chunk propio que sólo se descarga cuando la URL
+// pide la prueba, así que esos 39 KiB de aire son reales y la próxima función
+// mediana no toca este tope antes que el de `dist`.
 //
 // El tope de dist subió a 1780 KiB al crecer el canal de píxeles (+37 KiB de JS de
 // entrada, 455 → 490 kB) y volvió a bajar a 1725 KiB al optimizar el emblema del

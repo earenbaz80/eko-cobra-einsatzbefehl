@@ -62,19 +62,62 @@ async function congelarTiempo(page) {
  * pinta un rótulo con `fillText` (la chapita COBERTURA, el NIVEL IV del dummy,
  * los gestos del binomio), los glifos dependen del navegador y de las fuentes
  * instaladas: la huella dejaría de valer fuera de esta máquina aunque el arte no
- * hubiera cambiado. Se registran todas las llamadas y sólo se acepta el rótulo
- * de `present`, que se pinta a resolución de pantalla y no entra en el hash.
+ * hubiera cambiado. Se registra cada llamada con el canvas donde cayó, y después
+ * sólo cuentan las que fueron al buffer del pase (fuera del DOM y con su tamaño,
+ * que se lee del motor): el rótulo de `present` y los rótulos que dibuja el
+ * render normal mientras el chunk viaja no entran en el hash.
  */
 async function vigilarTextoDelSistema(page) {
   await page.addInitScript(() => {
     const original = CanvasRenderingContext2D.prototype.fillText;
     const registrados = [];
     CanvasRenderingContext2D.prototype.fillText = function (texto, ...resto) {
-      registrados.push(String(texto));
+      registrados.push({
+        texto: String(texto),
+        ancho: this.canvas.width,
+        alto: this.canvas.height,
+        enDom: this.canvas.isConnected,
+      });
       return original.call(this, texto, ...resto);
     };
     Object.defineProperty(window, '__arteTextos', { value: registrados, configurable: true });
   });
+}
+
+/**
+ * El pase vive en su propio chunk: se descarga sólo cuando la URL pide la
+ * prueba. La huella no lo notaría —hashea el buffer, no la red—, así que un
+ * import estático devolvería el canal al JS de entrada en silencio y el aire
+ * del tope se evaporaría con el humo en verde.
+ */
+async function comprobarChunkSeparado(page, url) {
+  const pedidosDeArte = () =>
+    page.evaluate(() =>
+      performance
+        .getEntriesByType('resource')
+        .map((entrada) => entrada.name)
+        .filter((nombre) => /artProof/i.test(nombre))
+    );
+
+  await page.goto(url, { waitUntil: 'load' });
+  await page.waitForTimeout(400);
+  const sinPrueba = await pedidosDeArte();
+
+  const conPrueba = new URL(url);
+  conPrueba.searchParams.set('art', 'proof');
+  await page.goto(conPrueba.href, { waitUntil: 'load' });
+  await page.waitForTimeout(600);
+  const conPase = await pedidosDeArte();
+
+  if (sinPrueba.length > 0) {
+    fail(
+      `${ETIQUETA}: sin ?art=proof ya se descarga el pase (${sinPrueba.length} recurso/s); el canal volvió al arranque`
+    );
+  } else if (conPase.length === 0) {
+    fail(`${ETIQUETA}: ?art=proof no pide el pase en un chunk aparte`);
+  } else {
+    console.log(`${ETIQUETA} · pase en chunk aparte (${conPase.length} recurso, 0 sin el flag)`);
+  }
 }
 
 /**
@@ -139,6 +182,7 @@ function leerHuellas() {
 export async function comprobarArtProof(page, { url }) {
   await congelarTiempo(page);
   await vigilarTextoDelSistema(page);
+  await comprobarChunkSeparado(page, url);
 
   const medidos = {};
   for (const [indice, escenario] of ESCENARIOS.entries()) {
@@ -153,11 +197,18 @@ export async function comprobarArtProof(page, { url }) {
       continue;
     }
 
-    const textosAjenos = await page.evaluate(() => [
-      ...new Set(
-        (window.__arteTextos ?? []).filter((texto) => !texto.startsWith('ART PROOF'))
-      ),
-    ]);
+    const textosAjenos = await page.evaluate(() => {
+      const buffer = window.__eko?.artBufferSize() ?? null;
+      if (!buffer) return ['(sin tamaño de buffer: el pase no terminó de cargar)'];
+      return [
+        ...new Set(
+          (window.__arteTextos ?? [])
+            .filter((t) => !t.enDom && t.ancho === buffer.width && t.alto === buffer.height)
+            .map((t) => t.texto)
+            .filter((texto) => !texto.startsWith('ART PROOF'))
+        ),
+      ];
+    });
     if (textosAjenos.length > 0) {
       fail(
         `${etiqueta}: el buffer dibuja texto con fuente del sistema (${textosAjenos.join(', ')}); la huella no sería portable`

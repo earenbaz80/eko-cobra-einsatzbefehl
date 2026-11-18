@@ -417,6 +417,8 @@ export interface EkoE2EHook extends EkoE2EState {
   worldToScreen(x: number, y: number): { x: number; y: number };
   /** FNV-1a del buffer del pase de arte; null si `?art=proof` no pintó nada. */
   artBufferHash(): string | null;
+  /** Tamaño de ese buffer; null mientras el chunk del pase no esté cargado. */
+  artBufferSize(): { readonly width: number; readonly height: number } | null;
 }
 
 export class TacticalEngineCore {
