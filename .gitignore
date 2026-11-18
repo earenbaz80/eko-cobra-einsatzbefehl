@@ -19,4 +19,4 @@ coverage/
 backups/
 
 # Capturas de trabajo del art proof (iteración local, no documentación)
-docs/prueba-arte-*.png
+docs/prueba-*.png
