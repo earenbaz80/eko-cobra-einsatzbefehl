@@ -3,7 +3,7 @@
  *
  * Objetivo: demostrar el mismo juego con arte de píxeles real (tileset + sprites
  * dibujados a mano), sombras proyectadas y un pase de luz suave, renderizado a
- * una resolución interna de 480x270 presentada a la escala de la ventana.
+ * una resolución interna de 640x360 presentada a la escala de la ventana.
  *
  * No toca la simulación: sólo lee el estado que ya existe en el motor.
  * Se activa con `?art=proof`. Opcionales: `&focus=salon` para encuadrar el salón
@@ -44,6 +44,7 @@ export function isArtProofRequested(): boolean {
 export function isIntegerScaleRequested(): boolean {
   return readParams().get('scale') === 'int';
 }
+
 
 function resolveCamera(scene: ArtProofScene): { x: number; y: number } {
   const params = readParams();

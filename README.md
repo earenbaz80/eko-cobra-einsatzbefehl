@@ -98,7 +98,7 @@ La app queda en <http://localhost:3000>.
 
 ## Render de prueba (pixel art)
 
-Con `?art=proof` en la URL el motor dibuja el mismo estado de partida con un arte alternativo experimental —tileset y sprites de píxeles dibujados a mano, sombras de contacto y un pase de luz suave— a una resolución interna de **480×270** que después se presenta escalada, siempre con nearest-neighbor y sin blur. No toca la simulación: sólo lee lo que el motor ya tiene.
+Con `?art=proof` en la URL el motor dibuja el mismo estado de partida con un arte alternativo experimental —tileset y sprites de píxeles dibujados a mano, sombras de contacto y un pase de luz suave— a una resolución interna de **640×360** que después se presenta escalada, siempre con nearest-neighbor y sin blur. No toca la simulación: sólo lee lo que el motor ya tiene.
 
 | Parámetro | Efecto |
 |---|---|
@@ -106,11 +106,11 @@ Con `?art=proof` en la URL el motor dibuja el mismo estado de partida con un art
 | `&focus=salon` | Encuadra el salón del chalet alpino en vez de seguir a la cámara. |
 | `&scale=int` | Fuerza escala entera, para capturas sin remuestreo. |
 
-La escala sale del menor de los dos ajustes a la ventana (`ancho/480` y `alto/270`). Sin `scale=int` ese factor se aplica tal cual —2,67 en un panel de 1280×720—, así que el arte ocupa toda la ventana pero cada píxel de arte mide una fracción de píxel de pantalla. Con `&scale=int` se usa el **entero más cercano** (`Math.round`) en lugar del piso: el arte nunca queda diminuto aunque sobre espacio, y cuando el entero elegido no cabe el desborde se recorta por igual a los lados, de modo que la zona central no se mueve. Un panel de 1280×720 pasa de ×2,67 a ×3: el buffer crece a 1440×810 y se recortan 80 px por lado y 45 arriba y abajo. Un panel casi cuadrado de 953×935, con ajuste 1,99, sube a ×2 en vez de caer a ×1.
+La escala sale del menor de los dos ajustes a la ventana (`ancho/640` y `alto/360`). Sin `scale=int` ese factor se aplica tal cual —2,14 en un panel de 1370×771—, así que el arte ocupa toda la ventana pero cada píxel de arte mide una fracción de píxel de pantalla. Con `&scale=int` se usa el **entero más cercano** (`Math.round`) en lugar del piso: el arte nunca queda diminuto aunque sobre espacio, y cuando el entero elegido no cabe el desborde se recorta por igual a los lados, de modo que la zona central no se mueve. Un panel de 1370×771 pasa de ×2,14 a ×2: el buffer mide 1280×720 y quedan 45 px de banda a cada lado y 25 arriba y abajo. Un panel de 1250×800, con ajuste 1,95, sube a ×2 en vez de caer a ×1.
 
 ![Comparativa de la escala forzada frente a la fraccionaria](docs/art-proof-comparativa.png)
 
-La etiqueta de la esquina inferior izquierda indica la resolución y el factor en uso (`ART PROOF · 480×270 ×3 · APARTMENT`) y se mantiene dentro del panel aunque el arte se recorte.
+La etiqueta de la esquina inferior izquierda indica la resolución y el factor en uso (`ART PROOF · 640×360 ×2 · APARTMENT`) y se mantiene dentro del panel aunque el arte se recorte.
 
 ## Tests y CI
 

@@ -9,8 +9,11 @@
 
 import { hash2 } from './bitmap';
 
-export const BUFFER_W = 480;
-export const BUFFER_H = 270;
+// 640x360: el encaje entero cae en ×2 sobre los paneles 16:9 habituales
+// (1280x800 deja 40 px de banda arriba y abajo) y muestra 640x360 unidades de
+// mundo, 1,78x el área de 480x270, con el actor en 96 px de pantalla en vez de 144.
+export const BUFFER_W = 640;
+export const BUFFER_H = 360;
 
 export function present(
   target: CanvasRenderingContext2D,
@@ -32,7 +35,7 @@ export function present(
   const oy = Math.floor((canvas.height - drawH) / 2);
   target.drawImage(source, ox, oy, drawW, drawH);
 
-  // Viñeta y grano a resolución de pantalla: dentro del buffer de 480x270 el
+  // Viñeta y grano a resolución de pantalla: dentro del buffer de 640x360 el
   // reescalado los convertiría en bloques de arte.
   target.save();
   target.beginPath();

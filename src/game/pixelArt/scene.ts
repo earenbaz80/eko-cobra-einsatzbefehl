@@ -981,7 +981,7 @@ function chargeAnchor(scene: PixelScene, target: ChargeTarget): ChargeAnchor {
 /* Plantado de C4                                                      */
 /* ------------------------------------------------------------------ */
 
-// Texto de 3x5 píxeles: a 480x270 una fuente del sistema se ve sucia y no
+// Texto de 3x5 píxeles: en el buffer una fuente del sistema se ve sucia y no
 // sobrevive al reescalado.
 const PIXEL_GLYPHS: Record<string, string[]> = {
   '0': ['111', '101', '101', '101', '111'],
