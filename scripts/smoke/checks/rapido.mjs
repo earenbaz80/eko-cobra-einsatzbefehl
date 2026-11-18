@@ -1,13 +1,20 @@
 /**
- * Perfil rápido para pull requests: canvas, Misión 1 y transiciones.
+ * Perfil rápido para pull requests: canvas, Misión 1, transiciones y peso de arranque.
  *
- * No sustituye al smoke completo: acorta el feedback de PR con una sola carga,
- * una misión, las órdenes de Kobra 2 y las transiciones de estado que la UI usa de verdad. El smoke
- * completo sigue siendo el que valida misiones densas, móvil, persistencia,
- * metadatos, pesos y rendimiento antes de publicar.
+ * No sustituye al smoke completo: acorta el feedback de PR con una carga medida
+ * para el presupuesto de arranque, una misión, las órdenes de Kobra 2 y las
+ * transiciones de estado que la UI usa de verdad. El smoke completo sigue siendo
+ * el que valida misiones densas, móvil, persistencia, metadatos, los demás pesos
+ * y rendimiento antes de publicar.
+ *
+ * El peso de arranque se mide acá y no sólo en el completo porque es el presupuesto
+ * que una PR puede romper sin tocar un solo número: partir un chunk o montar una
+ * vista desde el título no mueve `entradaJs` ni la suma de `dist/`, pero suma en
+ * lo que cada jugador descarga antes de poder jugar.
  */
 import { fail, fallos } from '../informe.mjs';
 import { estadisticasCanvas } from '../canvas.mjs';
+import { comprobarPesoDeArranque } from './entrega.mjs';
 import { comprobarOrdenesEscuadron } from './ordenes.mjs';
 import { comprobarTransiciones, esperarEstado } from './transiciones.mjs';
 
@@ -43,6 +50,9 @@ async function comprobarCanvasMision1(page) {
 export async function comprobarRapido(page, { url }) {
   const fallosAntes = fallos.length;
   await page.bringToFront();
+  // Primero la carga limpia: es la única que mide el arranque sin estado previo ni
+  // caché de una misión ya jugada.
+  await comprobarPesoDeArranque(page, url);
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForSelector('canvas', { timeout: 20000 });
   await esperarEstado(page, 'TITLE');

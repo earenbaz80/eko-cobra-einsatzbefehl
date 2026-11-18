@@ -22,7 +22,7 @@
  *   smoke/checks/misiones.mjs    las siete misiones arrancan y pintan escena
  *   smoke/checks/escritorio.mjs  partida, canvas, metadatos, manifest, iconos y favicon
  *   smoke/checks/ordenes.mjs     ejecución real de brecha, sonda y HOLD de Kobra 2
- *   smoke/checks/rapido.mjs      perfil de PR: canvas, Misión 1 y transiciones
+ *   smoke/checks/rapido.mjs      perfil de PR: peso de arranque, canvas, Misión 1 y transiciones
  *   smoke/checks/transiciones.mjs pausa, reanudación y vuelta al título (rápido y completo)
  *   smoke/checks/persistencia.mjs mover, autoguardar, recargar y reanudar sin reiniciar
  *   smoke/checks/rendimiento.mjs p50/p95 de frame time en escritorio y móvil emulado
@@ -32,7 +32,7 @@
  *
  * Perfiles:
  *   npm run smoke        cobertura completa (main, nightly y deploy)
- *   npm run smoke:quick  feedback de PR: canvas, Misión 1 y transiciones
+ *   npm run smoke:quick  feedback de PR: peso de arranque, canvas, Misión 1 y transiciones
  *
  * La aleatoriedad se fija con mulberry32 antes de cargar la app. La semilla por
  * defecto es 0xE2E0 y `SMOKE_SEED` permite repetir una pasada concreta.
@@ -137,6 +137,6 @@ if (fallos.length) {
   process.exit(1);
 }
 const cobertura = ES_RAPIDO
-  ? 'perfil rápido: canvas, Misión 1, transiciones y art proof'
+  ? 'perfil rápido: peso de arranque, canvas, Misión 1, transiciones y art proof'
   : 'cobertura completa: misiones, móvil, persistencia, metadatos y rendimiento';
 console.log(`\n✓ Prueba de humo correcta${ES_REMOTO ? ' (URL publicada)' : ''}: ${cobertura}.`);

@@ -84,8 +84,11 @@ async function comprobarPublicado(url) {
  * Timing: un recurso de otro origen sin `Timing-Allow-Origin` —el CSS de Google
  * Fonts, sin ir más lejos— reporta 0 y su peso desaparecía de la cuenta. Las
  * imágenes y las fuentes quedan fuera a propósito: cuentan JS, CSS y documento.
+ *
+ * La comparten los dos perfiles: es el único tope que ningún perfil puede dejar
+ * de vigilar, porque un chunk reacomodado no cambia `entradaJs` pero sí este peso.
  */
-async function comprobarPesoDeArranque(page, url) {
+export async function comprobarPesoDeArranque(page, url) {
   const capturadas = [];
   const tipos = new Set(['script', 'stylesheet', 'document']);
   const capturar = (respuesta) => {

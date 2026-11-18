@@ -62,7 +62,7 @@ Cada escenario tiene su layout en un módulo propio: `grazMap.ts`, `stationMap.t
 - Modales con `React.lazy` + `Suspense` (chunks separados).
 - Modo de baja calidad automático cuando el frame supera ~33 ms.
 - El canvas mide el coste del render y lo comunica al motor.
-- Presupuestos vigilados por la prueba de humo (tope / medido hoy): JS de entrada 490 / 451 KiB, `dist/` 1725 / 1676 KiB, peso de arranque 850 / 825 KiB.
+- Presupuestos vigilados por la prueba de humo (tope / medido hoy): JS de entrada 490 / 451 KiB, `dist/` 1725 / 1676 KiB, peso de arranque 850 / 825 KiB. El peso de arranque lo vigilan los dos perfiles (rápido y completo); los demás, sólo el completo.
 
 ## Accesibilidad y seguridad
 
@@ -81,7 +81,7 @@ Cada escenario tiene su layout en un módulo propio: `grazMap.ts`, `stationMap.t
 | `npm run test` | Unidad (Vitest). |
 | `npm run build` | Build de producción. |
 | `npm run smoke` | Build servido como en Pages: cobertura completa (misiones, móvil, persistencia, pesos y frame time). |
-| `npm run smoke:quick` | Perfil rápido de PR: canvas, Misión 1 y transiciones de estado. |
+| `npm run smoke:quick` | Perfil rápido de PR: canvas, Misión 1, transiciones de estado y peso de arranque. |
 | `npm run verify` | Las cuatro anteriores en orden; usa el smoke completo. |
 
 La prueba de humo sale del CI con `VITE_BASE_PATH=/eko-cobra-einsatzbefehl/`; en local
