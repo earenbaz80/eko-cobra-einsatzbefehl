@@ -507,11 +507,56 @@ function drawFloors(ctx: CanvasRenderingContext2D, scene: ArtProofScene, view: {
   }
 }
 
+/**
+ * Quemadura en planta: hollín translúcido, borde raído y núcleo de carbón. Sin
+ * agujeros ni volumen: todo se apoya en el piso y deja ver la textura debajo.
+ */
+function drawScorch(ctx: CanvasRenderingContext2D, decal: FloorDecal) {
+  const rx = decal.radius;
+  const ry = rx * decal.aspect;
+  // Cuatro lóbulos tomados de la posición: el clúster del C4 no repite mancha.
+  ctx.fillStyle = decal.color;
+  ctx.globalAlpha = decal.alpha * 0.4;
+  for (let i = 0; i < 4; i++) {
+    const seed = hash2(decal.x + i * 5.7, decal.y - i * 3.3);
+    const lobe = 0.55 + seed * 0.45;
+    ctx.beginPath();
+    ctx.ellipse(
+      (seed - 0.5) * rx,
+      (hash2(seed, i * 2.1) - 0.5) * ry,
+      rx * lobe,
+      ry * lobe,
+      0,
+      0,
+      Math.PI * 2
+    );
+    ctx.fill();
+  }
+  // Carbón: un núcleo más opaco y sin brillo, para que lea quemado y no sucio.
+  ctx.fillStyle = '#0B1220';
+  ctx.globalAlpha = decal.alpha * 0.55;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, rx * 0.55, ry * 0.55, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Brasas apagadas: dos píxeles cálidos en el borde, nunca un anillo.
+  ctx.fillStyle = '#92400E';
+  ctx.globalAlpha = decal.alpha * 0.7;
+  for (let i = 0; i < 2; i++) {
+    const seed = hash2(decal.y + i * 2.9, decal.x - i * 6.1);
+    ctx.fillRect(
+      Math.round(Math.cos(seed * Math.PI * 2) * rx * 0.9),
+      Math.round(Math.sin(seed * Math.PI * 2) * ry * 0.9),
+      1,
+      1
+    );
+  }
+}
+
 function drawFloorDecals(ctx: CanvasRenderingContext2D, decals: FloorDecal[], solids: SolidRect[]) {
   for (const decal of decals) {
     const isCasing = decal.type === 'CASING';
-    // Sangre y otros decals quedan fuera del proof táctico.
-    if (!isCasing && decal.type !== 'DEBRIS') continue;
+    // Sangre y otros tipos quedan fuera del proof táctico.
+    if (!isCasing && decal.type !== 'DEBRIS' && decal.type !== 'SCORCH') continue;
 
     const halfHeight = decal.radius * decal.aspect;
     const position = nudgeOutOfSolids(decal.x, decal.y, solids, decal.radius + 1);
@@ -520,7 +565,9 @@ function drawFloorDecals(ctx: CanvasRenderingContext2D, decals: FloorDecal[], so
     ctx.rotate(decal.angle);
     ctx.globalAlpha = decal.alpha;
     ctx.fillStyle = decal.color;
-    if (isCasing) {
+    if (decal.type === 'SCORCH') {
+      drawScorch(ctx, decal);
+    } else if (isCasing) {
       // Casquillo dorado con brillo en un extremo
       ctx.fillRect(-decal.radius, -halfHeight, decal.radius * 2, halfHeight * 2);
       ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
