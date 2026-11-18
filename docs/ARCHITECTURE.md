@@ -36,6 +36,8 @@ no importan React salvo los tipos.
 | `pixelSprites.ts` | Sprites procedurales en canvas. |
 | `asphaltTexture.ts` | Texturas procedurales de asfalto. |
 | `battlemapAssets.ts` | Catálogo de assets de escenario. |
+| `artDirection.ts` | Lenguaje visual compartido: tokens RGB semánticos (aliado, amenaza, advertencia) que se componen con `rgba()`/`rgb()` sin duplicar hex. |
+| `artProof.ts` | Render alternativo experimental (`?art=proof`): el mismo estado del motor a 480×270 con tileset de píxeles y presentación nearest-neighbor a la escala de la ventana. No toca la simulación. |
 
 ## Mapas
 
