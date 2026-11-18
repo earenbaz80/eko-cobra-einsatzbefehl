@@ -1,4 +1,5 @@
 import type { EkoE2EHook, TacticalEngineCore } from './TacticalEngineCore';
+import { artProofBufferHash } from './artProof';
 
 declare global {
   interface Window {
@@ -39,6 +40,7 @@ export function instalarHookE2E(engine: TacticalEngineCore): () => void {
     },
     snapshot: () => engine.snapshotE2E(),
     worldToScreen: (x: number, y: number) => engine.worldToScreen(x, y),
+    artBufferHash: () => artProofBufferHash(),
   });
 
   Object.defineProperty(window, '__eko', {

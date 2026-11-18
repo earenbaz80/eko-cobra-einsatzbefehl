@@ -45,6 +45,22 @@ export function isIntegerScaleRequested(): boolean {
   return readParams().get('scale') === 'int';
 }
 
+/**
+ * FNV-1a de 32 bits sobre los píxeles del buffer, para la regresión visual del
+ * humo. Hashea el arte y no la presentación: así el rótulo, la viñeta y el grano
+ * de pantalla no dependen de la tipografía instalada. Devuelve null mientras el
+ * pase no haya pintado ningún cuadro.
+ */
+export function artProofBufferHash(): string | null {
+  if (!bufferCtx) return null;
+  const { data } = bufferCtx.getImageData(0, 0, BUFFER_W, BUFFER_H);
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < data.length; i++) {
+    hash ^= data[i];
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
 
 function resolveCamera(scene: ArtProofScene): { x: number; y: number } {
   const params = readParams();

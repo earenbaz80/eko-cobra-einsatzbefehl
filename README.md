@@ -112,6 +112,8 @@ La escala sale del menor de los dos ajustes a la ventana (`ancho/640` y `alto/36
 
 La etiqueta de la esquina inferior izquierda indica la resolución y el factor en uso (`ART PROOF · 640×360 ×2 · APARTMENT`) y se mantiene dentro del panel aunque el arte se recorte.
 
+La prueba de humo hashea el buffer con FNV-1a en cinco escenarios —salón, Tirol, estación, estación nocturna y Schwechat— con la semilla fija y el reloj congelado, y compara contra las huellas de `scripts/smoke/huellas-arte.json`. Cuando el arte cambie a propósito, se regeneran con `ART_PROOF_HUELLAS=1 npm run smoke:quick`, se revisa el diff de las huellas y se commitean junto con el cambio.
+
 ## Tests y CI
 
 La lógica que no depende del canvas vive en módulos puros y está cubierta por **193 tests**:

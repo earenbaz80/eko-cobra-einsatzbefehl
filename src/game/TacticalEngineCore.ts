@@ -414,6 +414,8 @@ export interface EkoE2EHook extends EkoE2EState {
   snapshot(): EkoE2EState;
   /** Coordenadas CSS para pulsar una posición del mundo desde Playwright. */
   worldToScreen(x: number, y: number): { x: number; y: number };
+  /** FNV-1a del buffer del pase de arte; null si `?art=proof` no pintó nada. */
+  artBufferHash(): string | null;
 }
 
 export class TacticalEngineCore {
