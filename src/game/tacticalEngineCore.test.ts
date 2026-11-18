@@ -890,4 +890,16 @@ describe('secuencia de plantado y despeje de C4', () => {
     expect(trigger).toHaveBeenCalledTimes(1);
     expect(engine.c4.charges).toHaveLength(0);
   });
+
+  it('reanuda el inventario y las cargas armadas desde el guardado', () => {
+    const engine = createEngine({ activeC4Charges: [makeCharge()], c4Count: 1 });
+    const guardado = engine.capturarC4();
+    const reanudado = createEngine({ activeC4Charges: [] });
+
+    reanudado.restaurarC4(guardado);
+
+    expect(reanudado.c4.count).toBe(1);
+    expect(reanudado.c4.charges).toHaveLength(1);
+    expect(reanudado.c4.charges[0]).toMatchObject({ phase: 'ARMED', targetName: mainDoor.name });
+  });
 });

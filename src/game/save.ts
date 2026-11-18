@@ -11,9 +11,10 @@
  */
 
 import type { SnapshotSimulacion } from './simulation';
+import type { C4SaveState } from './c4Charges';
 
 /** Versión actual del esquema de guardado. Cámbiala al modificar la forma del estado. */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /** Clave usada en `localStorage` para la partida en curso. */
 export const SAVE_KEY = 'eko_cobra_partida_en_curso';
@@ -33,6 +34,8 @@ export interface SaveState {
   tick?: number;
   /** Posición, mundo y puertas de la simulación para reanudar sin reiniciar. */
   simulacion?: SnapshotSimulacion;
+  /** Inventario, cargas armadas y plantado en curso del C4. */
+  c4?: C4SaveState;
   /** Cualquier dato adicional de la partida. */
   [key: string]: unknown;
 }

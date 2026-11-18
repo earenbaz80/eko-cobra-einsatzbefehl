@@ -51,7 +51,8 @@ Cada escenario tiene su layout en un módulo propio: `grazMap.ts`, `stationMap.t
 - Partida en curso: `localStorage['eko_cobra_partida_en_curso']` con `version` de esquema.
   `App.tsx` la guarda cada 5 s y en `pagehide`, `beforeunload` y `visibilitychange`;
   al reanudar, `App.tsx` restaura marcador, tiempo y tick y `TacticalEngine.restaurarSimulacion()`
-  reconstruye la simulación (posición, paredes, puertas y muebles) sobre el escenario.
+  reconstruye la simulación (posición, paredes, puertas y muebles) sobre el escenario;
+  `restaurarC4()` recupera además el inventario, las cargas armadas y el plantado en curso.
 - Ajustes (subtítulos, daltonismo, teclas): claves propias de `localStorage`; las teclas
   se leen de `eko_cobra_keybinds` y pasan por `sanitizeKeybinds()`.
 - `save.ts` acepta un `StorageLike` inyectable: los tests usan `createMemoryStorage()`.

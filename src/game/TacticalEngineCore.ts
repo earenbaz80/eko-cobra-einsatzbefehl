@@ -57,7 +57,8 @@ import {
 import {
   C4ChargeSystem,
   C4_SAFE_RADIUS,
-  type C4Dependencies
+  type C4Dependencies,
+  type C4SaveState
 } from './c4Charges';
 import {
   chooseSquadSteeringAngle,
@@ -9208,6 +9209,20 @@ public nightMode: boolean = false;
         muebles: this.furniture.map((mueble) => ({ ...mueble })),
       },
     };
+  }
+
+  /** Inventario, cargas armadas y plantado en curso para el guardado. */
+  public capturarC4(): C4SaveState {
+    return this.c4.snapshot();
+  }
+
+  /**
+   * Devuelve el C4 guardado al subsistema. Se llama después de reconstruir el
+   * escenario: el inventario y las cargas no viven en la simulación.
+   */
+  public restaurarC4(saved: C4SaveState | undefined) {
+    this.c4.restore(saved);
+    this.emitHudSnapshot();
   }
 
   /** Reanuda la simulación guardada sin reconstruir el escenario. */

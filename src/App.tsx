@@ -583,6 +583,9 @@ export default function App() {
       tick: typeof saved.tick === 'number' ? saved.tick : undefined,
     });
     if (saved.simulacion) engineRef.current?.restaurarSimulacion(saved.simulacion);
+    // El C4 no vive en la simulación: inventario, cargas armadas y plantado en
+    // curso se devuelven aparte, con el escenario ya reconstruido.
+    engineRef.current?.restaurarC4(saved.c4);
     setHasSavedGame(false);
   };
 
@@ -839,6 +842,7 @@ export default function App() {
         score: ultimo?.score ?? 0,
         tick: eng.ticks,
         simulacion: eng.capturarSimulacion() ?? undefined,
+        c4: eng.capturarC4(),
       });
       if (guardado && !silent) setHasSavedGame(true);
     };

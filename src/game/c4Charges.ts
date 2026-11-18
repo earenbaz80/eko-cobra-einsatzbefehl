@@ -19,6 +19,13 @@ export interface C4PlantingState extends C4PlantTarget {
   maxProgress: number;
 }
 
+/** Estado serializable del subsistema C4 para reanudar una partida guardada. */
+export interface C4SaveState {
+  count: number;
+  charges: ActiveC4Charge[];
+  planting?: C4PlantingState;
+}
+
 /**
  * Dependencias externas del subsistema: mundo, radio, audio, HUD y resolución
  * de la explosión. La lógica de plantado y detonación vive en este módulo.
@@ -176,5 +183,52 @@ export class C4ChargeSystem {
     }
     this.charges = [];
     deps.emitHudSnapshot();
+  }
+
+  /** Copia inventario, cargas y plantado a un objeto plano para el guardado. */
+  snapshot(): C4SaveState {
+    return {
+      count: this.count,
+      charges: this.charges.map((charge) => ({ ...charge })),
+      planting: this.planting ? { ...this.planting } : undefined,
+    };
+  }
+
+  /**
+   * Reconstruye el subsistema desde el guardado. Los datos vienen de
+   * `localStorage`, así que se validan y se copian a objetos propios. Una carga
+   * restaurada vuelve armada y sin permiso de detonación: el radio seguro lo
+   * vuelve a comprobar el motor en cada tick.
+   */
+  restore(saved: C4SaveState | undefined): void {
+    this.planting = undefined;
+    this.charges = [];
+    if (!saved || typeof saved !== 'object') return;
+
+    if (Number.isFinite(saved.count)) this.count = Math.max(0, Math.floor(saved.count));
+    const charges = Array.isArray(saved.charges) ? saved.charges : [];
+    this.charges = charges
+      .filter((charge) => Number.isFinite(charge?.x) && Number.isFinite(charge?.y))
+      .map(
+        (charge): ActiveC4Charge => ({
+          ...charge,
+          remainingSeconds: 0,
+          maxSeconds: 0,
+          phase: 'ARMED',
+          safeToDetonate: false,
+        })
+      );
+
+    const planting = saved.planting;
+    if (!planting || !Number.isFinite(planting.x) || !Number.isFinite(planting.y)) return;
+    const maxProgress =
+      Number.isFinite(planting.maxProgress) && planting.maxProgress > 0
+        ? planting.maxProgress
+        : C4_PLANT_SECONDS;
+    this.planting = {
+      ...planting,
+      maxProgress,
+      progress: Math.min(Math.max(0, planting.progress || 0), maxProgress),
+    };
   }
 }
