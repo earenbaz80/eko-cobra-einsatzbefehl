@@ -5788,10 +5788,11 @@ public nightMode: boolean = false;
       actor.inCover = inCover;
     }
 
-    const viewW = this.viewWidth;
-    const viewH = this.viewHeight;
-    this.mouseWorld.x = (this.mouseScreen.x - viewW * 0.5) / CAMERA_ZOOM + this.camX;
-    this.mouseWorld.y = (this.mouseScreen.y - viewH * 0.5) / CAMERA_ZOOM + this.camY;
+    // El cursor se resuelve con la misma conversión que usan los handlers de
+    // ratón, para que apuntado, arrastre y clics no puedan encuadrar distinto.
+    const pointer = this.screenToWorld(this.mouseScreen.x, this.mouseScreen.y);
+    this.mouseWorld.x = pointer.x;
+    this.mouseWorld.y = pointer.y;
 
     // 1. Update Player Movement, Limb Slowdown, Untreated Bleeding & Aim Tremor
     const playerBh = this.ensureBodyHealth(player);
@@ -9250,19 +9251,13 @@ public nightMode: boolean = false;
   }
 
   public screenToWorld(clientX: number, clientY: number): { x: number; y: number } {
-    const cx = this.viewWidth * 0.5;
-    const cy = this.viewHeight * 0.5;
-    const worldX = (clientX - cx) / CAMERA_ZOOM + this.camX;
-    const worldY = (clientY - cy) / CAMERA_ZOOM + this.camY;
-    return { x: worldX, y: worldY };
+    const { x: cx, y: cy, zoom } = this.framing;
+    return { x: (clientX - cx) / zoom + this.camX, y: (clientY - cy) / zoom + this.camY };
   }
 
   public worldToScreen(wx: number, wy: number): { x: number; y: number } {
-    const cx = this.viewWidth * 0.5;
-    const cy = this.viewHeight * 0.5;
-    const sx = (wx - this.camX) * CAMERA_ZOOM + cx;
-    const sy = (wy - this.camY) * CAMERA_ZOOM + cy;
-    return { x: sx, y: sy };
+    const { x: cx, y: cy, zoom } = this.framing;
+    return { x: (wx - this.camX) * zoom + cx, y: (wy - this.camY) * zoom + cy };
   }
 
   public getInteractiveTargetAt(
@@ -9312,6 +9307,17 @@ public nightMode: boolean = false;
 
   protected get viewHeight(): number {
     return this.canvas.height / this.renderScale;
+  }
+
+  /**
+   * Encuadre vigente: dónde cae la cámara en píxeles CSS y cuántos píxeles de
+   * pantalla mide una unidad de mundo. `screenToWorld` y `worldToScreen` leen
+   * sólo de aquí, así que un canal que presente otro buffer (otra escala, con
+   * letterbox) puede sobrescribir este getter y el ratón sigue apuntando al
+   * mismo punto del mundo sin tocar los handlers.
+   */
+  protected get framing(): { x: number; y: number; zoom: number } {
+    return { x: this.viewWidth * 0.5, y: this.viewHeight * 0.5, zoom: CAMERA_ZOOM };
   }
 
   public setHudOpacity(opacityRatio: number) {
