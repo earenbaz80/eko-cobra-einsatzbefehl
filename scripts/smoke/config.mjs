@@ -72,12 +72,12 @@ export const PRESUPUESTO = {
   tarjetaSocial: 150 * 1024,
   dist: 1725 * 1024,
   // `arranque` no es el peso de dist/ sino lo que el navegador baja antes de poder
-  // jugar: documento, JS y CSS. Medido da 860 KiB (entry 451, vendor 206, CSS 72,
-  // battlemap 60, TacticalPadModal 52, ui 18, fuentes de Google 12, runtime 1). Es
-  // el número que no se puede maquillar partiendo chunks: el jugador los descarga
-  // igual. El margen es ~4,7 % en vez del 3 % de los otros topes porque los 12 KiB
-  // de CSS de Google Fonts no son nuestros y pueden crecer sin que toquemos nada.
-  arranque: 900 * 1024,
+  // jugar: documento, JS y CSS. Medido da 825 KiB (entry 451, vendor 206, CSS 72,
+  // battlemap 60, ui 18, CSS de Google Fonts 12, documento 5, runtime 1). Es el
+  // número que no se puede maquillar partiendo chunks: el jugador los descarga
+  // igual. El margen de ~3 % cubre que ese CSS de fuentes lo sirve Google y no
+  // nosotros, así que puede cambiar de tamaño o de variante sin aviso.
+  arranque: 850 * 1024,
 };
 
 /** Tipos que usa el servidor local para imitar a GitHub Pages. */

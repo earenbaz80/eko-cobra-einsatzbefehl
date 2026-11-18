@@ -80,21 +80,44 @@ async function comprobarPublicado(url) {
  * chunks propios). Esta suma es la que no se puede maquillar reacomodando
  * archivos, así que es la que mide el costo real de abrir el juego.
  *
- * Se leen `encodedBodySize` del navegador, que es lo que viajó por la red. Las
- * fuentes y las imágenes quedan fuera: cuentan JS, CSS y el documento.
+ * Se suman las respuestas que ve el navegador y no `encodedBodySize` de Resource
+ * Timing: un recurso de otro origen sin `Timing-Allow-Origin` —el CSS de Google
+ * Fonts, sin ir más lejos— reporta 0 y su peso desaparecía de la cuenta. Las
+ * imágenes y las fuentes quedan fuera a propósito: cuentan JS, CSS y documento.
  */
 async function comprobarPesoDeArranque(page, url) {
-  await page.goto(url, { waitUntil: 'load' });
-  await page.waitForTimeout(300);
-  const recursos = await page.evaluate(() =>
-    performance
-      .getEntriesByType('resource')
-      .filter((entrada) => entrada.initiatorType === 'script' || entrada.initiatorType === 'link')
-      .map((entrada) => ({
-        nombre: entrada.name.split('/').pop(),
-        bytes: entrada.encodedBodySize,
-      }))
-  );
+  const capturadas = [];
+  const tipos = new Set(['script', 'stylesheet', 'document']);
+  const capturar = (respuesta) => {
+    if (tipos.has(respuesta.request().resourceType())) capturadas.push(respuesta);
+  };
+
+  page.on('response', capturar);
+  try {
+    await page.goto(url, { waitUntil: 'load' });
+    await page.waitForTimeout(300);
+  } finally {
+    page.off('response', capturar);
+  }
+
+  const recursos = [];
+  for (const respuesta of capturadas) {
+    const destino = respuesta.url();
+    let bytes = null;
+    try {
+      bytes = (await respuesta.body()).length;
+    } catch {
+      const declarado = Number(respuesta.headers()['content-length']);
+      bytes = Number.isFinite(declarado) && declarado > 0 ? declarado : null;
+    }
+    if (bytes === null) {
+      // Un 4xx/5xx ya lo reporta `badRequests`; acá sólo interesa que la suma no
+      // se quede corta sin decirlo.
+      if (respuesta.status() < 400) fail(`arranque: no se pudo pesar ${destino.split('/').pop()}`);
+      continue;
+    }
+    recursos.push({ nombre: destino.split('/').pop(), bytes });
+  }
 
   const total = recursos.reduce((suma, recurso) => suma + recurso.bytes, 0);
   // Una medición vacía pasaría cualquier tope: si no hay recursos o no viajó
