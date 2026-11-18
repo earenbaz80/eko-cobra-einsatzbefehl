@@ -1183,8 +1183,9 @@ function drawDoor(ctx: CanvasRenderingContext2D, door: DoorEntity) {
   ctx.fillRect(0, 2, leafLength, 1);
 
   // Pomo y cerradura: marcas de canto, no objetos de una cara vertical. El
-  // acero separa el pomo del amarillo del C4, que se planta en la misma hoja.
-  ctx.fillStyle = door.isLocked ? '#B4751F' : '#94A3B8';
+  // acero separa el pomo del amarillo del C4, que se planta en la misma hoja;
+  // el candado ya lo dice la pestaña ámbar, sin un segundo marrón casi igual.
+  ctx.fillStyle = '#94A3B8';
   ctx.fillRect(Math.max(1, leafLength - 4), -1, 2, 2);
   if (door.isLocked) {
     ctx.fillStyle = 'rgba(217, 119, 6, 0.85)';
@@ -1222,8 +1223,12 @@ interface ChargeTarget {
 const DOOR_HALF = 3;
 const WINDOW_HALF = 3.5;
 
-/** Media anchura del estuche en planta, medida desde el anclaje. */
-const CHARGE_HALF_WIDTH = 4.6;
+/**
+ * Estuche del C4 en coordenadas del anclaje: la cara que lo recibe queda en
+ * y=0, así que su borde de fuera está en Y y el estuche se mete 1.4 px en el
+ * listón. La sombra, las marcas de destino y la placa salen de esta caja.
+ */
+const CHARGE_BOX = { x: -4.6, y: -7.2, w: 9.2, h: 8.6 };
 /** Aire que se deja entre el estuche (o el vano) y la placa de progreso. */
 const PLATE_GAP = 2;
 
@@ -1236,53 +1241,51 @@ interface ChargeAnchor {
 }
 
 /**
- * Dónde se apoya la carga: al costado del listón (en planta la hoja o el vano
- * son un canto estrecho), sobre la cara que mira al operador que la colocó.
- * Si no reconoce su puerta o ventana conserva el punto que da el motor.
+ * Cara del listón que recibe la carga. `angle` es el del listón y `half` su
+ * medio grosor; `toward` dice de qué lado está el operador y elige el canto.
  */
-function chargeAnchor(
-  scene: ArtProofScene,
-  target: ChargeTarget
+function faceAnchor(
+  mx: number,
+  my: number,
+  angle: number,
+  half: number,
+  toward?: { x: number; y: number }
 ): ChargeAnchor {
-  const face = target.face;
+  const nx = Math.sin(angle);
+  const ny = -Math.cos(angle);
+  // El estuche gira con la hoja; si ese canto no mira al operador se gira media
+  // vuelta, y así el detonador queda de su lado.
+  const finalAngle = toward && toward.x * nx + toward.y * ny < 0 ? angle + Math.PI : angle;
+  const ox = Math.sin(finalAngle);
+  const oy = -Math.cos(finalAngle);
+  return { x: mx + ox * half, y: my + oy * half, angle: finalAngle, half };
+}
 
-  // La normal base es el lado "arriba" local del listón; el operador elige el
-  // canto y el anclaje cae sobre esa cara, no encima del canto.
-  const sideAnchor = (mx: number, my: number, angle: number, half: number) => {
-    const nx = Math.sin(angle);
-    const ny = -Math.cos(angle);
-    const finalAngle = face && face.x * nx + face.y * ny < 0 ? angle + Math.PI : angle;
-    const ox = Math.sin(finalAngle);
-    const oy = -Math.cos(finalAngle);
-    return { x: mx + ox * half, y: my + oy * half, angle: finalAngle, half };
-  };
-
+/**
+ * Dónde se apoya la carga: sobre la cara del listón que mira al operador, no
+ * encima del canto. Si no reconoce su puerta o ventana conserva el punto que
+ * da el motor.
+ */
+function chargeAnchor(scene: ArtProofScene, target: ChargeTarget): ChargeAnchor {
   if (target.isWindow) {
     const win = scene.windows.find((item) => item.id === target.windowId);
     if (win) {
+      // Sin operador registrado, la carga va del lado interior: la única cara
+      // del vano que ve el jugador desde dentro.
+      const toward = target.face ?? { x: Math.cos(win.normalAngle), y: Math.sin(win.normalAngle) };
       const angle = Math.atan2(win.y2 - win.y1, win.x2 - win.x1);
       const mx = (win.x1 + win.x2) / 2;
       const my = (win.y1 + win.y2) / 2;
-      if (!face) {
-        // Sin operador registrado, el estuche va del lado interior: la única
-        // cara del vano que ve el jugador desde dentro.
-        const ix = Math.cos(win.normalAngle);
-        const iy = Math.sin(win.normalAngle);
-        return {
-          x: mx + ix * WINDOW_HALF,
-          y: my + iy * WINDOW_HALF,
-          angle: Math.atan2(ix, -iy),
-          half: WINDOW_HALF,
-        };
-      }
-      return sideAnchor(mx, my, angle, WINDOW_HALF);
+      return faceAnchor(mx, my, angle, WINDOW_HALF, toward);
     }
   } else {
     const door = scene.doors.find((item) => item.id === target.doorId);
     if (door && !door.isDestroyed) {
       const leaf = doorLeafSegment(door);
       const angle = Math.atan2(leaf.y2 - leaf.y1, leaf.x2 - leaf.x1);
-      return sideAnchor((leaf.x1 + leaf.x2) / 2, (leaf.y1 + leaf.y2) / 2, angle, DOOR_HALF);
+      const mx = (leaf.x1 + leaf.x2) / 2;
+      const my = (leaf.y1 + leaf.y2) / 2;
+      return faceAnchor(mx, my, angle, DOOR_HALF, target.face);
     }
   }
   return { x: target.x, y: target.y, angle: 0, half: DOOR_HALF };
@@ -1353,17 +1356,16 @@ function drawPlantProgress(
   // El -y local del anclaje apunta al operador: ésa es la normal exterior.
   const outwardX = Math.sin(anchor.angle);
   const outwardY = -Math.cos(anchor.angle);
-  // La placa se lee de pie, así que su huella sobre esa normal depende del giro.
-  const plateReach = Math.abs(outwardX) * (width / 2) + Math.abs(outwardY) * (height / 2);
-  // Por delante del vano (su medio grosor) y sin invadir la hoja ni el estuche.
-  const outward = anchor.half + PLATE_GAP + plateReach;
   // Derecha del operador en pantalla: (-dy, dx) de su mirada, que va hacia el
   // anclaje en dirección -outward. Queda igual en cualquier puerta o ventana.
   const rightX = outwardY;
   const rightY = -outwardX;
-  // Huella de la placa sobre la tangente: en vertical apoya el alto, no el ancho.
-  const tangentReach = Math.abs(outwardY) * (width / 2) + Math.abs(outwardX) * (height / 2);
-  const lateral = CHARGE_HALF_WIDTH + PLATE_GAP + tangentReach;
+  // Huella de la placa sobre un eje: en vertical apoya el alto, no el ancho.
+  const reach = (ux: number, uy: number) =>
+    Math.abs(ux) * (width / 2) + Math.abs(uy) * (height / 2);
+  // Por delante del vano (su medio grosor) y corrida a un lado del estuche.
+  const outward = anchor.half + PLATE_GAP + reach(outwardX, outwardY);
+  const lateral = CHARGE_BOX.w / 2 + PLATE_GAP + reach(rightX, rightY);
   const x = Math.round(anchor.x + outwardX * outward + rightX * lateral - width / 2);
   const y = Math.round(anchor.y + outwardY * outward + rightY * lateral - height / 2);
 
@@ -1437,13 +1439,15 @@ function drawPlanting(
   ctx.translate(anchor.x, anchor.y);
   ctx.rotate(anchor.angle);
   ctx.fillStyle = 'rgba(239, 68, 68, 0.55)';
-  for (const corner of [
-    { x: -4.7, y: -7.3 },
-    { x: 4.6, y: -7.3 },
-    { x: -4.7, y: 1.5 },
-    { x: 4.6, y: 1.5 },
+  const right = CHARGE_BOX.x + CHARGE_BOX.w;
+  const bottom = CHARGE_BOX.y + CHARGE_BOX.h;
+  for (const [cx, cy] of [
+    [CHARGE_BOX.x, CHARGE_BOX.y],
+    [right, CHARGE_BOX.y],
+    [CHARGE_BOX.x, bottom],
+    [right, bottom],
   ]) {
-    ctx.fillRect(corner.x, corner.y, 1, 1);
+    ctx.fillRect(cx, cy, 1, 1);
   }
   ctx.restore();
 
@@ -1468,7 +1472,7 @@ function drawPlanting(
  */
 function drawCharge(
   ctx: CanvasRenderingContext2D,
-  anchor: { x: number; y: number; angle: number },
+  anchor: ChargeAnchor,
   view: { x0: number; y0: number; x1: number; y1: number },
   time: number
 ) {
@@ -1478,17 +1482,17 @@ function drawCharge(
   ctx.translate(anchor.x, anchor.y);
   ctx.rotate(anchor.angle);
 
-  // Sombra al pie del estuche: cae hacia abajo-derecha en coordenadas del mundo
-  // aunque el estuche gire con la hoja, así que se gira el offset al revés.
-  const cos = Math.cos(anchor.angle);
-  const sin = Math.sin(anchor.angle);
+  // Sombra al pie del estuche: cae hacia abajo-derecha en coordenadas del
+  // mundo, así que el desplazamiento se gira al revés antes de dibujarla.
+  const shadowX = 1.6 * Math.cos(anchor.angle) + 2 * Math.sin(anchor.angle);
+  const shadowY = -1.6 * Math.sin(anchor.angle) + 2 * Math.cos(anchor.angle);
   ctx.fillStyle = 'rgba(0, 0, 0, 0.32)';
-  ctx.fillRect(-4.6 + 1.6 * cos + 2 * sin, -7.2 - 1.6 * sin + 2 * cos, 9.2, 8.6);
+  ctx.fillRect(CHARGE_BOX.x + shadowX, CHARGE_BOX.y + shadowY, CHARGE_BOX.w, CHARGE_BOX.h);
 
   // Cuerpo sobre la cara del listón: el anclaje está en su canto y el estuche
   // se mete 1.4 px en la hoja, así se apoya en la puerta y no flota al lado.
   ctx.fillStyle = '#0B1220';
-  ctx.fillRect(-4.6, -7.2, 9.2, 8.6);
+  ctx.fillRect(CHARGE_BOX.x, CHARGE_BOX.y, CHARGE_BOX.w, CHARGE_BOX.h);
   ctx.fillStyle = '#1E293B';
   ctx.fillRect(-3.9, -6.5, 7.8, 7.4);
   // Dos bloques de explosivo con un hueco en medio: lectura de carga, no caja.
