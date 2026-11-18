@@ -2,6 +2,8 @@ import type { ActiveC4Charge, ActorEntity, Vec2 } from './types';
 
 export const C4_PLANT_SECONDS = 1.7;
 export const C4_SAFE_RADIUS = 190;
+/** Distancia máxima al objetivo que se tolera durante el plantado antes de cancelar. */
+export const C4_CANCEL_DISTANCE = 100;
 
 export interface C4PlantTarget {
   targetName: string;
@@ -114,7 +116,10 @@ export class C4ChargeSystem {
 
     // En la galería de tiro el control [C] coloca la carga de forma remota para
     // poder practicar la secuencia completa sin recorrer el pasillo.
-    if (!deps.isTrainingMode && Math.hypot(player.x - planting.x, player.y - planting.y) > 100) {
+    if (
+      !deps.isTrainingMode &&
+      Math.hypot(player.x - planting.x, player.y - planting.y) > C4_CANCEL_DISTANCE
+    ) {
       this.planting = undefined;
       deps.pushRadio('KOBRA-1', 'C4 cancelada: el operador se alejó antes de terminar la colocación.', 'warn');
       deps.emitHudSnapshot();
