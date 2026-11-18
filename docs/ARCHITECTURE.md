@@ -62,7 +62,7 @@ Cada escenario tiene su layout en un módulo propio: `grazMap.ts`, `stationMap.t
 - Modales con `React.lazy` + `Suspense` (chunks separados).
 - Modo de baja calidad automático cuando el frame supera ~33 ms.
 - El canvas mide el coste del render y lo comunica al motor.
-- Presupuestos vigilados por la prueba de humo: JS de entrada < 490 KiB, `dist/` < 1700 KiB.
+- Presupuestos vigilados por la prueba de humo (tope / medido hoy): JS de entrada 490 / 451 KiB, `dist/` 1725 / 1676 KiB, peso de arranque 850 / 825 KiB.
 
 ## Accesibilidad y seguridad
 
