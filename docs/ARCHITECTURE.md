@@ -36,6 +36,8 @@ no importan React salvo los tipos.
 | `pixelSprites.ts` | Sprites procedurales en canvas. |
 | `asphaltTexture.ts` | Texturas procedurales de asfalto. |
 | `battlemapAssets.ts` | Catálogo de assets de escenario. |
+| `artDirection.ts` | Lenguaje visual compartido: tokens RGB semánticos (aliado, amenaza, advertencia) que se componen con `rgba()`/`rgb()` sin duplicar hex. |
+| `artProof.ts` | Render alternativo experimental (`?art=proof`): el mismo estado del motor a 640×360 con tileset de píxeles y presentación nearest-neighbor a la escala de la ventana. No toca la simulación. |
 
 ## Mapas
 
@@ -49,7 +51,8 @@ Cada escenario tiene su layout en un módulo propio: `grazMap.ts`, `stationMap.t
 - Partida en curso: `localStorage['eko_cobra_partida_en_curso']` con `version` de esquema.
   `App.tsx` la guarda cada 5 s y en `pagehide`, `beforeunload` y `visibilitychange`;
   al reanudar, `App.tsx` restaura marcador, tiempo y tick y `TacticalEngine.restaurarSimulacion()`
-  reconstruye la simulación (posición, paredes, puertas y muebles) sobre el escenario.
+  reconstruye la simulación (posición, paredes, puertas y muebles) sobre el escenario;
+  `restaurarC4()` recupera además el inventario, las cargas armadas y el plantado en curso.
 - Ajustes (subtítulos, daltonismo, teclas): claves propias de `localStorage`; las teclas
   se leen de `eko_cobra_keybinds` y pasan por `sanitizeKeybinds()`.
 - `save.ts` acepta un `StorageLike` inyectable: los tests usan `createMemoryStorage()`.
@@ -59,7 +62,7 @@ Cada escenario tiene su layout en un módulo propio: `grazMap.ts`, `stationMap.t
 - Modales con `React.lazy` + `Suspense` (chunks separados).
 - Modo de baja calidad automático cuando el frame supera ~33 ms.
 - El canvas mide el coste del render y lo comunica al motor.
-- Presupuestos vigilados por la prueba de humo: JS de entrada < 490 KiB, `dist/` < 1700 KiB.
+- Presupuestos vigilados por la prueba de humo (tope / medido hoy): JS de entrada 490 / 451 KiB, `dist/` 1725 / 1676 KiB, peso de arranque 850 / 825 KiB.
 
 ## Accesibilidad y seguridad
 

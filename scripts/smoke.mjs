@@ -27,6 +27,7 @@
  *   smoke/checks/persistencia.mjs mover, autoguardar, recargar y reanudar sin reiniciar
  *   smoke/checks/rendimiento.mjs p50/p95 de frame time en escritorio y móvil emulado
  *   smoke/checks/movil.mjs       audio al primer toque, joystick y franjas del HUD
+ *   smoke/checks/arte.mjs       ?art=proof arranca la misión y pinta escena (rápido y completo)
  * y las piezas comunes en smoke/config, informa, archivos, servidor-local, navegador y canvas.
  *
  * Perfiles:
@@ -55,6 +56,7 @@ import { comprobarRapido } from './smoke/checks/rapido.mjs';
 import { comprobarPersistencia } from './smoke/checks/persistencia.mjs';
 import { comprobarRendimiento } from './smoke/checks/rendimiento.mjs';
 import { comprobarMovil } from './smoke/checks/movil.mjs';
+import { comprobarArtProof } from './smoke/checks/arte.mjs';
 
 const args = process.argv.slice(2);
 const perfil = (
@@ -96,12 +98,13 @@ await arrancarTraza(contextoNavegador);
 // Listas compartidas: las tres secciones apuntan aquí sus fallos de red y consola.
 const badRequests = [];
 const consoleErrors = [];
-const contexto = { url, origin, badRequests, consoleErrors, semilla: SEMILLA_E2E };
+const contexto = { url, origin, page, badRequests, consoleErrors, semilla: SEMILLA_E2E };
 vigilarPagina(page, { origin, badRequests, consoleErrors });
 
 try {
   if (ES_RAPIDO) {
     await comprobarRapido(page, contexto);
+    await comprobarArtProof(page, contexto);
   } else {
     await comprobarEntrega(contexto);
     await comprobarMisiones(page, contexto);
@@ -112,6 +115,8 @@ try {
     // Al final: la recarga y los cinco segundos de autoguardado no deben contaminar
     // la medición de frames, que es la comprobación más sensible al ruido del runner.
     await comprobarPersistencia(page, contexto);
+    // Al final: recarga la página con ?art=proof y no depende del estado previo.
+    await comprobarArtProof(page, contexto);
   }
 } catch (error) {
   fail(`navegación/interacción: ${error.message}`);
@@ -132,6 +137,6 @@ if (fallos.length) {
   process.exit(1);
 }
 const cobertura = ES_RAPIDO
-  ? 'perfil rápido: canvas, Misión 1 y transiciones'
+  ? 'perfil rápido: canvas, Misión 1, transiciones y art proof'
   : 'cobertura completa: misiones, móvil, persistencia, metadatos y rendimiento';
 console.log(`\n✓ Prueba de humo correcta${ES_REMOTO ? ' (URL publicada)' : ''}: ${cobertura}.`);

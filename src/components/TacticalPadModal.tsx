@@ -25,6 +25,7 @@ import {
   X,
 } from 'lucide-react';
 import { soundEngine } from '../game/soundEngine';
+import { ART } from '../game/artDirection';
 import { HudSnapshot, SquadCommand, TacticalMarkerType } from '../game/types';
 
 interface TacticalPadModalProps {
@@ -230,6 +231,7 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
   const [selectedMarkerType, setSelectedMarkerType] = useState<TacticalMarkerType>('HOSTILE');
   const [padHeaderOpen, setPadHeaderOpen] = useState(true);
   const [mapToolsOpen, setMapToolsOpen] = useState(true);
+  const [showThreatZones, setShowThreatZones] = useState(true);
   const [shouldRender, setShouldRender] = useState(isOpen);
   const [isVisible, setIsVisible] = useState(false);
 
@@ -249,6 +251,9 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
       return () => window.clearTimeout(timer);
     }
   }, [isOpen]);
+
+  // Hook de accesibilidad siempre antes del retorno temprano (reglas de hooks).
+  const dialogRef = useModalA11y(isOpen);
 
   if (!shouldRender) return null;
 
@@ -285,8 +290,6 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
     const worldY = 60 + relY * 700;
     onAddTacticalMarker(worldX, worldY, selectedMarkerType);
   };
-
-  const dialogRef = useModalA11y(isOpen);
 
   const activeMarkerMeta =
     MARKER_MODES.find((m) => m.type === selectedMarkerType) || MARKER_MODES[0];
@@ -657,6 +660,21 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
                         Haz clic en cualquier punto del mapa táctico para colocar marcadores visibles.
                       </div>
                     </div>
+                    <button
+                      onClick={() => {
+                        soundEngine.playUiClick();
+                        setShowThreatZones((v) => !v);
+                      }}
+                      className={`px-2 py-1 text-[10px] font-bold border transition-colors cursor-pointer flex items-center gap-1 ${
+                        showThreatZones
+                          ? 'border-[#EF4444]/60 bg-[#EF4444]/15 text-[#FCA5A5] hover:bg-[#EF4444]/25'
+                          : 'border-[#334155] bg-[#0B111B]/60 text-[#94A3B8] hover:text-white'
+                      }`}
+                      title="Mostrar u ocultar las zonas de peligro por fuego conocido"
+                    >
+                      <ShieldAlert className="w-3.5 h-3.5" />
+                      AMENAZAS {showThreatZones ? 'ON' : 'OFF'}
+                    </button>
                   </div>
 
                   {/* Collapsible Map Tools & Marker Selection Menu */}
@@ -853,14 +871,14 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
                       y="60"
                       width="1060"
                       height="700"
-                      fill="rgba(239, 68, 68, 0.06)"
+                      fill={`rgba(${ART.threat}, 0.06)`}
                       pointerEvents="none"
                     />
                     {pad.coveragePolygon.length > 2 && (
                       <polygon
                         points={pad.coveragePolygon.map((p) => `${p.x},${p.y}`).join(' ')}
-                        fill="rgba(56, 189, 248, 0.16)"
-                        stroke="rgba(56, 189, 248, 0.55)"
+                        fill={`rgba(${ART.ally}, 0.16)`}
+                        stroke={`rgba(${ART.ally}, 0.55)`}
                         strokeWidth="1.5"
                         pointerEvents="none"
                       />
@@ -1020,36 +1038,20 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
                       );
                     })}
 
-                    {/* Known hostile threat arcs (position + facing, no AI change) */}
-                    {pad.contacts
-                      .filter(
-                        (c) =>
-                          c.role === 'SUSPECT' &&
-                          c.isArmed &&
-                          c.state !== 'DEAD' &&
-                          c.state !== 'ARRESTED' &&
-                          c.state !== 'SURRENDERED'
-                      )
-                      .map((c) => {
-                        const range = 190;
-                        const half = 0.35;
-                        const a1 = c.angle - half;
-                        const a2 = c.angle + half;
-                        const x1 = c.x + Math.cos(a1) * range;
-                        const y1 = c.y + Math.sin(a1) * range;
-                        const x2 = c.x + Math.cos(a2) * range;
-                        const y2 = c.y + Math.sin(a2) * range;
-                        return (
-                          <path
+                    {/* Known hostile threat arcs clipped by line of sight (no AI change) */}
+                    {showThreatZones &&
+                      pad.contacts
+                        .filter((c) => c.threatPolygon && c.threatPolygon.length > 2)
+                        .map((c) => (
+                          <polygon
                             key={`threat-${c.id}`}
-                            d={`M ${c.x} ${c.y} L ${x1} ${y1} A ${range} ${range} 0 0 1 ${x2} ${y2} Z`}
-                            fill="rgba(239, 68, 68, 0.09)"
-                            stroke="rgba(239, 68, 68, 0.42)"
+                            points={c.threatPolygon!.map((p) => `${p.x},${p.y}`).join(' ')}
+                            fill={`rgba(${ART.threat}, 0.09)`}
+                            stroke={`rgba(${ART.threat}, 0.42)`}
                             strokeWidth="1"
                             pointerEvents="none"
                           />
-                        );
-                      })}
+                        ))}
 
                     {/* Known Contacts (Kobra-1, Kobra-2, Spotted Suspects & Hostages) */}
                     {pad.contacts.map((c) => {
@@ -1125,10 +1127,12 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
                       <span className="w-2.5 h-2.5 bg-[#EF4444]/20 border border-[#EF4444]/70" />
                       EXPUESTA
                     </span>
-                    <span className="flex items-center gap-1 text-[#FCA5A5]">
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#EF4444]/25 border border-[#EF4444]" />
-                      AMENAZA
-                    </span>
+                    {showThreatZones && (
+                      <span className="flex items-center gap-1 text-[#FCA5A5]">
+                        <span className="w-2.5 h-2.5 rounded-full bg-[#EF4444]/25 border border-[#EF4444]" />
+                        AMENAZA
+                      </span>
+                    )}
                   </div>
                 </div>
 

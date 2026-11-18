@@ -1,4 +1,5 @@
 import type { EkoE2EHook, TacticalEngineCore } from './TacticalEngineCore';
+import { paseDeArteCargado, precargarPaseDeArte } from './artProofLoader';
 
 declare global {
   interface Window {
@@ -12,6 +13,9 @@ declare global {
  * La propiedad no es enumerable ni escribible y se retira al desmontar la app.
  */
 export function instalarHookE2E(engine: TacticalEngineCore): () => void {
+  // El pase de arte vive en su propio chunk; se pide acá porque el humo lo
+  // consulta enseguida. Sin `?art=proof` esta llamada no descarga nada.
+  precargarPaseDeArte();
   const hook: EkoE2EHook = Object.freeze({
     get gameState() {
       return engine.gameState;
@@ -39,6 +43,8 @@ export function instalarHookE2E(engine: TacticalEngineCore): () => void {
     },
     snapshot: () => engine.snapshotE2E(),
     worldToScreen: (x: number, y: number) => engine.worldToScreen(x, y),
+    artBufferHash: () => paseDeArteCargado()?.artProofBufferHash() ?? null,
+    artBufferSize: () => paseDeArteCargado()?.artBufferSize() ?? null,
   });
 
   Object.defineProperty(window, '__eko', {

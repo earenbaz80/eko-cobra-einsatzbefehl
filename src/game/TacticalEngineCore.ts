@@ -57,7 +57,8 @@ import {
 import {
   C4ChargeSystem,
   C4_SAFE_RADIUS,
-  type C4Dependencies
+  type C4Dependencies,
+  type C4SaveState
 } from './c4Charges';
 import {
   chooseSquadSteeringAngle,
@@ -159,17 +160,6 @@ export interface FloorDecal {
   type: 'BLOOD_SPLATTER' | 'BLOOD_POOL' | 'DEBRIS' | 'SCORCH' | 'CASING';
   angle: number;
   aspect: number;
-}
-
-export interface EnvironmentImpactMark {
-  x: number;
-  y: number;
-  bulletAngle: number;
-  surfaceKind: 'WALL' | 'DOOR' | 'FURNITURE';
-  surfaceColor?: string;
-  craterRadius: number;
-  emberTimer: number;
-  cracks: { angle: number; len: number }[];
 }
 
 export interface ImpactShockRing {
@@ -325,7 +315,17 @@ export const AUSTRIAN_SHOUTS = [
 ];
 
 /** World-to-screen zoom shared by rendering, aiming and hit testing. */
-export const CAMERA_ZOOM = 1.55;
+function getWeaponThreatRange(weaponLabel?: string): number {
+  const label = (weaponLabel ?? '').toLowerCase();
+  if (/vz\.?\s*58|aug|gewehr|rifle|ak-?47|karabiner/.test(label)) return 280;
+  if (/skorpion|mp-?5|smg|maschinenpistole/.test(label)) return 230;
+  if (/schrot|shotgun|flinte/.test(label)) return 150;
+  if (/messer|knife|bajonett/.test(label)) return 120;
+  return 180;
+}
+
+/** Zoom del encuadre táctico: se consume a través de `framing`, nunca suelto. */
+const CAMERA_ZOOM = 1.55;
 
 /** Contrato de introspección de solo lectura para las pruebas E2E. */
 export interface EkoE2ESegment {
@@ -415,6 +415,10 @@ export interface EkoE2EHook extends EkoE2EState {
   snapshot(): EkoE2EState;
   /** Coordenadas CSS para pulsar una posición del mundo desde Playwright. */
   worldToScreen(x: number, y: number): { x: number; y: number };
+  /** FNV-1a del buffer del pase de arte; null si `?art=proof` no pintó nada. */
+  artBufferHash(): string | null;
+  /** Tamaño de ese buffer; null mientras el chunk del pase no esté cargado. */
+  artBufferSize(): { readonly width: number; readonly height: number } | null;
 }
 
 export class TacticalEngineCore {
@@ -452,7 +456,6 @@ export class TacticalEngineCore {
   protected traces: BulletTrace[] = [];
   protected particles: Particle[] = [];
   protected decals: FloorDecal[] = [];
-  protected surfaceImpacts: EnvironmentImpactMark[] = [];
   protected impactRings: ImpactShockRing[] = [];
   protected refractionRings: RefractionShockwave[] = [];
   protected snowFootprints: SnowFootprint[] = [];
@@ -746,7 +749,6 @@ public nightMode: boolean = false;
     this.traces = [];
     this.particles = [];
     this.decals = [];
-    this.surfaceImpacts = [];
     this.impactRings = [];
     this.impactPopups = [];
     this.shoutWaves = [];
@@ -4459,6 +4461,26 @@ public nightMode: boolean = false;
     if (hitActor) {
       const hitZone = this.computeBallisticHitZone(shooter, hitActor, endX, endY);
       this.spawnActorImpactEffects(hitActor, endX, endY, angle, isTaser, hitZone);
+      // Visual hit confirmation for the player's shots (no mechanics change).
+      if (shooter.role === 'PLAYER') {
+        this.refractionRings.push({
+          x: endX,
+          y: endY,
+          radius: 4,
+          maxRadius: 46,
+          alpha: 0.85,
+          strength: 0.6,
+        });
+        this.impactPopups.push({
+          x: endX,
+          y: endY - 14,
+          vy: -55,
+          text: 'TREFFER',
+          color: '#FBBF24',
+          life: 0.55,
+          maxLife: 0.55,
+        });
+      }
       this.resolveProjectileHit(shooter, hitActor, damage, isTaser, hitZone, angle);
 
       // Over-penetration / graze environmental mark on wall or furniture closely behind hit actor
@@ -4901,27 +4923,6 @@ public nightMode: boolean = false;
       type: 'DEBRIS',
       angle: Math.random() * Math.PI * 2,
       aspect: 0.5 + Math.random() * 0.4,
-    });
-
-    // 4. Persistent Environmental Bullet Crater, Radial Stress Cracks & Hot Ballistic Ember on Wall/Door/Furniture
-    if (this.surfaceImpacts.length > 240) this.surfaceImpacts.shift();
-    const crackCount = surfaceKind === 'WALL' ? 4 + Math.floor(Math.random() * 3) : 3;
-    const cracks: { angle: number; len: number }[] = [];
-    for (let c = 0; c < crackCount; c++) {
-      cracks.push({
-        angle: (c / crackCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.65,
-        len: 4.5 + Math.random() * (surfaceKind === 'WALL' ? 7.5 : 5.5),
-      });
-    }
-    this.surfaceImpacts.push({
-      x,
-      y,
-      bulletAngle,
-      surfaceKind,
-      surfaceColor,
-      craterRadius: surfaceKind === 'WALL' ? 3.2 + Math.random() * 1.4 : 2.6 + Math.random() * 1.2,
-      emberTimer: 1.8,
-      cracks,
     });
 
     this.impactRings.push({
@@ -5792,10 +5793,11 @@ public nightMode: boolean = false;
       actor.inCover = inCover;
     }
 
-    const viewW = this.viewWidth;
-    const viewH = this.viewHeight;
-    this.mouseWorld.x = (this.mouseScreen.x - viewW * 0.5) / CAMERA_ZOOM + this.camX;
-    this.mouseWorld.y = (this.mouseScreen.y - viewH * 0.5) / CAMERA_ZOOM + this.camY;
+    // El cursor se resuelve con la misma conversión que usan los handlers de
+    // ratón, para que apuntado, arrastre y clics no puedan encuadrar distinto.
+    const pointer = this.screenToWorld(this.mouseScreen.x, this.mouseScreen.y);
+    this.mouseWorld.x = pointer.x;
+    this.mouseWorld.y = pointer.y;
 
     // 1. Update Player Movement, Limb Slowdown, Untreated Bleeding & Aim Tremor
     const playerBh = this.ensureBodyHealth(player);
@@ -6313,12 +6315,6 @@ public nightMode: boolean = false;
       ring.alpha -= dt * 4.2;
     }
     this.impactRings = this.impactRings.filter((r) => r.alpha > 0.02);
-
-    for (const imp of this.surfaceImpacts) {
-      if (imp.emberTimer > 0) {
-        imp.emberTimer = Math.max(0, imp.emberTimer - dt);
-      }
-    }
 
     for (const pop of this.impactPopups) {
       pop.y += pop.vy * dt;
@@ -8789,7 +8785,17 @@ public nightMode: boolean = false;
           roomName: a.roomName,
           isKnown: true,
           identifiedByRadio: !!a.identifiedByRadio,
+          directlyVisible: !!(a.visibleToPlayer || a.visibleToSquad),
           isArmed: a.isArmed,
+          threatPolygon:
+            a.role === 'SUSPECT' &&
+            a.isArmed &&
+            (a.visibleToPlayer || a.visibleToSquad) &&
+            a.state !== 'DEAD' &&
+            a.state !== 'ARRESTED' &&
+            a.state !== 'SURRENDERED'
+              ? this.computeVisibilityPolygon(a.x, a.y, a.angle, getWeaponThreatRange(a.weaponLabel), 0.35, 24)
+              : undefined,
           weaponLabel: a.weaponLabel,
           ekisCode: a.biometricProfile?.ekisCode,
           warrantStatus: a.biometricProfile?.warrantStatus,
@@ -9211,6 +9217,20 @@ public nightMode: boolean = false;
     };
   }
 
+  /** Inventario, cargas armadas y plantado en curso para el guardado. */
+  public capturarC4(): C4SaveState {
+    return this.c4.snapshot();
+  }
+
+  /**
+   * Devuelve el C4 guardado al subsistema. Se llama después de reconstruir el
+   * escenario: el inventario y las cargas no viven en la simulación.
+   */
+  public restaurarC4(saved: C4SaveState | undefined) {
+    this.c4.restore(saved);
+    this.emitHudSnapshot();
+  }
+
   /** Reanuda la simulación guardada sin reconstruir el escenario. */
   public restaurarSimulacion(snapshot: SnapshotSimulacion) {
     const player = this.getPlayer();
@@ -9236,19 +9256,13 @@ public nightMode: boolean = false;
   }
 
   public screenToWorld(clientX: number, clientY: number): { x: number; y: number } {
-    const cx = this.viewWidth * 0.5;
-    const cy = this.viewHeight * 0.5;
-    const worldX = (clientX - cx) / CAMERA_ZOOM + this.camX;
-    const worldY = (clientY - cy) / CAMERA_ZOOM + this.camY;
-    return { x: worldX, y: worldY };
+    const { x: cx, y: cy, zoom } = this.framing;
+    return { x: (clientX - cx) / zoom + this.camX, y: (clientY - cy) / zoom + this.camY };
   }
 
   public worldToScreen(wx: number, wy: number): { x: number; y: number } {
-    const cx = this.viewWidth * 0.5;
-    const cy = this.viewHeight * 0.5;
-    const sx = (wx - this.camX) * CAMERA_ZOOM + cx;
-    const sy = (wy - this.camY) * CAMERA_ZOOM + cy;
-    return { x: sx, y: sy };
+    const { x: cx, y: cy, zoom } = this.framing;
+    return { x: (wx - this.camX) * zoom + cx, y: (wy - this.camY) * zoom + cy };
   }
 
   public getInteractiveTargetAt(
@@ -9298,6 +9312,17 @@ public nightMode: boolean = false;
 
   protected get viewHeight(): number {
     return this.canvas.height / this.renderScale;
+  }
+
+  /**
+   * Encuadre vigente: dónde cae la cámara en píxeles CSS y cuántos píxeles de
+   * pantalla mide una unidad de mundo. `screenToWorld` y `worldToScreen` leen
+   * sólo de aquí, así que un canal que presente otro buffer (otra escala, con
+   * letterbox) puede sobrescribir este getter y el ratón sigue apuntando al
+   * mismo punto del mundo sin tocar los handlers.
+   */
+  protected get framing(): { x: number; y: number; zoom: number } {
+    return { x: this.viewWidth * 0.5, y: this.viewHeight * 0.5, zoom: CAMERA_ZOOM };
   }
 
   public setHudOpacity(opacityRatio: number) {

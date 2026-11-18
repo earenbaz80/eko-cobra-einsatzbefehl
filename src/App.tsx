@@ -103,6 +103,11 @@ export default function App() {
   const [plan, setPlan] = useState<MissionPlan>(INITIAL_PLAN);
   const [hud, setHud] = useState<HudSnapshot | null>(null);
   const [activeModal, setActiveModal] = useState<ActiveModalId>('NONE');
+  // El pad es un chunk de 52 KiB que sólo hace falta al abrirlo. Se monta la primera
+  // vez que hay intención de usarlo —al empezar la partida o al pedirlo— y desde ahí
+  // queda montado: el cierre conserva su fundido y reabrirlo es instantáneo. Montarlo
+  // desde el título era lo que lo descargaba en el arranque.
+  const [padMontado, setPadMontado] = useState(false);
   const [muted, setMuted] = useState(false);
   const [radioAudioEnabled, setRadioAudioEnabled] = useState<boolean>(() => {
     try {
@@ -200,6 +205,7 @@ export default function App() {
   }, [hud?.radioFeed]);
 
   const openModalExclusive = (modal: ActiveModalId) => {
+    if (modal === 'PAD') setPadMontado(true);
     activeModalRef.current = modal;
     setActiveModal(modal);
     setCommandMenuOpen(false);
@@ -208,6 +214,12 @@ export default function App() {
   };
   const closeModal = () => openModalExclusive('NONE');
   const openBlueprintModal = () => openModalExclusive('BLUEPRINT');
+
+  // Con la partida en marcha se baja el pad en segundo plano mientras el jugador mira
+  // el mapa: la primera apertura lo encuentra listo en vez de esperar al chunk.
+  useEffect(() => {
+    if (gameState === 'PLAYING') setPadMontado(true);
+  }, [gameState]);
 
   const formatKeyCodeLabel = (code: string): string => {
     if (code.startsWith('Key')) return code.slice(3).toUpperCase();
@@ -583,6 +595,9 @@ export default function App() {
       tick: typeof saved.tick === 'number' ? saved.tick : undefined,
     });
     if (saved.simulacion) engineRef.current?.restaurarSimulacion(saved.simulacion);
+    // El C4 no vive en la simulación: inventario, cargas armadas y plantado en
+    // curso se devuelven aparte, con el escenario ya reconstruido.
+    engineRef.current?.restaurarC4(saved.c4);
     setHasSavedGame(false);
   };
 
@@ -839,6 +854,7 @@ export default function App() {
         score: ultimo?.score ?? 0,
         tick: eng.ticks,
         simulacion: eng.capturarSimulacion() ?? undefined,
+        c4: eng.capturarC4(),
       });
       if (guardado && !silent) setHasSavedGame(true);
     };
@@ -1161,7 +1177,7 @@ export default function App() {
         )}
 
       {/* ==================== 4. INTERACTIVE EKO-PAD C4I TABLET MODAL (With FadeIn / FadeOut & Temporary Markers) ==================== */}
-      {hud && (
+      {hud && padMontado && (
         <Suspense fallback={null}>
           <TacticalPadModal
             isOpen={activeModal === 'PAD'}

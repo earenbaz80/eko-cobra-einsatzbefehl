@@ -6,14 +6,33 @@
  * y la medición de frames, para que las dos esperen exactamente lo mismo.
  */
 
-/** Abre la URL, arranca la misión y espera al HUD en juego. */
-export async function arrancarMision(page, url, nombre, { asentarMs = 1000 } = {}) {
+/**
+ * Abre la URL, arranca la misión y espera al HUD en juego.
+ *
+ * `reiniciarAzar` re-siembra el `Math.random` determinista y pulsa el botón en
+ * la misma tarea: la generación procedural del mundo consume el flujo al
+ * arrancar, así que sin eso el mobiliario depende de cuántos frames corrió el
+ * título. Lo usa la regresión visual del pase de arte.
+ */
+export async function arrancarMision(page, url, nombre, { asentarMs = 1000, reiniciarAzar = false } = {}) {
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForSelector('canvas', { timeout: 20000 });
 
   const boton = page.getByRole('button', { name: nombre, exact: true });
   await boton.waitFor({ timeout: 15000 });
-  await boton.click();
+  if (reiniciarAzar) {
+    const nodo = await boton.elementHandle();
+    const sembrado = await nodo.evaluate((elemento) => {
+      const azar = window.__ekoAzar;
+      if (!azar) return false;
+      azar.reiniciar(window.__ekoSeed);
+      elemento.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      return true;
+    });
+    if (!sembrado) throw new Error('el azar reiniciable no está instalado');
+  } else {
+    await boton.click();
+  }
 
   // El HUD en partida solo existe con la simulación arrancada.
   await page.getByText('K1 OPERATIVO').first().waitFor({ timeout: 20000 });

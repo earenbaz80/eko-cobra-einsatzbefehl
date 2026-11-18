@@ -30,7 +30,9 @@ import {
   Vec2,
   WallSconceLight
 } from './types';
-import { CAMERA_ZOOM, TacticalEngineCore } from './TacticalEngineCore';
+import { TacticalEngineCore } from './TacticalEngineCore';
+import { ART } from './artDirection';
+import { paseDeArteCargado, precargarPaseDeArte } from './artProofLoader';
 
 /**
  * Capa de dibujo del motor táctico.
@@ -207,6 +209,38 @@ export class TacticalEngine extends TacticalEngineCore {
 
   public render() {
     const ctx = this.ctx;
+
+    // Prueba de arte opcional (?art=proof): pinta la escena con tileset, sprites
+    // y luz suave a 640x360 reescalado a la ventana. Sólo cambia el dibujo. El
+    // canal está en su propio chunk y se pide una sola vez; fuera de la prueba
+    // no se descarga, y mientras viaja sigue dibujando el pase normal.
+    precargarPaseDeArte();
+    const paseDeArte = paseDeArteCargado();
+    if (paseDeArte) {
+      paseDeArte.renderArtProof({
+        ctx,
+        rooms: this.rooms,
+        walls: this.walls,
+        doors: this.doors,
+        windows: this.exteriorWindows,
+        charges: this.c4.charges,
+        planting: this.c4.planting,
+        furniture: this.furniture,
+        actors: this.actors,
+        sconces: this.wallSconces,
+        decals: this.decals,
+        footprints: this.snowFootprints,
+        nightMode: this.nightMode,
+        player: this.getPlayer(),
+        camX: this.camX,
+        camY: this.camY,
+        missionMode: this.missionMode,
+        primaryWeapon: this.plan.primaryWeapon,
+        activeTool: this.activeTool
+      });
+      return;
+    }
+
     // Draw in CSS pixels so the backing store can be scaled by devicePixelRatio.
     ctx.setTransform(this.renderScale, 0, 0, this.renderScale, 0, 0);
     const width = this.viewWidth;
@@ -220,8 +254,11 @@ export class TacticalEngine extends TacticalEngineCore {
     ctx.save();
     const shakeX = (Math.random() - 0.5) * this.shakeIntensity;
     const shakeY = (Math.random() - 0.5) * this.shakeIntensity;
-    ctx.translate(width * 0.5 + shakeX, height * 0.5 + shakeY);
-    ctx.scale(CAMERA_ZOOM, CAMERA_ZOOM);
+    // Centro y zoom salen del encuadre del motor, que es el mismo que usa el
+    // ratón: dibujo e input no pueden discrepar sobre dónde cae el mundo.
+    const framing = this.framing;
+    ctx.translate(framing.x + shakeX, framing.y + shakeY);
+    ctx.scale(framing.zoom, framing.zoom);
     ctx.translate(-this.camX, -this.camY);
 
     // 1. Exterior tactical grid & wet asphalt surround
@@ -572,7 +609,7 @@ export class TacticalEngine extends TacticalEngineCore {
     // Clearer suppression indicator: one pulsing red edge frame on top of the vignette.
     const pulse = 0.5 + 0.5 * Math.sin(this.elapsedSeconds * 9);
     const edgeAlpha = Math.min(0.9, alpha * (0.7 + pulse * 0.3));
-    ctx.strokeStyle = `rgba(239, 68, 68, ${edgeAlpha.toFixed(3)})`;
+    ctx.strokeStyle = `rgba(${ART.threat}, ${edgeAlpha.toFixed(3)})`;
     ctx.lineWidth = 4;
     ctx.strokeRect(6, 6, width - 12, height - 12);
     ctx.restore();
@@ -854,9 +891,6 @@ export class TacticalEngine extends TacticalEngineCore {
       }
       renderBattlemapFurnitureItem(ctx, item);
     }
-
-    // Render persistent bullet impact marks on furniture surfaces
-    this.renderSurfaceImpactMarks(ctx, 'FURNITURE');
 
     // Render tactical acoustic noise ripple waves expanding across the map
     this.renderAcousticNoiseRings(ctx);
@@ -1172,21 +1206,14 @@ export class TacticalEngine extends TacticalEngineCore {
     // La luz se calcula en coordenadas de mundo, pero solo se rasteriza el viewport
     // visible a media resolución; así no hay que limpiar ni componer 1280×820 por frame.
     lCtx.setTransform(0.4, 0, 0, 0.4, 0, 0);
-    lCtx.translate(width * 0.5 + shakeX, height * 0.5 + shakeY);
-    lCtx.scale(CAMERA_ZOOM, CAMERA_ZOOM);
+    const framing = this.framing;
+    lCtx.translate(framing.x + shakeX, framing.y + shakeY);
+    lCtx.scale(framing.zoom, framing.zoom);
     lCtx.translate(-this.camX, -this.camY);
 
-    const stairGrad = lCtx.createRadialGradient(170, 410, 20, 170, 410, 290);
-    stairGrad.addColorStop(0, this.nvgActive ? 'rgba(255, 255, 255, 0.82)' : 'rgba(255, 255, 255, 0.55)');
-    stairGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-    lCtx.fillStyle = stairGrad;
-    lCtx.fillRect(80, 90, 180, 640);
-
-    const balconyGrad = lCtx.createRadialGradient(1055, 540, 20, 1055, 540, 250);
-    balconyGrad.addColorStop(0, this.nvgActive ? 'rgba(255, 255, 255, 0.78)' : 'rgba(255, 255, 255, 0.45)');
-    balconyGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-    lCtx.fillStyle = balconyGrad;
-    lCtx.fillRect(960, 350, 200, 380);
+    // Interior stairwell/balcony illumination comes from their wall sconces
+    // (see the sconce loop below), so switching or destroying those fixtures
+    // actually darkens the area instead of leaving a baked ambient pool.
 
     // 2B. Carve ambient illumination from urban streetlamps along the perimeter streets
     for (const lamp of URBAN_STREET_LAMPS) {
@@ -1199,6 +1226,19 @@ export class TacticalEngine extends TacticalEngineCore {
       lCtx.beginPath();
       lCtx.arc(lamp.x, lamp.y, lamp.radius, 0, Math.PI * 2);
       lCtx.fill();
+
+      // Volumetric warm sodium glow on the main canvas so exterior light has
+      // a distinct identity from the cool tactical flashlight beam.
+      ctx.save();
+      const streetGlow = ctx.createRadialGradient(lamp.x, lamp.y, 4, lamp.x, lamp.y, lamp.radius);
+      streetGlow.addColorStop(0, this.nvgActive ? 'rgba(251, 191, 36, 0.22)' : 'rgba(251, 191, 36, 0.16)');
+      streetGlow.addColorStop(0.55, this.nvgActive ? 'rgba(251, 191, 36, 0.10)' : 'rgba(251, 191, 36, 0.06)');
+      streetGlow.addColorStop(1, 'rgba(251, 191, 36, 0)');
+      ctx.fillStyle = streetGlow;
+      ctx.beginPath();
+      ctx.arc(lamp.x, lamp.y, lamp.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     }
 
     // 2C. Carve & Render Wall Sconce Lamps (Wandlampen) along corridors and hallways
@@ -1669,9 +1709,8 @@ export class TacticalEngine extends TacticalEngineCore {
       ctx.restore();
     }
 
-    // Render persistent bullet craters, radial stress cracks & wood splinters on Walls and Doors
-    this.renderSurfaceImpactMarks(ctx, 'WALL');
-    this.renderSurfaceImpactMarks(ctx, 'DOOR');
+    // Los muros y las puertas son superficies verticales: en vista cenital no
+    // se les ve el agujero. Su impacto ya deja chispas, polvo y escombros.
 
     // Render Wall-Mounted Sconce Lamp Fixtures (Wandlampen) along corridors
     this.renderWallSconceFixtures(ctx);
@@ -1943,72 +1982,6 @@ export class TacticalEngine extends TacticalEngineCore {
     }
   }
 
-  private renderSurfaceImpactMarks(
-    ctx: CanvasRenderingContext2D,
-    filterKind: 'WALL' | 'DOOR' | 'FURNITURE'
-  ) {
-    for (const imp of this.surfaceImpacts) {
-      if (imp.surfaceKind !== filterKind) continue;
-      // Viewport spatial culling: Skip rendering offscreen bullet impacts
-      if (Math.hypot(imp.x - this.camX, imp.y - this.camY) > 750) continue;
-
-      ctx.save();
-      ctx.translate(imp.x, imp.y);
-
-      // 1. Radial stress fracture cracks / wood splinters around the bullet crater
-      ctx.strokeStyle =
-        imp.surfaceKind === 'DOOR'
-          ? 'rgba(251, 191, 36, 0.85)'
-          : imp.surfaceKind === 'FURNITURE'
-            ? 'rgba(15, 23, 42, 0.85)'
-            : 'rgba(226, 232, 240, 0.78)';
-      ctx.lineWidth = 1.1;
-      for (const crack of imp.cracks) {
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(Math.cos(crack.angle) * crack.len, Math.sin(crack.angle) * crack.len);
-        ctx.stroke();
-      }
-
-      // 2. Outer pulverized spall / scorch ring
-      ctx.fillStyle =
-        imp.surfaceKind === 'DOOR'
-          ? 'rgba(146, 64, 14, 0.88)'
-          : imp.surfaceKind === 'FURNITURE'
-            ? 'rgba(30, 41, 59, 0.85)'
-            : 'rgba(71, 85, 105, 0.9)';
-      ctx.beginPath();
-      ctx.arc(0, 0, imp.craterRadius * 1.45, 0, Math.PI * 2);
-      ctx.fill();
-
-      // 3. Directional ballistic lead-smear / scorch streak
-      const backAng = imp.bulletAngle + Math.PI;
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.72)';
-      ctx.lineWidth = 1.8;
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(Math.cos(backAng) * 6.5, Math.sin(backAng) * 6.5);
-      ctx.stroke();
-
-      // 4. Deep dark bullet entry hole core
-      ctx.fillStyle = '#020617';
-      ctx.beginPath();
-      ctx.arc(0, 0, imp.craterRadius * 0.8, 0, Math.PI * 2);
-      ctx.fill();
-
-      // 5. Hot glowing kinetic friction ember that cools down after impact
-      if (imp.emberTimer > 0) {
-        const emberRatio = imp.emberTimer / 1.8;
-        ctx.fillStyle = `rgba(251, 146, 60, ${emberRatio * 0.95})`;
-        ctx.beginPath();
-        ctx.arc(0, 0, imp.craterRadius * 0.7 * emberRatio + 0.8, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      ctx.restore();
-    }
-  }
-
   private renderEvidence(ctx: CanvasRenderingContext2D) {
     const player = this.getPlayer();
     for (const ev of this.evidenceList) {
@@ -2127,7 +2100,7 @@ export class TacticalEngine extends TacticalEngineCore {
           ctx.save();
           ctx.translate(lastSeen.x, lastSeen.y);
           const alpha = (1 - age / 4) * 0.55;
-          ctx.strokeStyle = `rgba(239, 68, 68, ${alpha.toFixed(3)})`;
+          ctx.strokeStyle = `rgba(${ART.threat}, ${alpha.toFixed(3)})`;
           ctx.lineWidth = 1.5;
           ctx.setLineDash([4, 4]);
           ctx.beginPath();
@@ -2182,14 +2155,14 @@ export class TacticalEngine extends TacticalEngineCore {
 
       if (actor.role === 'SUSPECT' && actor.state === 'AIMING_WINDUP' && player) {
         const pulse = 0.5 + 0.5 * Math.sin(this.elapsedSeconds * 12);
-        ctx.strokeStyle = `rgba(239, 68, 68, ${0.35 + actor.windupProgress * 0.6})`;
+        ctx.strokeStyle = `rgba(${ART.threat}, ${0.35 + actor.windupProgress * 0.6})`;
         ctx.lineWidth = 1.5 + actor.windupProgress * 1.5;
         ctx.beginPath();
         ctx.moveTo(0, 0);
         ctx.lineTo(Math.cos(actor.angle) * 260, Math.sin(actor.angle) * 260);
         ctx.stroke();
 
-        ctx.strokeStyle = '#EF4444';
+        ctx.strokeStyle = `rgb(${ART.threat})`;
         ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.arc(
@@ -2202,7 +2175,7 @@ export class TacticalEngine extends TacticalEngineCore {
         ctx.stroke();
 
         // Pulsing warning diamond above the muzzle line.
-        ctx.fillStyle = `rgba(248, 113, 113, ${(0.55 + pulse * 0.35).toFixed(3)})`;
+        ctx.fillStyle = `rgba(${ART.threat}, ${(0.55 + pulse * 0.35).toFixed(3)})`;
         ctx.beginPath();
         ctx.moveTo(0, -actor.radius - 24);
         ctx.lineTo(6, -actor.radius - 17);
@@ -2227,7 +2200,7 @@ export class TacticalEngine extends TacticalEngineCore {
           const len = Math.min(dist, 90);
           ctx.save();
           ctx.rotate(Math.atan2(dy, dx));
-          ctx.strokeStyle = 'rgba(251, 191, 36, 0.45)';
+          ctx.strokeStyle = `rgba(${ART.warning}, 0.45)`;
           ctx.lineWidth = 1.5;
           ctx.setLineDash([5, 5]);
           ctx.beginPath();
@@ -2235,7 +2208,7 @@ export class TacticalEngine extends TacticalEngineCore {
           ctx.lineTo(len, 0);
           ctx.stroke();
           ctx.setLineDash([]);
-          ctx.fillStyle = 'rgba(251, 191, 36, 0.55)';
+          ctx.fillStyle = `rgba(${ART.warning}, 0.55)`;
           ctx.beginPath();
           ctx.moveTo(len, 0);
           ctx.lineTo(len - 8, -4);
@@ -2264,10 +2237,10 @@ export class TacticalEngine extends TacticalEngineCore {
       if (actor.role === 'SUSPECT' && actor.state !== 'DEAD' && actor.state !== 'ARRESTED') {
         const contourColor =
           actor.alertLevel === 'COMBAT'
-            ? '#EF4444'
+            ? `rgb(${ART.threat})`
             : actor.alertLevel === 'READY'
-              ? '#F59E0B'
-              : '#38BDF8';
+              ? `rgb(${ART.warning})`
+              : `rgb(${ART.ally})`;
         ctx.strokeStyle = contourColor;
         ctx.lineWidth = 2;
         ctx.beginPath();
