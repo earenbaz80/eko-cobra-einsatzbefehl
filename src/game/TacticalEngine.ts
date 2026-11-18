@@ -30,7 +30,7 @@ import {
   Vec2,
   WallSconceLight
 } from './types';
-import { CAMERA_ZOOM, TacticalEngineCore } from './TacticalEngineCore';
+import { TacticalEngineCore } from './TacticalEngineCore';
 import { ART } from './artDirection';
 import { isArtProofRequested, renderArtProof } from './artProof';
 
@@ -250,8 +250,11 @@ export class TacticalEngine extends TacticalEngineCore {
     ctx.save();
     const shakeX = (Math.random() - 0.5) * this.shakeIntensity;
     const shakeY = (Math.random() - 0.5) * this.shakeIntensity;
-    ctx.translate(width * 0.5 + shakeX, height * 0.5 + shakeY);
-    ctx.scale(CAMERA_ZOOM, CAMERA_ZOOM);
+    // Centro y zoom salen del encuadre del motor, que es el mismo que usa el
+    // ratón: dibujo e input no pueden discrepar sobre dónde cae el mundo.
+    const framing = this.framing;
+    ctx.translate(framing.x + shakeX, framing.y + shakeY);
+    ctx.scale(framing.zoom, framing.zoom);
     ctx.translate(-this.camX, -this.camY);
 
     // 1. Exterior tactical grid & wet asphalt surround
@@ -1199,8 +1202,9 @@ export class TacticalEngine extends TacticalEngineCore {
     // La luz se calcula en coordenadas de mundo, pero solo se rasteriza el viewport
     // visible a media resolución; así no hay que limpiar ni componer 1280×820 por frame.
     lCtx.setTransform(0.4, 0, 0, 0.4, 0, 0);
-    lCtx.translate(width * 0.5 + shakeX, height * 0.5 + shakeY);
-    lCtx.scale(CAMERA_ZOOM, CAMERA_ZOOM);
+    const framing = this.framing;
+    lCtx.translate(framing.x + shakeX, framing.y + shakeY);
+    lCtx.scale(framing.zoom, framing.zoom);
     lCtx.translate(-this.camX, -this.camY);
 
     // Interior stairwell/balcony illumination comes from their wall sconces

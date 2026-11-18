@@ -324,7 +324,8 @@ function getWeaponThreatRange(weaponLabel?: string): number {
   return 180;
 }
 
-export const CAMERA_ZOOM = 1.55;
+/** Zoom del encuadre táctico: se consume a través de `framing`, nunca suelto. */
+const CAMERA_ZOOM = 1.55;
 
 /** Contrato de introspección de solo lectura para las pruebas E2E. */
 export interface EkoE2ESegment {
