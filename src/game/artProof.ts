@@ -39,9 +39,8 @@ import type {
 import type { ExteriorWindowSection, FloorDecal, SnowFootprint } from './TacticalEngineCore';
 import { drawPixelArtActor } from './pixelSprites';
 import type { C4PlantingState } from './c4Charges';
-
-const PROOF_W = 480;
-const PROOF_H = 270;
+import { art, createCanvas, createTileSet, hash2, type PixelArt } from './pixelArt/bitmap';
+import { BUFFER_H, BUFFER_W, present } from './pixelArt/present';
 
 const TILE = 16; // tamaño de baldosa en unidades de mundo
 const ART_SCALE = 2; // cada píxel de arte mide 2x2 en el buffer
@@ -49,13 +48,6 @@ const ART_SCALE = 2; // cada píxel de arte mide 2x2 en el buffer
 /* ------------------------------------------------------------------ */
 /* Arte: patrones de 8x8 píxeles autorizados a mano                    */
 /* ------------------------------------------------------------------ */
-
-type PixelArt = { rows: string[]; map: Record<string, string> };
-
-function art(map: Record<string, string>, rows: string[]): PixelArt {
-  const width = Math.max(...rows.map((row) => row.length));
-  return { map, rows: rows.map((row) => row.padEnd(width, '.')) };
-}
 
 const SNOW_ART = art(
   { a: '#9FB2C4', b: '#C2D2E2', c: '#8FA3B6', d: '#DBE7F2' },
@@ -257,35 +249,8 @@ const FIRE_ART_B = art(
 /* Cachés de canvases                                                  */
 /* ------------------------------------------------------------------ */
 
-const tileCache = new Map<string, HTMLCanvasElement>();
-
 let bufferCtx: CanvasRenderingContext2D | null = null;
 let lightCtx: CanvasRenderingContext2D | null = null;
-
-function createCanvas(w: number, h: number): HTMLCanvasElement {
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  return canvas;
-}
-
-function renderArtToCanvas(pixelArt: PixelArt, scale: number): HTMLCanvasElement {
-  const width = pixelArt.rows[0].length;
-  const height = pixelArt.rows.length;
-  const canvas = createCanvas(width * scale, height * scale);
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return canvas;
-  for (let y = 0; y < height; y++) {
-    const row = pixelArt.rows[y];
-    for (let x = 0; x < width; x++) {
-      const color = pixelArt.map[row[x]];
-      if (!color) continue;
-      ctx.fillStyle = color;
-      ctx.fillRect(x * scale, y * scale, scale, scale);
-    }
-  }
-  return canvas;
-}
 
 const TILES: Record<string, PixelArt[]> = {
   snow: [SNOW_ART, SNOW_DRIFT_ART],
@@ -301,82 +266,11 @@ const TILES: Record<string, PixelArt[]> = {
   tile: [TILE_ART],
 };
 
-function getTile(name: string, variant = 0): HTMLCanvasElement {
-  const variants = TILES[name] ?? TILES.wall;
-  const index = variant % variants.length;
-  const key = `${name}:${index}`;
-  const cached = tileCache.get(key);
-  if (cached) return cached;
-  const canvas = renderArtToCanvas(variants[index], ART_SCALE);
-  tileCache.set(key, canvas);
-  return canvas;
-}
-
+const { getTile, fillTiles } = createTileSet(TILES, ART_SCALE, TILE);
 
 /* ------------------------------------------------------------------ */
 /* Utilidades                                                          */
 /* ------------------------------------------------------------------ */
-
-function hash2(x: number, y: number): number {
-  const value = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
-  return Math.abs(value - Math.floor(value));
-}
-
-function tileVariant(x: number, y: number, count: number): number {
-  return Math.floor(hash2(Math.floor(x / TILE), Math.floor(y / TILE)) * count);
-}
-
-/** Rellena un rectángulo con baldosas, recortado a los límites. */
-function fillTiles(
-  ctx: CanvasRenderingContext2D,
-  tileName: string,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  bounds: { x0: number; y0: number; x1: number; y1: number },
-  options: { variants?: number } = {}
-) {
-  const x0 = Math.max(x, bounds.x0);
-  const y0 = Math.max(y, bounds.y0);
-  const x1 = Math.min(x + w, bounds.x1);
-  const y1 = Math.min(y + h, bounds.y1);
-  if (x1 <= x0 || y1 <= y0) return;
-
-  const variants = options.variants ?? 1;
-  const startX = Math.floor(x0 / TILE) * TILE;
-  const startY = Math.floor(y0 / TILE) * TILE;
-
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(x0, y0, x1 - x0, y1 - y0);
-  ctx.clip();
-
-  for (let ty = startY; ty < y1; ty += TILE) {
-    for (let tx = startX; tx < x1; tx += TILE) {
-      const sprite = getTile(tileName, tileVariant(tx, ty, variants));
-      // Volteos pseudoaleatorios: rompen la repetición en cuadrícula
-      const flip = hash2(tx * 1.7, ty * 2.3);
-      if (flip > 0.75) {
-        ctx.save();
-        ctx.translate(tx + TILE, ty);
-        ctx.scale(-1, 1);
-        ctx.drawImage(sprite, 0, 0);
-        ctx.restore();
-      } else if (flip > 0.5) {
-        ctx.save();
-        ctx.translate(tx, ty + TILE);
-        ctx.scale(1, -1);
-        ctx.drawImage(sprite, 0, 0);
-        ctx.restore();
-      } else {
-        ctx.drawImage(sprite, tx, ty);
-      }
-    }
-  }
-
-  ctx.restore();
-}
 
 function drawShadow(ctx: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number, alpha = 0.45) {
   ctx.save();
@@ -1749,7 +1643,7 @@ function drawLighting(
   cam: { x: number; y: number },
   time: number
 ) {
-  if (!lightCtx) lightCtx = createCanvas(PROOF_W, PROOF_H).getContext('2d');
+  if (!lightCtx) lightCtx = createCanvas(BUFFER_W, BUFFER_H).getContext('2d');
   if (!lightCtx) return;
   const lctx = lightCtx;
 
@@ -1758,15 +1652,15 @@ function drawLighting(
   const night = scene.nightMode || scene.missionMode === 'SCHWECHAT';
 
   lctx.setTransform(1, 0, 0, 1, 0, 0);
-  lctx.clearRect(0, 0, PROOF_W, PROOF_H);
+  lctx.clearRect(0, 0, BUFFER_W, BUFFER_H);
   lctx.fillStyle = night ? 'rgba(6, 10, 18, 0.74)' : 'rgba(6, 10, 18, 0.8)';
-  lctx.fillRect(0, 0, PROOF_W, PROOF_H);
+  lctx.fillRect(0, 0, BUFFER_W, BUFFER_H);
   lctx.globalCompositeOperation = 'destination-out';
-  lctx.translate(PROOF_W / 2 - cam.x, PROOF_H / 2 - cam.y);
+  lctx.translate(BUFFER_W / 2 - cam.x, BUFFER_H / 2 - cam.y);
 
   // Luz ambiental mínima: la escena se lee sin linterna
   lctx.fillStyle = night ? 'rgba(0, 0, 0, 0.24)' : 'rgba(0, 0, 0, 0.16)';
-  lctx.fillRect(cam.x - PROOF_W / 2, cam.y - PROOF_H / 2, PROOF_W, PROOF_H);
+  lctx.fillRect(cam.x - BUFFER_W / 2, cam.y - BUFFER_H / 2, BUFFER_W, BUFFER_H);
 
   const segments = occlusionSegments(scene);
   const player = scene.player;
@@ -1838,7 +1732,7 @@ function drawLighting(
 
   // Halos cálidos aditivos, en coordenadas de mundo
   ctx.save();
-  ctx.translate(PROOF_W / 2 - cam.x, PROOF_H / 2 - cam.y);
+  ctx.translate(BUFFER_W / 2 - cam.x, BUFFER_H / 2 - cam.y);
   ctx.globalCompositeOperation = 'lighter';
   for (const glow of glowSources) {
     const gradient = ctx.createRadialGradient(glow.x, glow.y, 2, glow.x, glow.y, glow.radius);
@@ -1871,10 +1765,10 @@ function drawDustMotes(
   cam: { x: number; y: number },
   time: number
 ) {
-  const x0 = cam.x - PROOF_W / 2;
-  const y0 = cam.y - PROOF_H / 2;
-  const x1 = cam.x + PROOF_W / 2;
-  const y1 = cam.y + PROOF_H / 2;
+  const x0 = cam.x - BUFFER_W / 2;
+  const y0 = cam.y - BUFFER_H / 2;
+  const x1 = cam.x + BUFFER_W / 2;
+  const y1 = cam.y + BUFFER_H / 2;
   ctx.save();
   ctx.fillStyle = 'rgba(190, 205, 220, 0.14)';
   for (let i = 0; i < 150; i++) {
@@ -1944,97 +1838,32 @@ function drawActors(
 /* Post-proceso y presentación                                         */
 /* ------------------------------------------------------------------ */
 
-function present(
-  target: CanvasRenderingContext2D,
-  source: HTMLCanvasElement,
-  scale: number,
-  label: string,
-  time: number
-) {
-  const canvas = target.canvas;
-  target.save();
-  target.setTransform(1, 0, 0, 1, 0, 0);
-  target.imageSmoothingEnabled = false;
-  target.fillStyle = '#000';
-  target.fillRect(0, 0, canvas.width, canvas.height);
-
-  const drawW = PROOF_W * scale;
-  const drawH = PROOF_H * scale;
-  const ox = Math.floor((canvas.width - drawW) / 2);
-  const oy = Math.floor((canvas.height - drawH) / 2);
-  target.drawImage(source, ox, oy, drawW, drawH);
-
-  // Viñeta y grano a resolución de pantalla: dentro del buffer de 480x270 el
-  // reescalado los convertiría en bloques de arte.
-  target.save();
-  target.beginPath();
-  target.rect(ox, oy, drawW, drawH);
-  target.clip();
-
-  const cx = ox + drawW * 0.5;
-  const cy = oy + drawH * 0.5;
-  const vignette = target.createRadialGradient(
-    cx,
-    cy,
-    Math.min(drawW, drawH) * 0.28,
-    cx,
-    cy,
-    Math.max(drawW, drawH) * 0.72
-  );
-  vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
-  vignette.addColorStop(1, 'rgba(2, 5, 12, 0.55)');
-  target.fillStyle = vignette;
-  target.fillRect(ox, oy, drawW, drawH);
-
-  // Grano de 1 píxel real, con la densidad por área del pase anterior
-  target.globalAlpha = 0.05;
-  target.fillStyle = '#93A4B8';
-  const seed = Math.floor(time * 14) % 97;
-  const grain = Math.min(4200, Math.round((drawW * drawH) / 520));
-  for (let i = 0; i < grain; i++) {
-    const rx = ox + hash2(i * 3.1 + seed, seed * 1.7) * drawW;
-    const ry = oy + hash2(seed * 2.3, i * 5.7) * drawH;
-    target.fillRect(Math.floor(rx), Math.floor(ry), 1, 1);
-  }
-  target.restore();
-
-  target.font = '600 11px "JetBrains Mono", monospace';
-  target.fillStyle = 'rgba(148, 163, 184, 0.85)';
-  target.textAlign = 'left';
-  target.textBaseline = 'bottom';
-  // El arte puede desbordar y recortarse: la etiqueta se mantiene en el panel.
-  const labelX = Math.max(8, ox + 8);
-  const labelY = Math.min(canvas.height - 6, Math.max(14, oy + drawH - 6));
-  target.fillText(label, labelX, labelY);
-  target.restore();
-}
-
 /* ------------------------------------------------------------------ */
 /* Entrada pública                                                     */
 /* ------------------------------------------------------------------ */
 
 export function renderArtProof(scene: ArtProofScene): void {
   const { ctx } = scene;
-  if (!bufferCtx) bufferCtx = createCanvas(PROOF_W, PROOF_H).getContext('2d');
+  if (!bufferCtx) bufferCtx = createCanvas(BUFFER_W, BUFFER_H).getContext('2d');
   if (!bufferCtx) return;
 
   const bctx = bufferCtx;
   const time = (typeof performance !== 'undefined' ? performance.now() : 0) / 1000;
   const cam = resolveCamera(scene);
   const view = {
-    x0: cam.x - PROOF_W / 2,
-    y0: cam.y - PROOF_H / 2,
-    x1: cam.x + PROOF_W / 2,
-    y1: cam.y + PROOF_H / 2,
+    x0: cam.x - BUFFER_W / 2,
+    y0: cam.y - BUFFER_H / 2,
+    x1: cam.x + BUFFER_W / 2,
+    y1: cam.y + BUFFER_H / 2,
   };
 
   bctx.setTransform(1, 0, 0, 1, 0, 0);
   bctx.imageSmoothingEnabled = false;
   bctx.fillStyle = '#05080D';
-  bctx.fillRect(0, 0, PROOF_W, PROOF_H);
+  bctx.fillRect(0, 0, BUFFER_W, BUFFER_H);
 
   bctx.save();
-  bctx.translate(PROOF_W / 2 - cam.x, PROOF_H / 2 - cam.y);
+  bctx.translate(BUFFER_W / 2 - cam.x, BUFFER_H / 2 - cam.y);
 
   drawFloors(bctx, scene, view);
 
@@ -2075,8 +1904,8 @@ export function renderArtProof(scene: ArtProofScene): void {
   // arte se recorta por igual a los lados, en vez de quedar chico con bandas
   // enormes (con floor, un panel de 1,98 caía a ×1).
   const integerScale = isIntegerScaleRequested();
-  const fit = Math.min(ctx.canvas.width / PROOF_W, ctx.canvas.height / PROOF_H);
+  const fit = Math.min(ctx.canvas.width / BUFFER_W, ctx.canvas.height / BUFFER_H);
   const scale = Math.max(1, integerScale ? Math.round(fit) : fit);
   const factor = integerScale ? `${Math.round(scale)}` : scale.toFixed(2);
-  present(ctx, bctx.canvas, scale, `ART PROOF · 480×270 ×${factor} · ${scene.missionMode}`, time);
+  present(ctx, bctx.canvas, scale, `ART PROOF · ${BUFFER_W}×${BUFFER_H} ×${factor} · ${scene.missionMode}`, time);
 }
