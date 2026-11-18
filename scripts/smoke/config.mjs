@@ -75,8 +75,10 @@ export const PRESUPUESTO = {
   // jugar: documento, JS y CSS. Medido da 825 KiB (entry 451, vendor 206, CSS 72,
   // battlemap 60, ui 18, CSS de Google Fonts 12, documento 5, runtime 1). Es el
   // número que no se puede maquillar partiendo chunks: el jugador los descarga
-  // igual. El margen de ~3 % cubre que ese CSS de fuentes lo sirve Google y no
-  // nosotros, así que puede cambiar de tamaño o de variante sin aviso.
+  // igual. Lo vigilan los dos perfiles del humo: el rápido lo mide junto a canvas,
+  // Misión 1 y transiciones, y el completo junto al resto de los topes. El margen
+  // de ~3 % cubre que ese CSS de fuentes lo sirve Google y no nosotros, así que
+  // puede cambiar de tamaño o de variante sin aviso.
   arranque: 850 * 1024,
 };
 

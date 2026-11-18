@@ -42,8 +42,9 @@ jobs:
         run: npm run build
 
   smoke:
-    # En PR basta con canvas, Misión 1 y transiciones; en main y nightly corre
-    # el perfil completo, igual que el smoke posterior al deploy.
+    # En PR basta con canvas, Misión 1, transiciones y peso de arranque —el único
+    # tope de peso que vigilan los dos perfiles—; en main y nightly corre el perfil
+    # completo, igual que el smoke posterior al deploy.
     runs-on: ubuntu-latest
     timeout-minutes: 25
     # La imagen oficial ya trae Chromium y todas las dependencias del sistema: no se
