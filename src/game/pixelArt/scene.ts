@@ -1574,7 +1574,9 @@ function drawActors(
       ctx.rotate(actor.angle);
     }
 
-    drawPixelArtActor(ctx, actor, scene.primaryWeapon, scene.activeTool, time);
+    // El canal de píxeles dibuja su texto con la fuente de 3x5: los rótulos del
+    // sprite usan fuentes del sistema y romperían el arte y las huellas.
+    drawPixelArtActor(ctx, actor, scene.primaryWeapon, scene.activeTool, time, true);
     ctx.restore();
   }
 }

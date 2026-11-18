@@ -58,6 +58,26 @@ async function congelarTiempo(page) {
 }
 
 /**
+ * El buffer tiene que quedar libre de fuentes del sistema. Si `drawPixelArtActor`
+ * pinta un rótulo con `fillText` (la chapita COBERTURA, el NIVEL IV del dummy,
+ * los gestos del binomio), los glifos dependen del navegador y de las fuentes
+ * instaladas: la huella dejaría de valer fuera de esta máquina aunque el arte no
+ * hubiera cambiado. Se registran todas las llamadas y sólo se acepta el rótulo
+ * de `present`, que se pinta a resolución de pantalla y no entra en el hash.
+ */
+async function vigilarTextoDelSistema(page) {
+  await page.addInitScript(() => {
+    const original = CanvasRenderingContext2D.prototype.fillText;
+    const registrados = [];
+    CanvasRenderingContext2D.prototype.fillText = function (texto, ...resto) {
+      registrados.push(String(texto));
+      return original.call(this, texto, ...resto);
+    };
+    Object.defineProperty(window, '__arteTextos', { value: registrados, configurable: true });
+  });
+}
+
+/**
  * El pase dibuja su buffer 16:9 centrado sobre negro. En esta ventana (1280x800)
  * el encaje da 2,00 y sobran 40 px de banda arriba y abajo; en otras
  * proporciones la banda cae a los lados. El render normal pinta de borde a borde
@@ -118,6 +138,7 @@ function leerHuellas() {
 
 export async function comprobarArtProof(page, { url }) {
   await congelarTiempo(page);
+  await vigilarTextoDelSistema(page);
 
   const medidos = {};
   for (const [indice, escenario] of ESCENARIOS.entries()) {
@@ -130,6 +151,17 @@ export async function comprobarArtProof(page, { url }) {
     } catch (error) {
       fail(`${etiqueta}: no arranca la misión (${error.message.split('\n')[0]})`);
       continue;
+    }
+
+    const textosAjenos = await page.evaluate(() => [
+      ...new Set(
+        (window.__arteTextos ?? []).filter((texto) => !texto.startsWith('ART PROOF'))
+      ),
+    ]);
+    if (textosAjenos.length > 0) {
+      fail(
+        `${etiqueta}: el buffer dibuja texto con fuente del sistema (${textosAjenos.join(', ')}); la huella no sería portable`
+      );
     }
 
     // El canvas y el marco se comprueban una vez: son presentación y no cambian

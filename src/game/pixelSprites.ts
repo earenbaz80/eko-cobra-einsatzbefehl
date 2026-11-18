@@ -403,7 +403,14 @@ export function drawPixelArtActor(
   actor: ActorEntity,
   primaryWeapon: PrimaryWeaponId,
   activeTool: 'PRIMARY' | 'TASER' | 'GADGET',
-  elapsedTime: number
+  elapsedTime: number,
+  /**
+   * `sinTextoDelSistema`: el canal de píxeles dibuja su propio texto con la
+   * fuente de 3x5 del buffer. Sin esto, una chapita como `COBERTURA` mete
+   * glifos del sistema en el buffer y las huellas dejan de ser portables entre
+   * plataformas (el render real sigue con su texto de siempre).
+   */
+  sinTextoDelSistema = false
 ) {
   ctx.save();
   ctx.imageSmoothingEnabled = false;
@@ -539,7 +546,7 @@ export function drawPixelArtActor(
       }
 
       // Tactical Cover Badge
-      if (actor.inCover && actor.state !== 'DEAD' && actor.state !== 'ARRESTED') {
+      if (!sinTextoDelSistema && actor.inCover && actor.state !== 'DEAD' && actor.state !== 'ARRESTED') {
         ctx.fillStyle = 'rgba(16, 185, 129, 0.88)';
         ctx.fillRect(-14, -26, 28, 5);
         ctx.fillStyle = '#06090E';
@@ -633,10 +640,12 @@ export function drawPixelArtActor(
       ctx.fillRect(-12, -5, 24, 26);
       ctx.strokeRect(-12, -5, 24, 26);
 
-      ctx.fillStyle = '#38BDF8';
-      ctx.font = '700 6px "JetBrains Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('NIVEL IV', 0, 10);
+      if (!sinTextoDelSistema) {
+        ctx.fillStyle = '#38BDF8';
+        ctx.font = '700 6px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('NIVEL IV', 0, 10);
+      }
     }
     ctx.restore();
     return;
@@ -735,7 +744,8 @@ export function drawPixelArtActor(
     alertLevel,
     isFiring,
     recoilShift,
-    elapsedTime
+    elapsedTime,
+    sinTextoDelSistema
   );
 
   // High-contrast pixel-art impact flash & localized wound burst when taking fire
@@ -786,14 +796,14 @@ export function drawPixelArtActor(
   }
 
   // Tactical Prone & Cover Indicator Badges
-  if (actor.isProne && actor.state !== 'DEAD' && actor.state !== 'ARRESTED') {
+  if (!sinTextoDelSistema && actor.isProne && actor.state !== 'DEAD' && actor.state !== 'ARRESTED') {
     ctx.fillStyle = 'rgba(56, 189, 248, 0.88)';
     ctx.fillRect(-18, -22, 36, 5);
     ctx.fillStyle = '#06090E';
     ctx.font = '700 6.5px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.fillText('⬇️ AL SUELO', 0, -17.5);
-  } else if (actor.inCover && actor.state !== 'DEAD' && actor.state !== 'ARRESTED') {
+  } else if (!sinTextoDelSistema && actor.inCover && actor.state !== 'DEAD' && actor.state !== 'ARRESTED') {
     ctx.fillStyle = 'rgba(16, 185, 129, 0.88)';
     ctx.fillRect(-14, -22, 28, 5);
     ctx.fillStyle = '#06090E';
@@ -827,7 +837,8 @@ function renderHighDetailCharacterLayers(
   alertLevel: AlertLevel,
   isFiring: boolean,
   recoilShift: number,
-  elapsedTime: number
+  elapsedTime: number,
+  sinTextoDelSistema: boolean
 ) {
   ctx.save();
   ctx.translate(recoilShift, 0);
@@ -1022,9 +1033,11 @@ function renderHighDetailCharacterLayers(
         ctx.fillStyle = '#0F172A';
         ctx.fillRect(armX, armY, 4.5, 4.5);
 
-        ctx.fillStyle = '#34D399';
-        ctx.font = '700 8px "JetBrains Mono", monospace';
-        ctx.fillText('AVANCE', armX + 6, armY + 3);
+        if (!sinTextoDelSistema) {
+          ctx.fillStyle = '#34D399';
+          ctx.font = '700 8px "JetBrains Mono", monospace';
+          ctx.fillText('AVANCE', armX + 6, armY + 3);
+        }
 
         ctx.strokeStyle = '#34D399';
         ctx.lineWidth = 1.5;
@@ -1047,9 +1060,11 @@ function renderHighDetailCharacterLayers(
         ctx.lineWidth = 1.2;
         ctx.strokeRect(armX - 2, armY - 2, 6, 6);
 
-        ctx.fillStyle = '#FBBF24';
-        ctx.font = '700 8px "JetBrains Mono", monospace';
-        ctx.fillText('ALTO ✋', armX + 6, armY);
+        if (!sinTextoDelSistema) {
+          ctx.fillStyle = '#FBBF24';
+          ctx.font = '700 8px "JetBrains Mono", monospace';
+          ctx.fillText('ALTO ✋', armX + 6, armY);
+        }
       } else if (gKind === 'BREACH' || gKind === 'POINT') {
         const armX = 10 + prog * 14;
         const armY = -9 - prog * 3;
@@ -1067,9 +1082,11 @@ function renderHighDetailCharacterLayers(
         ctx.lineTo(armX + 22, armY + 2);
         ctx.stroke();
 
-        ctx.fillStyle = '#38BDF8';
-        ctx.font = '700 8px "JetBrains Mono", monospace';
-        ctx.fillText('OBJETIVO 👉', armX + 8, armY - 3);
+        if (!sinTextoDelSistema) {
+          ctx.fillStyle = '#38BDF8';
+          ctx.font = '700 8px "JetBrains Mono", monospace';
+          ctx.fillText('OBJETIVO 👉', armX + 8, armY - 3);
+        }
       } else if (gKind === 'SECURE') {
         const armX = 4 + prog * 8;
         const armY = -12 + prog * 8;
@@ -1079,9 +1096,11 @@ function renderHighDetailCharacterLayers(
         ctx.fillStyle = '#0F172A';
         ctx.fillRect(armX, armY, 4.5, 4.5);
 
-        ctx.fillStyle = '#A7F3D0';
-        ctx.font = '700 8px "JetBrains Mono", monospace';
-        ctx.fillText('ESPOSAR 👇', armX + 6, armY + 3);
+        if (!sinTextoDelSistema) {
+          ctx.fillStyle = '#A7F3D0';
+          ctx.font = '700 8px "JetBrains Mono", monospace';
+          ctx.fillText('ESPOSAR 👇', armX + 6, armY + 3);
+        }
       }
       ctx.restore();
     }
