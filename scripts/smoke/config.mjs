@@ -49,15 +49,24 @@ export const SEMILLA_E2E = SEMILLA_NUMERO >>> 0;
 export const SEMILLA_E2E_TEXTO = `0x${SEMILLA_E2E.toString(16)}`;
 
 // Topes de peso: un asset de varios MB o un salto del bundle no debería pasar el CI.
-// Los valores salen de lo que ocupa hoy el build con ~3 % de margen (JS 475 KiB,
-// dist 1654 KiB): ajustados a propósito para que el tope avise antes de una subida
-// real, no solo de un desastre. Si un asset nuevo es legítimo, se sube aquí a mano.
+// Los valores salen de lo que ocupa el build con ~3 % de margen (JS de entrada
+// 479 KiB, dist 1725 KiB): ajustados a propósito para que el tope avise antes de
+// una subida real, no sólo de un desastre. Si un asset nuevo es legítimo, se sube
+// aquí a mano.
+//
+// El tope de dist se revisó al subir el canal de píxeles: desde que se fijó en
+// 1700 KiB el build pasó de 1688 a 1725 KiB y los 37 KiB son todos JS de entrada
+// (455 → 490 kB), porque `public/` no cambió, no hay sourcemaps y los binarios
+// pesados siguen igual (sprite 396 KiB, tarjeta social 122, emblema del título
+// 106, textura del battlemap 80). Recortar 25 KiB de código para no tocar el tope
+// habría sido lo caro; lo que estaba mal era el margen, que se calculó sobre una
+// medición vieja y dejaba sólo 12 KiB de aire sobre el build real.
 export const PRESUPUESTO = {
   entradaJs: 490 * 1024,
   entradaJsGzip: 170 * 1024,
   sprite: 450 * 1024,
   tarjetaSocial: 150 * 1024,
-  dist: 1700 * 1024,
+  dist: 1780 * 1024,
 };
 
 /** Tipos que usa el servidor local para imitar a GitHub Pages. */
