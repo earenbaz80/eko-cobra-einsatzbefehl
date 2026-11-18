@@ -1,10 +1,10 @@
 /**
  * Presentación del buffer de arte en el canvas de pantalla.
  *
- * Escala el buffer con nearest-neighbor y lo centra (si la escala entera desborda
- * la ventana, el arte se recorta por igual a los lados). La viñeta y el grano se
- * pintan a resolución de pantalla: dentro del buffer el reescalado los
- * convertiría en bloques de arte.
+ * `BUFFER_W`x`BUFFER_H` es el tamaño interno del arte. `present` escala el buffer
+ * con nearest-neighbor y lo centra, sin decidir la escala: esa política queda en
+ * quien llama. La viñeta y el grano se pintan a resolución de pantalla: dentro
+ * del buffer el reescalado los convertiría en bloques de arte.
  */
 
 import { hash2 } from './bitmap';
@@ -26,8 +26,8 @@ export function present(
   target.fillStyle = '#000';
   target.fillRect(0, 0, canvas.width, canvas.height);
 
-  const drawW = BUFFER_W * scale;
-  const drawH = BUFFER_H * scale;
+  const drawW = source.width * scale;
+  const drawH = source.height * scale;
   const ox = Math.floor((canvas.width - drawW) / 2);
   const oy = Math.floor((canvas.height - drawH) / 2);
   target.drawImage(source, ox, oy, drawW, drawH);

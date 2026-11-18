@@ -15,14 +15,14 @@ export interface PixelArt {
   map: Record<string, string>;
 }
 
-export interface TileBounds {
+interface TileBounds {
   x0: number;
   y0: number;
   x1: number;
   y1: number;
 }
 
-export interface TileSet {
+interface TileSet {
   getTile(name: string, variant?: number): HTMLCanvasElement;
   fillTiles(
     ctx: CanvasRenderingContext2D,
@@ -31,8 +31,8 @@ export interface TileSet {
     y: number,
     w: number,
     h: number,
-    bounds: TileBounds,
-    options?: { variants?: number }
+    bounds?: TileBounds,
+    variants?: number
   ): void;
 }
 
@@ -53,7 +53,7 @@ export function hash2(x: number, y: number): number {
   return Math.abs(value - Math.floor(value));
 }
 
-export function renderArtToCanvas(pixelArt: PixelArt, scale: number): HTMLCanvasElement {
+function renderArtToCanvas(pixelArt: PixelArt, scale: number): HTMLCanvasElement {
   const width = pixelArt.rows[0].length;
   const height = pixelArt.rows.length;
   const canvas = createCanvas(width * scale, height * scale);
@@ -97,7 +97,11 @@ export function createTileSet(
     return Math.floor(hash2(Math.floor(x / tileSize), Math.floor(y / tileSize)) * count);
   }
 
-  /** Rellena un rectángulo con baldosas, recortado a los límites. */
+  /**
+   * Rellena un rectángulo con baldosas, recortado a `bounds` (por defecto, el
+   * propio rectángulo: nada se sale de él). `variants` limita cuántas variantes
+   * del catálogo se reparten; con una sola, la textura no alterna.
+   */
   function fillTiles(
     ctx: CanvasRenderingContext2D,
     tileName: string,
@@ -105,8 +109,8 @@ export function createTileSet(
     y: number,
     w: number,
     h: number,
-    bounds: TileBounds,
-    options: { variants?: number } = {}
+    bounds: TileBounds = { x0: x, y0: y, x1: x + w, y1: y + h },
+    variants = 1
   ) {
     const x0 = Math.max(x, bounds.x0);
     const y0 = Math.max(y, bounds.y0);
@@ -114,7 +118,6 @@ export function createTileSet(
     const y1 = Math.min(y + h, bounds.y1);
     if (x1 <= x0 || y1 <= y0) return;
 
-    const variants = options.variants ?? 1;
     const startX = Math.floor(x0 / tileSize) * tileSize;
     const startY = Math.floor(y0 / tileSize) * tileSize;
 

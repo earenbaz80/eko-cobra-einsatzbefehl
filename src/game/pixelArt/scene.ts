@@ -129,9 +129,9 @@ function drawFloors(ctx: CanvasRenderingContext2D, scene: PixelScene, view: { x0
     // Base opaca: evita que las esquinas transparentes del patrón dejen huecos
     ctx.fillStyle = FLOOR_BASE_COLOR[tile] ?? '#1B2430';
     ctx.fillRect(room.x, room.y, room.w, room.h);
-    fillTiles(ctx, tile, room.x, room.y, room.w, room.h, view, {
-      variants: tile === 'snow' || tile === 'wood' ? 2 : 1,
-    });
+    // Nieve y madera alternan dos patrones; el resto repite el único que tiene.
+    const variants = tile === 'snow' || tile === 'wood' ? 2 : 1;
+    fillTiles(ctx, tile, room.x, room.y, room.w, room.h, view, variants);
     // La nieve tiende a quemar el detalle: se enfría con un velo tenue.
     if (tile === 'snow') {
       ctx.fillStyle = 'rgba(24, 38, 52, 0.16)';
@@ -362,7 +362,7 @@ function bevelBox(
 
 function drawFireplace(ctx: CanvasRenderingContext2D, item: FurnitureItem, time: number) {
   const { x, y, w, h } = item;
-  fillTiles(ctx, 'wall', x, y, w, h, { x0: x, y0: y, x1: x + w, y1: y + h });
+  fillTiles(ctx, 'wall', x, y, w, h);
   bevelBox(ctx, x, y, w, h, '#4B5865', '#0E141B');
 
   // Hornacina
@@ -394,7 +394,7 @@ function drawFireplace(ctx: CanvasRenderingContext2D, item: FurnitureItem, time:
 
 function drawSofa(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
   const { x, y, w, h } = item;
-  fillTiles(ctx, 'leather', x, y, w, h, { x0: x, y0: y, x1: x + w, y1: y + h });
+  fillTiles(ctx, 'leather', x, y, w, h);
   // Respaldo con brillo de cuero
   ctx.fillStyle = '#4A1A14';
   ctx.fillRect(x + 3, y + 2, w - 6, Math.max(6, h * 0.2));
@@ -421,7 +421,7 @@ function drawSofa(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
 
 function drawSafe(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
   const { x, y, w, h } = item;
-  fillTiles(ctx, 'metal', x, y, w, h, { x0: x, y0: y, x1: x + w, y1: y + h });
+  fillTiles(ctx, 'metal', x, y, w, h);
   ctx.strokeStyle = '#0F151B';
   ctx.lineWidth = 2;
   ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
@@ -442,7 +442,7 @@ function drawBed(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
   // Marco de madera
   ctx.fillStyle = '#2A1B11';
   ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
-  fillTiles(ctx, 'bed', x, y, w, h, { x0: x, y0: y, x1: x + w, y1: y + h });
+  fillTiles(ctx, 'bed', x, y, w, h);
   // Almohadas
   ctx.fillStyle = '#F1F5F9';
   ctx.fillRect(x + 6, y + 5, w * 0.34, Math.max(7, h * 0.14));
@@ -458,7 +458,7 @@ function drawBed(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
 
 function drawCrate(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
   const { x, y, w, h } = item;
-  fillTiles(ctx, 'wood', x, y, w, h, { x0: x, y0: y, x1: x + w, y1: y + h });
+  fillTiles(ctx, 'wood', x, y, w, h);
   ctx.strokeStyle = 'rgba(20, 14, 9, 0.85)';
   ctx.lineWidth = 3;
   ctx.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
@@ -470,7 +470,7 @@ function drawCrate(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
 
 function drawTable(ctx: CanvasRenderingContext2D, item: FurnitureItem, metal = false) {
   const { x, y, w, h } = item;
-  fillTiles(ctx, metal ? 'metal' : 'wood', x, y, w, h, { x0: x, y0: y, x1: x + w, y1: y + h });
+  fillTiles(ctx, metal ? 'metal' : 'wood', x, y, w, h);
   ctx.fillStyle = metal ? 'rgba(120, 140, 160, 0.22)' : 'rgba(150, 108, 70, 0.22)';
   ctx.fillRect(x + 2, y + 2, w - 4, Math.max(3, h * 0.18));
   ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
@@ -480,7 +480,7 @@ function drawTable(ctx: CanvasRenderingContext2D, item: FurnitureItem, metal = f
 
 function drawShelf(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
   const { x, y, w, h } = item;
-  fillTiles(ctx, 'wood', x, y, w, h, { x0: x, y0: y, x1: x + w, y1: y + h });
+  fillTiles(ctx, 'wood', x, y, w, h);
   // Baldaños y bultos
   const shelves = Math.max(2, Math.floor(h / 22));
   for (let i = 0; i < shelves; i++) {
@@ -505,7 +505,7 @@ function drawShelf(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
 function drawBench(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
   const { x, y, w, h } = item;
   const horizontal = w >= h;
-  fillTiles(ctx, 'wood', x, y, w, h, { x0: x, y0: y, x1: x + w, y1: y + h });
+  fillTiles(ctx, 'wood', x, y, w, h);
   ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
   if (horizontal) ctx.fillRect(x, y, w, Math.max(5, h * 0.28));
   else ctx.fillRect(x, y, Math.max(5, w * 0.28), h);
@@ -517,7 +517,7 @@ function drawBench(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
 
 function drawAppliance(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
   const { x, y, w, h } = item;
-  fillTiles(ctx, 'metal', x, y, w, h, { x0: x, y0: y, x1: x + w, y1: y + h });
+  fillTiles(ctx, 'metal', x, y, w, h);
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
   ctx.lineWidth = 1;
   ctx.strokeRect(x + 4.5, y + 6.5, w - 9, h - 12);
@@ -591,7 +591,7 @@ function drawPlant(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
 
 function drawPallet(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
   const { x, y, w, h } = item;
-  fillTiles(ctx, 'wood', x, y, w, h, { x0: x, y0: y, x1: x + w, y1: y + h });
+  fillTiles(ctx, 'wood', x, y, w, h);
   ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
   for (let i = 1; i < 4; i++) ctx.fillRect(x, y + (h * i) / 4 - 1, w, 2);
   ctx.strokeStyle = 'rgba(30, 20, 12, 0.7)';
@@ -1233,7 +1233,7 @@ function drawWalls(ctx: CanvasRenderingContext2D, scene: PixelScene, view: { x0:
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
     ctx.fillRect(x + 5, y + 7, w, h);
 
-    fillTiles(ctx, 'wall', x, y, w, h, { x0: x, y0: y, x1: x + w, y1: y + h });
+    fillTiles(ctx, 'wall', x, y, w, h);
 
     // Canto superior iluminado + nieve acumulada
     ctx.fillStyle = '#5A6878';
