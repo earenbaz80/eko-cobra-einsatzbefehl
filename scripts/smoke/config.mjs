@@ -54,10 +54,10 @@ export const SEMILLA_E2E_TEXTO = `0x${SEMILLA_E2E.toString(16)}`;
 // una subida real, no sólo de un desastre. Si un asset nuevo es legítimo, se sube
 // aquí a mano.
 //
-// `entradaJs` sigue en 490 KiB aunque el entry mide 451: el pase de arte
-// (`?art=proof`) vive ahora en un chunk propio que sólo se descarga cuando la URL
-// pide la prueba, así que esos 39 KiB de aire son reales y la próxima función
-// mediana no toca este tope antes que el de `dist`.
+// `entradaJs` sigue en 490 KiB aunque el entry mide 452: el pase de arte vive en
+// un chunk propio que se descarga después del primer cuadro, no en el entry, así
+// que esos 39 KiB de aire son reales y la próxima función mediana no toca este
+// tope antes que el de `dist`.
 //
 // El tope de dist subió a 1780 KiB al crecer el canal de píxeles (+37 KiB de JS de
 // entrada, 455 → 490 kB) y volvió a bajar a 1725 KiB al optimizar el emblema del
@@ -72,14 +72,15 @@ export const PRESUPUESTO = {
   tarjetaSocial: 150 * 1024,
   dist: 1725 * 1024,
   // `arranque` no es el peso de dist/ sino lo que el navegador baja antes de poder
-  // jugar: documento, JS y CSS. Medido da 825 KiB (entry 451, vendor 206, CSS 72,
-  // battlemap 60, ui 18, CSS de Google Fonts 12, documento 5, runtime 1). Es el
-  // número que no se puede maquillar partiendo chunks: el jugador los descarga
-  // igual. Lo vigilan los dos perfiles del humo: el rápido lo mide junto a canvas,
-  // Misión 1 y transiciones, y el completo junto al resto de los topes. El margen
-  // de ~3 % cubre que ese CSS de fuentes lo sirve Google y no nosotros, así que
-  // puede cambiar de tamaño o de variante sin aviso.
-  arranque: 850 * 1024,
+  // jugar: documento, JS y CSS. Medido da 854 KiB (entry 452, vendor 206, CSS 72,
+  // artProof 29, battlemap 60, ui 18, CSS de Google Fonts 12, documento 5,
+  // runtime 1). El pase de píxeles es el render por defecto, así que su chunk
+  // cuenta: `?art=classic` no lo pide, pero el jugador lo descarga igual. Lo
+  // vigilan los dos perfiles del humo: el rápido lo mide junto a canvas, Misión 1
+  // y transiciones, y el completo junto al resto de los topes. El margen de ~5 %
+  // cubre que ese CSS de fuentes lo sirve Google y no nosotros, así que puede
+  // cambiar de tamaño o de variante sin aviso.
+  arranque: 900 * 1024,
 };
 
 /** Tipos que usa el servidor local para imitar a GitHub Pages. */

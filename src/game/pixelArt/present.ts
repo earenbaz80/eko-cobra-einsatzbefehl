@@ -15,13 +15,24 @@ import { hash2 } from './bitmap';
 export const BUFFER_W = 640;
 export const BUFFER_H = 360;
 
+/**
+ * Dónde quedó el arte y a qué escala. En píxeles del backing store del canvas
+ * (los mismos de `canvas.width`), que quien llama convierte a píxeles CSS con su
+ * `renderScale` para alinear ratón y overlays con lo que se ve.
+ */
+export interface Presentacion {
+  readonly cx: number;
+  readonly cy: number;
+  readonly scale: number;
+}
+
 export function present(
   target: CanvasRenderingContext2D,
   source: HTMLCanvasElement,
   scale: number,
   label: string,
   time: number
-) {
+): Presentacion {
   const canvas = target.canvas;
   target.save();
   target.setTransform(1, 0, 0, 1, 0, 0);
@@ -78,4 +89,6 @@ export function present(
   const labelY = Math.min(canvas.height - 6, Math.max(14, oy + drawH - 6));
   target.fillText(label, labelX, labelY);
   target.restore();
+
+  return { cx: ox + drawW * 0.5, cy: oy + drawH * 0.5, scale };
 }

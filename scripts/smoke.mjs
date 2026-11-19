@@ -27,7 +27,7 @@
  *   smoke/checks/persistencia.mjs mover, autoguardar, recargar y reanudar sin reiniciar
  *   smoke/checks/rendimiento.mjs p50/p95 de frame time en escritorio y móvil emulado
  *   smoke/checks/movil.mjs       audio al primer toque, joystick y franjas del HUD
- *   smoke/checks/arte.mjs       ?art=proof arranca la misión y pinta escena (rápido y completo)
+ *   smoke/checks/arte.mjs       pase de píxeles por defecto y opt-out clásico (rápido y completo)
  * y las piezas comunes en smoke/config, informa, archivos, servidor-local, navegador y canvas.
  *
  * Perfiles:
@@ -115,7 +115,7 @@ try {
     // Al final: la recarga y los cinco segundos de autoguardado no deben contaminar
     // la medición de frames, que es la comprobación más sensible al ruido del runner.
     await comprobarPersistencia(page, contexto);
-    // Al final: recarga la página con ?art=proof y no depende del estado previo.
+    // Al final: recarga la página (pase por defecto, opt-out y misiones) y no depende del estado previo.
     await comprobarArtProof(page, contexto);
   }
 } catch (error) {

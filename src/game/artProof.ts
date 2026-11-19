@@ -1,14 +1,14 @@
 /**
- * PRUEBA DE ARTE — render alternativo experimental.
+ * PASE DE ARTE EN PÍXELES — el render por defecto del juego.
  *
- * Objetivo: demostrar el mismo juego con arte de píxeles real (tileset + sprites
+ * Objetivo: mostrar el mismo juego con arte de píxeles real (tileset + sprites
  * dibujados a mano), sombras proyectadas y un pase de luz suave, renderizado a
  * una resolución interna de 640x360 presentada a la escala de la ventana.
  *
  * No toca la simulación: sólo lee el estado que ya existe en el motor.
- * Se activa con `?art=proof`. Opcionales: `&focus=salon` para encuadrar el salón
- * y `&scale=int` para forzar escala entera (el entero más cercano, recortando
- * el desborde a los lados si hace falta).
+ * `?art=classic` devuelve el render anterior para comparar. Opcionales:
+ * `&focus=salon` para encuadrar el salón y `&scale=int` para forzar escala
+ * entera (el entero más cercano, recortando el desborde a los lados si hace falta).
  *
  * La pintura de la escena vive en `pixelArt/scene` (con su catálogo de baldosas
  * en `pixelArt/tiles`); aquí queda la entrada, el encuadre de la prueba y la
@@ -19,10 +19,31 @@ import { createCanvas } from './pixelArt/bitmap';
 import { BUFFER_H, BUFFER_W, present } from './pixelArt/present';
 import { renderScene, type PixelScene } from './pixelArt/scene';
 
-/** La prueba dibuja en su propio buffer; el canvas de pantalla llega aparte. */
-type ArtProofScene = PixelScene & { ctx: CanvasRenderingContext2D };
+/**
+ * La prueba dibuja en su propio buffer; el canvas de pantalla y su
+ * `devicePixelRatio` llegan aparte para poder devolver el encuadre en píxeles CSS.
+ */
+type ArtProofScene = PixelScene & { ctx: CanvasRenderingContext2D; renderScale: number };
+
+/** Centro de la cámara en pantalla (px CSS) y píxeles por unidad de mundo. */
+export interface EncuadrePresentado {
+  readonly x: number;
+  readonly y: number;
+  readonly zoom: number;
+}
 
 let bufferCtx: CanvasRenderingContext2D | null = null;
+let encuadre: EncuadrePresentado | null = null;
+
+/**
+ * Encuadre de la última presentación. El motor lo usa como `framing` para que
+ * `screenToWorld`/`worldToScreen` y sus overlays caigan donde se ve el arte: el
+ * canal presenta otro buffer (otra escala, con letterbox), no el encuadre clásico.
+ * Null mientras el pase no haya pintado ningún cuadro.
+ */
+export function geometriaPresentada(): EncuadrePresentado | null {
+  return encuadre;
+}
 
 let cachedParams: URLSearchParams | null = null;
 
@@ -96,5 +117,21 @@ export function renderArtProof(scene: ArtProofScene): void {
   const fit = Math.min(ctx.canvas.width / BUFFER_W, ctx.canvas.height / BUFFER_H);
   const scale = Math.max(1, integerScale ? Math.round(fit) : fit);
   const factor = integerScale ? `${Math.round(scale)}` : scale.toFixed(2);
-  present(ctx, bctx.canvas, scale, `ART PROOF · ${BUFFER_W}×${BUFFER_H} ×${factor} · ${scene.missionMode}`, time);
+  const presentado = present(
+    ctx,
+    bctx.canvas,
+    scale,
+    `ART PROOF · ${BUFFER_W}×${BUFFER_H} ×${factor} · ${scene.missionMode}`,
+    time
+  );
+
+  // El buffer mapea 1 unidad de mundo = 1 px, y `present` centra el arte en el
+  // canvas: el centro de la cámara queda en el centro del panel. Se devuelve en
+  // px CSS dividiendo por el `devicePixelRatio` con el que se pintó.
+  const renderScale = scene.renderScale > 0 ? scene.renderScale : 1;
+  encuadre = {
+    x: presentado.cx / renderScale,
+    y: presentado.cy / renderScale,
+    zoom: presentado.scale / renderScale,
+  };
 }

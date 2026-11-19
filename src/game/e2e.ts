@@ -14,7 +14,7 @@ declare global {
  */
 export function instalarHookE2E(engine: TacticalEngineCore): () => void {
   // El pase de arte vive en su propio chunk; se pide acá porque el humo lo
-  // consulta enseguida. Sin `?art=proof` esta llamada no descarga nada.
+  // consulta enseguida. Con `?art=classic` esta llamada no descarga nada.
   precargarPaseDeArte();
   const hook: EkoE2EHook = Object.freeze({
     get gameState() {

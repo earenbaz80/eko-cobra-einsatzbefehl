@@ -96,13 +96,15 @@ La app queda en <http://localhost:3000>.
 | `npm run lint` | Typecheck con `tsc --noEmit` |
 | `npm run clean` | Borra `dist/` y `server.js` |
 
-## Render de prueba (pixel art)
+## Arte en píxeles (render por defecto)
 
-Con `?art=proof` en la URL el motor dibuja el mismo estado de partida con un arte alternativo experimental —tileset y sprites de píxeles dibujados a mano, sombras de contacto y un pase de luz suave— a una resolución interna de **640×360** que después se presenta escalada, siempre con nearest-neighbor y sin blur. No toca la simulación: sólo lee lo que el motor ya tiene.
+El motor dibuja la escena táctica con arte de píxeles —tileset y sprites dibujados a mano, sombras de contacto y un pase de luz suave— a una resolución interna de **640×360** que después se presenta escalada, siempre con nearest-neighbor y sin blur. No toca la simulación: sólo lee lo que el motor ya tiene.
+
+El pase viaja en su propio chunk y se pide en cuanto el motor pinta el primer cuadro de la escena; mientras llega, se dibuja el render anterior, así que la partida nunca queda en blanco ni parpadea. `?art=classic` recupera ese render anterior para comparar y, en ese caso, el chunk no se descarga.
 
 | Parámetro | Efecto |
 |---|---|
-| `?art=proof` | Activa el render de prueba. |
+| `?art=classic` | Vuelve al render anterior (sin descargar el pase). |
 | `&focus=salon` | Encuadra el salón del chalet alpino en vez de seguir a la cámara. |
 | `&scale=int` | Fuerza escala entera, para capturas sin remuestreo. |
 

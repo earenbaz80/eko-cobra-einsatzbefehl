@@ -37,7 +37,7 @@ no importan React salvo los tipos.
 | `asphaltTexture.ts` | Texturas procedurales de asfalto. |
 | `battlemapAssets.ts` | Catálogo de assets de escenario. |
 | `artDirection.ts` | Lenguaje visual compartido: tokens RGB semánticos (aliado, amenaza, advertencia) que se componen con `rgba()`/`rgb()` sin duplicar hex. |
-| `artProof.ts` | Render alternativo experimental (`?art=proof`): el mismo estado del motor a 640×360 con tileset de píxeles y presentación nearest-neighbor a la escala de la ventana. No toca la simulación. |
+| `artProof.ts` | Render por defecto: el estado del motor a 640×360 con tileset de píxeles y presentación nearest-neighbor a la escala de la ventana. Se carga en su chunk al primer cuadro y `?art=classic` devuelve el render anterior. No toca la simulación. |
 
 ## Mapas
 
@@ -62,7 +62,7 @@ Cada escenario tiene su layout en un módulo propio: `grazMap.ts`, `stationMap.t
 - Modales con `React.lazy` + `Suspense` (chunks separados).
 - Modo de baja calidad automático cuando el frame supera ~33 ms.
 - El canvas mide el coste del render y lo comunica al motor.
-- Presupuestos vigilados por la prueba de humo (tope / medido hoy): JS de entrada 490 / 451 KiB, `dist/` 1725 / 1676 KiB, peso de arranque 850 / 825 KiB. El peso de arranque lo vigilan los dos perfiles (rápido y completo); los demás, sólo el completo.
+- Presupuestos vigilados por la prueba de humo (tope / medido hoy): JS de entrada 490 / 452 KiB, `dist/` 1725 / 1676 KiB, peso de arranque 900 / 854 KiB. El peso de arranque lo vigilan los dos perfiles (rápido y completo); los demás, sólo el completo.
 
 ## Accesibilidad y seguridad
 

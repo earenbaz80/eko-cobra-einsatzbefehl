@@ -210,10 +210,11 @@ export class TacticalEngine extends TacticalEngineCore {
   public render() {
     const ctx = this.ctx;
 
-    // Prueba de arte opcional (?art=proof): pinta la escena con tileset, sprites
-    // y luz suave a 640x360 reescalado a la ventana. Sólo cambia el dibujo. El
-    // canal está en su propio chunk y se pide una sola vez; fuera de la prueba
-    // no se descarga, y mientras viaja sigue dibujando el pase normal.
+    // Pase de arte por defecto: pinta la escena con tileset, sprites y luz suave
+    // a 640x360 reescalado a la ventana. Sólo cambia el dibujo. El canal está en
+    // su propio chunk y se pide una sola vez; con `?art=classic` no se descarga
+    // y el juego usa el render anterior, y mientras viaja se pinta ese mismo
+    // pase clásico para que la escena nunca quede en blanco.
     precargarPaseDeArte();
     const paseDeArte = paseDeArteCargado();
     if (paseDeArte) {
@@ -236,8 +237,13 @@ export class TacticalEngine extends TacticalEngineCore {
         camY: this.camY,
         missionMode: this.missionMode,
         primaryWeapon: this.plan.primaryWeapon,
-        activeTool: this.activeTool
+        activeTool: this.activeTool,
+        renderScale: this.renderScale
       });
+      // El pase returna antes de `renderActors`, así que las capas que el motor
+      // dibuja sobre la escena hay que repintarlas acá: sin esto, las órdenes al
+      // binomio se quedaban sin burbuja en el render por defecto.
+      this.renderSpeechBubblesOverlay(ctx);
       return;
     }
 
@@ -367,6 +373,62 @@ export class TacticalEngine extends TacticalEngineCore {
       ctx.fillStyle = `rgba(248, 250, 252, ${this.flashScreenAlpha})`;
       ctx.fillRect(0, 0, width, height);
     }
+  }
+
+  /**
+   * Burbuja de texto de un actor, en el espacio de mundo vigente: el render
+   * clásico llega con la transformación del actor aplicada y el pase de píxeles
+   * desde `renderSpeechBubblesOverlay`.
+   */
+  private renderSpeechBubble(ctx: CanvasRenderingContext2D, actor: ActorEntity) {
+    const bubble = actor.speechBubble;
+    if (!bubble) return;
+
+    ctx.save();
+    ctx.font = '600 10.5px "Plus Jakarta Sans", sans-serif';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
+    ctx.shadowBlur = 4;
+    ctx.fillStyle =
+      bubble.type === 'COMMAND' ? '#FBBF24' : bubble.type === 'HOSTILE' ? '#EF4444' : '#F8FAFC';
+    ctx.textAlign = 'center';
+    ctx.fillText(bubble.text, 0, -actor.radius - 28);
+    ctx.restore();
+  }
+
+  /**
+   * Burbujas sobre el pase de píxeles. El pase presenta su buffer y retorna, así
+   * que acá se restablece el encuadre del motor (`framing`, que con el pase
+   * activo es el suyo) y se repintan a resolución de pantalla: el texto queda
+   * nítido y sobre el actor que se ve en el arte.
+   */
+  private renderSpeechBubblesOverlay(ctx: CanvasRenderingContext2D) {
+    const actores = this.actors.filter((actor) => actor.speechBubble);
+    if (actores.length === 0) return;
+
+    const framing = this.framing;
+    ctx.save();
+    ctx.setTransform(this.renderScale, 0, 0, this.renderScale, 0, 0);
+    ctx.translate(framing.x, framing.y);
+    ctx.scale(framing.zoom, framing.zoom);
+    ctx.translate(-this.camX, -this.camY);
+    for (const actor of actores) {
+      ctx.save();
+      ctx.translate(actor.x, actor.y);
+      this.renderSpeechBubble(ctx, actor);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  /**
+   * Encuadre vigente: con el pase de píxeles activo, el suyo. El pase presenta un
+   * buffer de 640x360 escalado y centrado, así que mientras pinta manda su última
+   * presentación: `screenToWorld`, `worldToScreen` y los overlays caen donde se
+   * ve el arte. Con `?art=classic` —o antes de que llegue el chunk— manda el
+   * encuadre clásico.
+   */
+  protected override get framing(): { x: number; y: number; zoom: number } {
+    return paseDeArteCargado()?.geometriaPresentada() ?? super.framing;
   }
 
   private renderDirectionalPlayerHitEffect(
@@ -2413,24 +2475,7 @@ export class TacticalEngine extends TacticalEngineCore {
         ctx.restore();
       }
 
-      if (actor.speechBubble) {
-        const text = actor.speechBubble.text;
-        ctx.font = '600 10.5px "Plus Jakarta Sans", sans-serif';
-        const boxY = -actor.radius - 28;
-
-        ctx.save();
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
-        ctx.shadowBlur = 4;
-        ctx.fillStyle =
-          actor.speechBubble.type === 'COMMAND'
-            ? '#FBBF24'
-            : actor.speechBubble.type === 'HOSTILE'
-              ? '#EF4444'
-              : '#F8FAFC';
-        ctx.textAlign = 'center';
-        ctx.fillText(text, 0, boxY);
-        ctx.restore();
-      }
+      this.renderSpeechBubble(ctx, actor);
 
       // Render Biometric Facial Recognition Reticle & Radio ID Tag
       if (!isOperator && this.gameState === 'PLAYING') {

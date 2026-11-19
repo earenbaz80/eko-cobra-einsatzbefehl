@@ -1,12 +1,13 @@
 /**
- * `?art=proof`: el pase de arte cenital arranca la misión, pinta escena y deja
- * un buffer estable frente a la semilla fija del humo.
+ * Pase de arte en píxeles, que es el render por defecto: arranca la misión,
+ * pinta escena y deja un buffer estable frente a la semilla fija del humo.
  *
- * Es una superficie que ningún otro check abre: si el render experimental se
- * rompe, el juego normal sigue pintando y el humo pasaría en verde. Aquí se
- * falla si la página lanza excepciones (las recoge `vigilarPagina`), si el
- * canvas queda vacío o si no aparece el marco con el que el pase presenta su
- * buffer 16:9.
+ * Es una superficie que ningún otro check abre: si el pase se rompe, el juego
+ * sigue pintando con el clásico y el humo pasaría en verde. Aquí se falla si la
+ * página lanza excepciones (las recoge `vigilarPagina`), si el canvas queda
+ * vacío o si no aparece el marco con el que el pase presenta su buffer 16:9.
+ * También se comprueba el opt-out: con `?art=classic` el chunk no se descarga,
+ * no hay buffer del pase y el render anterior pinta de borde a borde.
  *
  * Encima de eso va la regresión visual: con el reloj congelado, cada escenario
  * tiene que dar siempre el mismo FNV-1a sobre los píxeles del buffer. Las
@@ -34,12 +35,17 @@ const ACTUALIZAR = process.env.ART_PROOF_HUELLAS === '1';
  * estación, estación nocturna y aeropuerto.
  */
 const ESCENARIOS = [
-  { id: 'graz-salon', mision: 'Misión 1: Piso Graz - Lend', consulta: 'art=proof&focus=salon' },
-  { id: 'tirol', mision: 'Misión 4: Chalet Alpino (Tirol)', consulta: 'art=proof' },
-  { id: 'estacion', mision: 'Misión 2: Estación de Trenes', consulta: 'art=proof' },
-  { id: 'estacion-nocturna', mision: 'Misión 2B: Estación Nocturna', consulta: 'art=proof' },
-  { id: 'schwechat', mision: 'Misión 5: Aeropuerto Wien-Schwechat', consulta: 'art=proof' },
+  { id: 'graz-salon', mision: 'Misión 1: Piso Graz - Lend', consulta: 'focus=salon' },
+  { id: 'tirol', mision: 'Misión 4: Chalet Alpino (Tirol)', consulta: '' },
+  { id: 'estacion', mision: 'Misión 2: Estación de Trenes', consulta: '' },
+  { id: 'estacion-nocturna', mision: 'Misión 2B: Estación Nocturna', consulta: '' },
+  { id: 'schwechat', mision: 'Misión 5: Aeropuerto Wien-Schwechat', consulta: '' },
 ];
+
+/** URL del escenario; `consulta` puede venir vacía porque el pase es el defecto. */
+function urlDelEscenario(url, consulta) {
+  return consulta ? `${url}?${consulta}` : url;
+}
 
 /**
  * Congela el reloj antes de que arranque la app. El pase lee `performance.now()`
@@ -85,9 +91,9 @@ async function vigilarTextoDelSistema(page) {
 }
 
 /**
- * El pase vive en su propio chunk: se descarga sólo cuando la URL pide la
- * prueba. La huella no lo notaría —hashea el buffer, no la red—, así que un
- * import estático devolvería el canal al JS de entrada en silencio y el aire
+ * El pase vive en su propio chunk: se descarga por defecto y no con
+ * `?art=classic`. La huella no lo notaría —hashea el buffer, no la red—, así que
+ * un import estático devolvería el canal al JS de entrada en silencio y el aire
  * del tope se evaporaría con el humo en verde.
  */
 async function comprobarChunkSeparado(page, url) {
@@ -100,23 +106,66 @@ async function comprobarChunkSeparado(page, url) {
     );
 
   await page.goto(url, { waitUntil: 'load' });
-  await page.waitForTimeout(400);
-  const sinPrueba = await pedidosDeArte();
-
-  const conPrueba = new URL(url);
-  conPrueba.searchParams.set('art', 'proof');
-  await page.goto(conPrueba.href, { waitUntil: 'load' });
   await page.waitForTimeout(600);
-  const conPase = await pedidosDeArte();
+  const porDefecto = await pedidosDeArte();
 
-  if (sinPrueba.length > 0) {
+  const conClasico = new URL(url);
+  conClasico.searchParams.set('art', 'classic');
+  await page.goto(conClasico.href, { waitUntil: 'load' });
+  await page.waitForTimeout(400);
+  const clasico = await pedidosDeArte();
+
+  if (porDefecto.length === 0) {
+    fail(`${ETIQUETA}: sin parámetros no se descarga el pase; el render por defecto no es el de píxeles`);
+  } else if (clasico.length > 0) {
     fail(
-      `${ETIQUETA}: sin ?art=proof ya se descarga el pase (${sinPrueba.length} recurso/s); el canal volvió al arranque`
+      `${ETIQUETA}: ?art=classic sigue descargando el pase (${clasico.length} recurso/s); el opt-out no libera el chunk`
     );
-  } else if (conPase.length === 0) {
-    fail(`${ETIQUETA}: ?art=proof no pide el pase en un chunk aparte`);
   } else {
-    console.log(`${ETIQUETA} · pase en chunk aparte (${conPase.length} recurso, 0 sin el flag)`);
+    console.log(`${ETIQUETA} · pase en chunk aparte (${porDefecto.length} recurso, 0 con ?art=classic)`);
+  }
+}
+
+/**
+ * Opt-out: con `?art=classic` no hay buffer del pase y el render anterior pinta
+ * de borde a borde (sin las bandas negras que deja la presentación 16:9).
+ */
+async function comprobarPaseClasico(page, url) {
+  const clasica = new URL(url);
+  clasica.searchParams.set('art', 'classic');
+  try {
+    await arrancarMision(page, clasica.href, 'Misión 1: Piso Graz - Lend', {
+      asentarMs: 600,
+      reiniciarAzar: true,
+    });
+  } catch (error) {
+    fail(`${ETIQUETA} classic: no arranca la misión (${error.message.split('\n')[0]})`);
+    return;
+  }
+
+  const estado = await page.evaluate(() => {
+    const el = document.querySelector('canvas');
+    const ctx = el.getContext('2d');
+    const fila = Math.floor(el.height / 2);
+    const pintado = (x) => {
+      const [r, g, b] = ctx.getImageData(x, fila, 1, 1).data;
+      return r + g + b > 0;
+    };
+    let izquierda = 0;
+    while (izquierda < el.width && !pintado(izquierda)) izquierda += 1;
+    let derecha = 0;
+    while (derecha < el.width && !pintado(el.width - 1 - derecha)) derecha += 1;
+    return { hash: window.__eko?.artBufferHash() ?? null, izquierda, derecha };
+  });
+
+  if (estado.hash !== null) {
+    fail(`${ETIQUETA} classic: el pase de píxeles sigue activo (buffer ${estado.hash})`);
+  } else if (estado.izquierda > 2 || estado.derecha > 2) {
+    fail(
+      `${ETIQUETA} classic: el render anterior deja bandas (${estado.izquierda}/${estado.derecha} px); el pase siguió pintando`
+    );
+  } else {
+    console.log(`${ETIQUETA} · ?art=classic sin pase y a sangre (bandas ${estado.izquierda}/${estado.derecha} px)`);
   }
 }
 
@@ -124,7 +173,7 @@ async function comprobarChunkSeparado(page, url) {
  * El pase dibuja su buffer 16:9 centrado sobre negro. En esta ventana (1280x800)
  * el encaje da 2,00 y sobran 40 px de banda arriba y abajo; en otras
  * proporciones la banda cae a los lados. El render normal pinta de borde a borde
- * y no deja ninguna, así que el marco es la prueba de que `?art=proof` se aplicó.
+ * y no deja ninguna, así que el marco es la prueba de que el pase de píxeles se aplicó.
  */
 async function comprobarMarco(page) {
   const marco = await page.evaluate(() => {
@@ -183,12 +232,13 @@ export async function comprobarArtProof(page, { url }) {
   await congelarTiempo(page);
   await vigilarTextoDelSistema(page);
   await comprobarChunkSeparado(page, url);
+  await comprobarPaseClasico(page, url);
 
   const medidos = {};
   for (const [indice, escenario] of ESCENARIOS.entries()) {
     const etiqueta = `${ETIQUETA} ${escenario.id}`;
     try {
-      await arrancarMision(page, `${url}?${escenario.consulta}`, escenario.mision, {
+      await arrancarMision(page, urlDelEscenario(url, escenario.consulta), escenario.mision, {
         asentarMs: 900,
         reiniciarAzar: true,
       });
@@ -235,7 +285,7 @@ export async function comprobarArtProof(page, { url }) {
 
     const hash = await page.evaluate(() => window.__eko?.artBufferHash() ?? null);
     if (!hash) {
-      fail(`${etiqueta}: sin buffer del pase (¿se aplicó ?art=proof?)`);
+      fail(`${etiqueta}: sin buffer del pase; el render por defecto no es el de píxeles`);
       continue;
     }
     medidos[escenario.id] = hash;
