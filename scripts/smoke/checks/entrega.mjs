@@ -73,6 +73,30 @@ async function comprobarPublicado(url) {
 }
 
 /**
+ * Nombre corto del recurso para el desglose: el archivo; `index.html` cuando la
+ * URL no trae nombre (el documento es la raíz) y con el host delante si es de otro
+ * origen, para que el CSS de Google Fonts no aparezca como su query completa.
+ */
+export function nombreDelRecurso(destino, url) {
+  const propio = new URL(url);
+  const recurso = new URL(destino);
+  const archivo = recurso.pathname.split('/').filter(Boolean).pop() ?? '';
+  const nombre = archivo || 'index.html';
+  return recurso.host === propio.host ? nombre : `${recurso.host}/${nombre}`;
+}
+
+/**
+ * Desglose para cuando el tope de arranque se pasa: el total dice cuánto sobra,
+ * no qué recortar. Va de mayor a menor, con el porcentaje de la suma, para que el
+ * chunk que engordó el build quede primero en el informe.
+ */
+export function desgloseDeArranque(recursos, total) {
+  return [...recursos]
+    .sort((a, b) => b.bytes - a.bytes)
+    .map((recurso) => `  ${recurso.nombre} ${kb(recurso.bytes)} (${Math.round((recurso.bytes / total) * 100)} %)`);
+}
+
+/**
  * Peso de arranque: documento, JS y CSS que el navegador descarga para poder
  * jugar. No es lo mismo que el peso de `dist/` ni que el del entry: mover un
  * chunk fuera del JS de entrada deja contento a `entradaJs` sin quitarle un byte
@@ -119,7 +143,7 @@ export async function comprobarPesoDeArranque(page, url) {
       if (respuesta.status() < 400) fail(`arranque: no se pudo pesar ${destino.split('/').pop()}`);
       continue;
     }
-    recursos.push({ nombre: destino.split('/').pop(), bytes });
+    recursos.push({ nombre: nombreDelRecurso(destino, url), bytes });
   }
 
   const total = recursos.reduce((suma, recurso) => suma + recurso.bytes, 0);
@@ -131,7 +155,10 @@ export async function comprobarPesoDeArranque(page, url) {
   }
 
   if (total > PRESUPUESTO.arranque) {
-    fail(`arranque: ${kb(total)} en ${recursos.length} recursos (tope ${kb(PRESUPUESTO.arranque)})`);
+    const desglose = desgloseDeArranque(recursos, total).join('\n');
+    fail(
+      `arranque: ${kb(total)} en ${recursos.length} recursos (tope ${kb(PRESUPUESTO.arranque)}); de mayor a menor:\n${desglose}`
+    );
   } else {
     console.log(`arranque: ${kb(total)} en ${recursos.length} recursos (tope ${kb(PRESUPUESTO.arranque)})`);
   }
