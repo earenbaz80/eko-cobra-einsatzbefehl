@@ -81,6 +81,30 @@ export function colisiona(x: number, y: number, radio: number, paredes: Pared[],
 }
 
 /**
+ * Recorre el tramo hasta el sondeo, no solo su extremo. En un vano el codo del
+ * marco queda entre el actor y el punto lejano: el sondeo cae ya dentro de la
+ * habitación y parece libre mientras el paso de este fotograma sigue frenado, y
+ * el actor se queda clavado con el rumbo recto para siempre. Se muestrea con el
+ * mismo paso de 8 px que usa el deslizamiento con colisión.
+ */
+export function isPathClear(
+  origin: { x: number; y: number },
+  angle: number,
+  distance: number,
+  colisionaEn: (x: number, y: number) => boolean,
+  step = 8
+): boolean {
+  const samples = Math.max(1, Math.ceil(distance / Math.max(1, step)));
+  for (let i = 1; i <= samples; i += 1) {
+    const ahead = (distance * i) / samples;
+    if (colisionaEn(origin.x + Math.cos(angle) * ahead, origin.y + Math.sin(angle) * ahead)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Mueve el actor al destino probando cada eje por separado: contra una pared se desliza
  * por el eje libre en vez de quedarse clavado.
  */
@@ -103,6 +127,113 @@ export function deslizarConColision(
     if (!colisionaEn(actor.x + pasoX, actor.y)) actor.x += pasoX;
     if (!colisionaEn(actor.x, actor.y + pasoY)) actor.y += pasoY;
   }
+}
+
+/**
+ * Desvíos que prueba un actor sin IA de navegación cuando el rumbo recto no está
+ * libre. Llegan a ±143°: en un rincón de 90° (la hoja abierta de una puerta
+ * contra el marco, por ejemplo) el único paso libre es casi el inverso, así que
+ * apartarse un poco del obstáculo no alcanza.
+ */
+export const DESVIOS_DE_ESQUINA = [0, 0.5, -0.5, 1, -1, 1.5, -1.5, 2, -2, 2.5, -2.5] as const;
+
+/** Rumbo elegido la última vez: lado del desvío y su magnitud (0 = recto). */
+export interface DesvioDeEsquina {
+  lado: 1 | -1;
+  desvio: number;
+  /** Ancla del último avance real, para detectar que el actor se quedó oscilando. */
+  anclaX?: number;
+  anclaY?: number;
+  /** Fotogramas seguidos sin alejarse del ancla. */
+  quietos?: number;
+}
+
+/** Fotogramas sin progreso tras los que un actor encajado cambia de lado. */
+const FOTOGRAMAS_QUIETO = 20;
+/** Avance que cuenta como progreso y mueve el ancla. */
+const PROGRESO_MINIMO = 6;
+
+/**
+ * Avanza un actor que se mueve sin navegación propia (un civil que huye, un
+ * sospechoso que busca cobertura): sondea el tramo del rumbo y, si está tapado,
+ * prueba un desvío. Mantiene el desvío que ya venía usando mientras el rumbo
+ * recto siga tapado; sin esa memoria el actor cambia de lado en cada fotograma
+ * y se queda oscilando en el mismo bolsillo. Devuelve el desvío para el paso
+ * siguiente. Sin nada de esto empuja el mismo codo para siempre, como le pasaba
+ * al binomio en el vano.
+ */
+export function avanzarConDesvio(
+  actor: { x: number; y: number },
+  rumbo: number,
+  distancia: number,
+  colisionaEn: (x: number, y: number) => boolean,
+  memoria: DesvioDeEsquina = { lado: 1, desvio: 0 }
+): DesvioDeEsquina {
+  if (distancia <= 0) return memoria;
+  const sonda = Math.max(16, distancia * 2.4);
+
+  // Un actor que lleva un segundo sin alejarse del ancla está oscilando entre
+  // dos obstáculos: cambia de lado para intentar el camino espejo.
+  let { lado, desvio } = memoria;
+  let anclaX = memoria.anclaX ?? NaN;
+  let anclaY = memoria.anclaY ?? NaN;
+  let quietos = memoria.quietos ?? 0;
+  if (!Number.isFinite(anclaX) || !Number.isFinite(anclaY)) {
+    anclaX = actor.x;
+    anclaY = actor.y;
+    quietos = 0;
+  } else if (Math.hypot(actor.x - anclaX, actor.y - anclaY) >= PROGRESO_MINIMO) {
+    anclaX = actor.x;
+    anclaY = actor.y;
+    quietos = 0;
+  } else if (++quietos >= FOTOGRAMAS_QUIETO) {
+    lado = (lado === 1 ? -1 : 1) as 1 | -1;
+    desvio = 0;
+    anclaX = actor.x;
+    anclaY = actor.y;
+    quietos = 0;
+  }
+  const resultado = (siguienteDesvio: number, siguienteLado: 1 | -1 = lado): DesvioDeEsquina => ({
+    lado: siguienteLado,
+    desvio: siguienteDesvio,
+    anclaX,
+    anclaY,
+    quietos,
+  });
+
+  const mover = (angulo: number): boolean => {
+    const x = actor.x;
+    const y = actor.y;
+    deslizarConColision(
+      actor,
+      x + Math.cos(angulo) * distancia,
+      y + Math.sin(angulo) * distancia,
+      colisionaEn
+    );
+    if (Math.hypot(actor.x - x, actor.y - y) > 0.05) return true;
+    actor.x = x;
+    actor.y = y;
+    return false;
+  };
+
+  if (isPathClear(actor, rumbo, sonda, colisionaEn) && mover(rumbo)) {
+    return resultado(0);
+  }
+
+  if (desvio !== 0) {
+    const angulo = rumbo + desvio * lado;
+    if (isPathClear(actor, angulo, sonda, colisionaEn) && mover(angulo)) {
+      return resultado(desvio);
+    }
+  }
+
+  for (const intento of DESVIOS_DE_ESQUINA) {
+    if (intento === 0) continue;
+    const angulo = rumbo + intento * lado;
+    if (!isPathClear(actor, angulo, sonda, colisionaEn)) continue;
+    if (mover(angulo)) return resultado(intento);
+  }
+  return resultado(desvio);
 }
 
 /** Generador pseudoaleatorio con semilla (mulberry32): misma semilla, misma partida. */

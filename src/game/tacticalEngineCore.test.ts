@@ -33,6 +33,7 @@ function createEngine(overrides: Record<string, unknown> = {}): any {
     squadHoldAnchorAngle: 0,
     squadScanningTimer: 0,
     squadSteerSide: 1,
+    actorSteerSides: new Map(),
     squadDoorCooldown: 0,
     squadDoorWarnCooldown: 0,
     squadFatigue: 0,
@@ -416,6 +417,118 @@ describe('órdenes de Kobra 2', () => {
 
     expect(atascado.x).toBeGreaterThan(300);
     expect(Math.hypot(atascado.x - 482, atascado.y - 493)).toBeLessThan(10);
+  });
+
+  it('el civil que huye rodea la hoja abierta y llega al rellano', () => {
+    // Civil en el salón huyendo al rellano (185,410). La hoja abierta de
+    // DOOR_LIVING le tapa el paso en línea recta: sin sondeo se queda pegado a
+    // la hoja para siempre, a 425 px de la salida. Con sondeo y desvío la rodea
+    // por el hueco de la puerta y llega.
+    const openLivingDoor = {
+      ...mainDoor,
+      id: 'DOOR_LIVING',
+      name: 'Tür Wohnzimmer',
+      x1: 520,
+      y1: 395,
+      x2: 520,
+      y2: 465,
+      hingeX: 520,
+      hingeY: 395,
+      currentAngle: 0,
+      openAngle: 0,
+      isOpen: true,
+      isLocked: false,
+    } as DoorEntity;
+    const civil = {
+      id: 'CIVIL_TEST',
+      name: 'Hanna',
+      role: 'CIVILIAN',
+      state: 'FLEEING',
+      x: 610,
+      y: 405,
+      angle: 0,
+      radius: 13,
+      hp: 100,
+      maxHp: 100,
+      morale: 20,
+      stress: 90,
+    } as unknown as ActorEntity;
+    const engine = createEngine({
+      walls: [
+        { id: 'w18', x1: 520, y1: 280, x2: 520, y2: 395 },
+        { id: 'w19', x1: 520, y1: 465, x2: 520, y2: 540 },
+        { id: 'w4', x1: 250, y1: 100, x2: 250, y2: 375 },
+        { id: 'w5', x1: 250, y1: 445, x2: 250, y2: 720 },
+      ],
+      doors: [openLivingDoor],
+      actors: [civil],
+      traces: [],
+      getPlayer: vi.fn(() => player),
+    });
+
+    for (let frame = 0; frame < 200; frame += 1) engine.updateHostagesAI(0.05, player);
+
+    expect(Math.hypot(civil.x - 185, civil.y - 410)).toBeLessThan(60);
+    expect(civil.state).toBe('SURRENDERED');
+  });
+
+  it('el sospechoso que busca cobertura cruza el vano pese a la hoja abierta', () => {
+    // Mismo salón, ahora un sospechoso que corre a cubrirse al otro lado de
+    // DOOR_LIVING: en línea recta se queda pegado a la hoja, a 20 px del tirador.
+    const openLivingDoor = {
+      ...mainDoor,
+      id: 'DOOR_LIVING',
+      name: 'Tür Wohnzimmer',
+      x1: 520,
+      y1: 395,
+      x2: 520,
+      y2: 465,
+      hingeX: 520,
+      hingeY: 395,
+      currentAngle: 0,
+      openAngle: 0,
+      isOpen: true,
+      isLocked: false,
+    } as DoorEntity;
+    const sospechoso = {
+      id: 'SUSPECT_TEST',
+      name: 'Lukas',
+      role: 'SUSPECT',
+      state: 'AIMING_WINDUP',
+      x: 610,
+      y: 405,
+      angle: 0,
+      radius: 14,
+      hp: 75,
+      maxHp: 75,
+      morale: 80,
+      stress: 40,
+      stunTimer: 0,
+      isArmed: true,
+      inCover: false,
+      coverPos: { x: 500, y: 405 },
+      windupProgress: -100,
+      patrolRoute: [],
+    } as unknown as ActorEntity;
+    const operadorLejos = { ...player, x: 700, y: 405 } as ActorEntity;
+    const engine = createEngine({
+      plan: { inspectionDevice: 'MICRO_CAM', profile: 'ZUGRIFF' },
+      walls: [
+        { id: 'w18', x1: 520, y1: 280, x2: 520, y2: 395 },
+        { id: 'w19', x1: 520, y1: 465, x2: 520, y2: 540 },
+      ],
+      doors: [openLivingDoor],
+      actors: [sospechoso],
+      getPlayer: vi.fn(() => operadorLejos),
+      getSquadmate: vi.fn(() => null),
+      raycastWallsAndDoors: vi.fn(() => false),
+      getWeatherVisibilityMultiplier: vi.fn(() => 1),
+      makeSuspectSurrender: vi.fn(),
+    });
+
+    for (let frame = 0; frame < 40; frame += 1) engine.updateSuspectsAI(0.05, operadorLejos);
+
+    expect(sospechoso.x).toBeLessThan(520);
   });
 
   it('la acumulación horizontal también evita el centro de la puerta', () => {

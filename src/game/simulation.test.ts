@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   avanzar,
+  avanzarConDesvio,
   colisiona,
   crearPartida,
   crearPartidaDesdeMundo,
   crearAzar,
   deslizarConColision,
   distanciaASegmento,
+  isPathClear,
   PASO_MAXIMO,
+  type DesvioDeEsquina,
   type Partida,
 } from './simulation';
 
@@ -75,6 +78,111 @@ describe('colisiona', () => {
     expect(colisiona(310, 320, 9, [], [], [{ ...muebles[0], blocksMovement: false }])).toBe(false);
     expect(colisiona(310, 320, 9, [], [], [{ ...muebles[0], isDestroyed: true }])).toBe(false);
     expect(colisiona(280, 320, 9, [], [], muebles)).toBe(false); // 20 px del borde
+  });
+});
+
+describe('isPathClear', () => {
+  it('ve el codo que frena el paso aunque el extremo del sondeo esté libre', () => {
+    // Vano de 70 px: a 24 px el punto ya pasó el jambá y está libre, pero el
+    // primer tramo choca con la esquina.
+    const origen = { x: 246.6, y: 428.02 };
+    const rumbo = Math.atan2(493 - origen.y, 482 - origen.x);
+    const tocaPared = (x: number, y: number) => Math.hypot(x - 250, y - 445) < 17;
+
+    expect(tocaPared(origen.x + Math.cos(rumbo) * 24, origen.y + Math.sin(rumbo) * 24)).toBe(false);
+    expect(tocaPared(origen.x + Math.cos(rumbo) * 8, origen.y + Math.sin(rumbo) * 8)).toBe(true);
+    expect(isPathClear(origen, rumbo, 24, tocaPared)).toBe(false);
+    expect(isPathClear(origen, rumbo - 0.55, 24, tocaPared)).toBe(true);
+  });
+
+  it('acepta un tramo libre y respeta el paso pedido', () => {
+    const visitas: number[] = [];
+    const espiado = (x: number) => {
+      visitas.push(x);
+      return false;
+    };
+
+    expect(isPathClear({ x: 0, y: 0 }, 0, 24, espiado)).toBe(true);
+    expect(visitas).toHaveLength(3);
+    expect(isPathClear({ x: 0, y: 0 }, 0, 10, espiado, 5)).toBe(true);
+    expect(visitas).toHaveLength(5);
+  });
+});
+
+describe('avanzarConDesvio', () => {
+  const radio = 13;
+  // Salón con la hoja de DOOR_LIVING abierta hacia dentro (de la bisagra al
+  // tirador) y el vano de entrada al rellano más al oeste.
+  const paredes = [
+    { x1: 520, y1: 280, x2: 520, y2: 395 },
+    { x1: 520, y1: 465, x2: 520, y2: 540 },
+    { x1: 250, y1: 100, x2: 250, y2: 375 },
+    { x1: 250, y1: 445, x2: 250, y2: 720 },
+  ];
+  const hoja = {
+    x1: 520,
+    y1: 395,
+    x2: 590,
+    y2: 395,
+    hingeX: 520,
+    hingeY: 395,
+    currentAngle: 0,
+    isOpen: true,
+  };
+  const enElPiso = (x: number, y: number) => colisiona(x, y, radio, paredes, [hoja], []);
+  const salida = { x: 185, y: 410 };
+
+  it('rodea la hoja abierta que tapa el paso y llega al rellano', () => {
+    const civil = { x: 610, y: 405 };
+    let memoria: DesvioDeEsquina = { lado: 1, desvio: 0 };
+
+    for (let i = 0; i < 200; i += 1) {
+      const rumbo = Math.atan2(salida.y - civil.y, salida.x - civil.x);
+      memoria = avanzarConDesvio(civil, rumbo, 115 * 0.05, enElPiso, memoria);
+    }
+
+    expect(Math.hypot(civil.x - salida.x, civil.y - salida.y)).toBeLessThan(40);
+    expect(memoria.lado === 1 || memoria.lado === -1).toBe(true);
+  });
+
+  it('sin desvío, la misma huida se queda pegada a la hoja', () => {
+    const civil = { x: 610, y: 405 };
+
+    for (let i = 0; i < 200; i += 1) {
+      const rumbo = Math.atan2(salida.y - civil.y, salida.x - civil.x);
+      deslizarConColision(
+        civil,
+        civil.x + Math.cos(rumbo) * 115 * 0.05,
+        civil.y + Math.sin(rumbo) * 115 * 0.05,
+        enElPiso
+      );
+    }
+
+    // El rumbo es casi recto al oeste: ni avanza ni se despega de la hoja.
+    expect(Math.hypot(civil.x - salida.x, civil.y - salida.y)).toBeGreaterThan(300);
+    expect(Math.abs(civil.x - 601)).toBeLessThan(4);
+  });
+
+  it('va recto cuando el rumbo está libre', () => {
+    const civil = { x: 400, y: 600 };
+    const libre = () => false;
+    const memoria = avanzarConDesvio(civil, 0, 5, libre, { lado: 1, desvio: 0 });
+
+    expect(memoria.desvio).toBe(0);
+    expect(civil.x).toBeCloseTo(405);
+    expect(civil.y).toBeCloseTo(600);
+  });
+
+  it('no se mueve si está encerrado y cambia de lado tras un segundo sin progreso', () => {
+    const encerrado = { x: 0, y: 0 };
+    let memoria: DesvioDeEsquina = { lado: 1, desvio: 0 };
+
+    for (let i = 0; i < 25; i += 1) {
+      memoria = avanzarConDesvio(encerrado, 0.4, 5, () => true, memoria);
+    }
+
+    expect(encerrado).toEqual({ x: 0, y: 0 });
+    expect(memoria.lado).toBe(-1);
   });
 });
 

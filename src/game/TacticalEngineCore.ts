@@ -60,23 +60,22 @@ import {
   type C4Dependencies,
   type C4SaveState
 } from './c4Charges';
-import {
-  chooseSquadSteeringAngle,
-  computeSquadNavTarget,
-  isPathClear
-} from './squadAi';
+import { chooseSquadSteeringAngle, computeSquadNavTarget } from './squadAi';
 import {
   canSurrender,
   resolveBreachReaction
 } from './suspectAi';
 import { aplicarEvento, type GameEvent } from './gameState';
 import {
+  avanzarConDesvio,
   colisiona,
   crearPartidaDesdeMundo,
   deslizarConColision,
   distanciaASegmento,
+  isPathClear,
   segmentoHojaPuerta,
   PASO_MAXIMO,
+  type DesvioDeEsquina,
   type Partida,
   type SnapshotSimulacion
 } from './simulation';
@@ -632,6 +631,8 @@ public nightMode: boolean = false;
     maxProgress: number;
   };
   protected squadSteerSide: 1 | -1 = 1;
+  /** Desvío vigente de los actores que avanzan sin IA de navegación (id -> memoria). */
+  protected actorSteerSides = new Map<string, DesvioDeEsquina>();
   protected minimapCenter: Vec2 = { x: 74, y: 74 };
   protected isDraggingMinimap: boolean = false;
   protected minimapDragOffset: Vec2 = { x: 0, y: 0 };
@@ -841,6 +842,7 @@ public nightMode: boolean = false;
     this.squadDoorTargetId = undefined;
     this.squadBreachAction = undefined;
     this.squadSteerSide = 1;
+    this.actorSteerSides.clear();
     this.sessionXp = 0;
     this.tacticalWaypoint = undefined;
     this.tacticalMarkers = [];
@@ -7506,11 +7508,7 @@ public nightMode: boolean = false;
               const ang = Math.atan2(coverSpot.y - actor.y, coverSpot.x - actor.x);
               actor.angle = ang;
               actor.isCrouched = true;
-              this.moveActorWithCollision(
-                actor,
-                actor.x + Math.cos(ang) * 95 * dt,
-                actor.y + Math.sin(ang) * 95 * dt
-              );
+              this.moveActorAvoidingCorners(actor, ang, 95 * dt);
             } else {
               actor.inCover = true;
               actor.isProne = true;
@@ -7600,11 +7598,7 @@ public nightMode: boolean = false;
         // Safe to advance toward Stiegenhaus
         const ang = Math.atan2(safeY - actor.y, safeX - actor.x);
         const fleeSpeed = 115;
-        this.moveActorWithCollision(
-          actor,
-          actor.x + Math.cos(ang) * fleeSpeed * dt,
-          actor.y + Math.sin(ang) * fleeSpeed * dt
-        );
+        this.moveActorAvoidingCorners(actor, ang, fleeSpeed * dt);
         actor.angle = ang;
         actor.isCrouched = true;
 
@@ -7777,11 +7771,7 @@ public nightMode: boolean = false;
       if (actor.state === 'FLEEING') {
         const awayAng = Math.atan2(actor.y - player.y, actor.x - player.x) + (Math.random() - 0.5) * 0.9;
         const fleeSpeed = 115;
-        this.moveActorWithCollision(
-          actor,
-          actor.x + Math.cos(awayAng) * fleeSpeed * dt,
-          actor.y + Math.sin(awayAng) * fleeSpeed * dt
-        );
+        this.moveActorAvoidingCorners(actor, awayAng, fleeSpeed * dt);
         actor.angle = awayAng;
         actor.morale = Math.max(0, actor.morale - 6 * dt);
         if (actor.morale <= 18 || Math.hypot(actor.x - player.x, actor.y - player.y) > 380) {
@@ -7918,11 +7908,7 @@ public nightMode: boolean = false;
                 const coverAng = Math.atan2(actor.coverPos.y - actor.y, actor.coverPos.x - actor.x);
                 const legMult = 0.35 + 0.65 * (suspectBh.legs / 100);
                 const runSpeed = 105 * legMult;
-                this.moveActorWithCollision(
-                  actor,
-                  actor.x + Math.cos(coverAng) * runSpeed * dt,
-                  actor.y + Math.sin(coverAng) * runSpeed * dt
-                );
+                this.moveActorAvoidingCorners(actor, coverAng, runSpeed * dt);
                 actor.isCrouched = true;
                 actor.angle = targetAng; // maintain eyes-on target vector
               } else {
@@ -8403,6 +8389,27 @@ public nightMode: boolean = false;
 
   protected collidesAt(x: number, y: number, radius: number): boolean {
     return colisiona(x, y, radius, this.walls, this.doors, this.furniture);
+  }
+
+  /**
+   * Paso de un actor que se mueve sin navegación propia (un civil que huye, un
+   * sospechoso que busca cobertura): sondea el tramo y desvía el rumbo si el
+   * codo de un marco, un mueble o la hoja de una puerta lo frena. Sin esto se
+   * queda empujando la misma esquina para siempre, igual que el binomio en el
+   * vano antes de que su sondeo recorriera el tramo.
+   */
+  protected moveActorAvoidingCorners(actor: ActorEntity, angle: number, distance: number) {
+    const memoria = this.actorSteerSides.get(actor.id) ?? { lado: 1, desvio: 0 };
+    this.actorSteerSides.set(
+      actor.id,
+      avanzarConDesvio(
+        actor,
+        angle,
+        distance,
+        (x, y) => this.collidesAt(x, y, actor.radius),
+        memoria
+      )
+    );
   }
 
   protected distToSegment(

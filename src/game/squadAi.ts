@@ -64,30 +64,6 @@ export function computeSquadNavTarget(input: SquadNavInput): Point2 | null {
 }
 
 /**
- * Recorre el tramo hasta el sondeo, no solo su extremo. En un vano el codo del
- * marco queda entre el binomio y el punto lejano: el sondeo cae ya dentro de la
- * habitación y parece libre mientras el paso de este fotograma sigue frenado, y
- * el actor se queda clavado con el rumbo recto para siempre. Se muestrea con el
- * mismo paso de 8 px que usa el deslizamiento con colisión.
- */
-export function isPathClear(
-  origin: Point2,
-  angle: number,
-  distance: number,
-  collides: (x: number, y: number) => boolean,
-  step = 8
-): boolean {
-  const samples = Math.max(1, Math.ceil(distance / Math.max(1, step)));
-  for (let i = 1; i <= samples; i += 1) {
-    const ahead = (distance * i) / samples;
-    if (collides(origin.x + Math.cos(angle) * ahead, origin.y + Math.sin(angle) * ahead)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-/**
  * Local steering for Kobra-2. The operator order gives the desired bearing, but a
  * binomio cannot walk through walls or furniture: probe a few deviations and take
  * the closest clear one. Keeping the choice deterministic avoids side-to-side
