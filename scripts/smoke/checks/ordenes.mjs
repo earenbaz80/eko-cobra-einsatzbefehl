@@ -221,8 +221,17 @@ async function comprobarContextMenuPuerta(page, url) {
       const jugado = (final?.tiempo ?? 0) - tiempoInicial;
       const pared = (Date.now() - inicioDePared) / 1000;
       const entrada = final?.world.doors.find((item) => item.id === 'DOOR_MAIN_A');
+      // Un mueble procedural junto al vano explicaría la pila parada: se listan los
+      // que bloquean movimiento a menos de 70 px de ella.
+      const alrededor = (final?.world.furniture ?? [])
+        .filter(
+          (m) =>
+            m.blocksMovement &&
+            Math.hypot((m.x ?? 0) - (final?.squad?.x ?? 0), (m.y ?? 0) - (final?.squad?.y ?? 0)) < 70
+        )
+        .map((m) => `${m.label ?? m.id} en ${Math.round(m.x)},${Math.round(m.y)} (${m.w}x${m.h})`);
       fail(
-        `órdenes · contexto: Kobra-2 no abrió ${puertaObjetivo.name} en ${jugado.toFixed(1)} s de simulación (${pared.toFixed(1)} s de pared; pila en ${Math.round(final?.squad?.x ?? -1)},${Math.round(final?.squad?.y ?? -1)} objetivo ${final?.squad?.target ? `${Math.round(final.squad.target.x)},${Math.round(final.squad.target.y)}` : 'ninguno'}; operador en ${Math.round(final?.player?.x ?? -1)},${Math.round(final?.player?.y ?? -1)} danger ${final?.player?.danger ?? '?'}; entrada abierta ${entrada?.isOpen ?? '?'} del todo ${entrada?.isFullyOpen ?? '?'})`
+        `órdenes · contexto: Kobra-2 no abrió ${puertaObjetivo.name} en ${jugado.toFixed(1)} s de simulación (${pared.toFixed(1)} s de pared; pila en ${Math.round(final?.squad?.x ?? -1)},${Math.round(final?.squad?.y ?? -1)} objetivo ${final?.squad?.target ? `${Math.round(final.squad.target.x)},${Math.round(final.squad.target.y)}` : 'ninguno'}; operador en ${Math.round(final?.player?.x ?? -1)},${Math.round(final?.player?.y ?? -1)} danger ${final?.player?.danger ?? '?'}; entrada abierta ${entrada?.isOpen ?? '?'} del todo ${entrada?.isFullyOpen ?? '?'}; muebles cerca: ${alrededor.length ? alrededor.join(', ') : 'ninguno'})`
       );
       return;
     }
