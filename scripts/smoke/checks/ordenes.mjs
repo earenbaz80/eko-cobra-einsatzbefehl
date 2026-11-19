@@ -9,7 +9,7 @@
  * estado del motor, no el texto de la interfaz.
  */
 import { fail, fallos } from '../informe.mjs';
-import { arrancarMision } from '../navegador.mjs';
+import { abrirPuertaDeEntrada, arrancarMision } from '../navegador.mjs';
 
 const MISION = 'Misión 1: Piso Graz - Lend';
 const MISION_LINZ = 'Misión 3: Laboratorio Químico';
@@ -91,48 +91,6 @@ async function comprobarSonda(page, url) {
   } catch (error) {
     fail(`órdenes · sonda: ${error.message.split('\n')[0]}`);
   }
-}
-
-/** Abre la puerta de entrada para que la puerta interior sea alcanzable. */
-async function abrirPuertaDeEntrada(page) {
-  const inicial = await page.evaluate(() => window.__eko?.snapshot()?.player ?? null);
-  if (!inicial) throw new Error('no hay jugador para abrir la puerta de entrada');
-
-  await page.keyboard.down('KeyD');
-  try {
-    await page.waitForFunction(
-      (x) => (window.__eko?.snapshot()?.player?.x ?? 0) >= x + 20,
-      inicial.x,
-      { timeout: 3000 }
-    );
-  } finally {
-    await page.keyboard.up('KeyD');
-  }
-  // E abre en tres pasos (28 %, 65 %, completa). La primera apertura deja la
-  // hoja en el vano y Kobra 2 no puede atravesarla; hay que abrirla del todo.
-  await page.keyboard.press('KeyE');
-  await page.waitForTimeout(120);
-  await page.keyboard.press('KeyE');
-  await page.waitForTimeout(120);
-  await page.keyboard.press('KeyE');
-  await page.waitForFunction(
-    (id) => window.__eko?.snapshot()?.world.doors.find((door) => door.id === id)?.isOpen === true,
-    PUERTA,
-    { timeout: 3000 }
-  );
-
-  // El jugador tampoco debe quedar parado en el umbral mientras pasa Kobra 2.
-  await page.keyboard.down('KeyA');
-  try {
-    await page.waitForFunction(
-      (x) => (window.__eko?.snapshot()?.player?.x ?? x) <= x,
-      inicial.x + 4,
-      { timeout: 3000 }
-    );
-  } finally {
-    await page.keyboard.up('KeyA');
-  }
-  await page.waitForTimeout(200);
 }
 
 /**

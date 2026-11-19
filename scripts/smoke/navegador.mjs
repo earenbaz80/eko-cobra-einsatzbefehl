@@ -57,6 +57,52 @@ export async function arrancarMision(page, url, nombre, { asentarMs = 1000, rein
 }
 
 /**
+ * Abre la puerta de entrada de Graz hasta dejarla franca: se acerca, la abre en
+ * sus tres pasos con [E] y se aparta del vano. La usan las órdenes del binomio y
+ * la comprobación de daño, que necesitan entrar al piso.
+ */
+export async function abrirPuertaDeEntrada(page, puertaId = 'DOOR_MAIN_A') {
+  const inicial = await page.evaluate(() => window.__eko?.snapshot()?.player ?? null);
+  if (!inicial) throw new Error('no hay jugador para abrir la puerta de entrada');
+
+  await page.keyboard.down('KeyD');
+  try {
+    await page.waitForFunction(
+      (x) => (window.__eko?.snapshot()?.player?.x ?? 0) >= x + 20,
+      inicial.x,
+      { timeout: 3000 }
+    );
+  } finally {
+    await page.keyboard.up('KeyD');
+  }
+  // E abre en tres pasos (28 %, 65 %, completa). La primera apertura deja la
+  // hoja en el vano y Kobra 2 no puede atravesarla; hay que abrirla del todo.
+  await page.keyboard.press('KeyE');
+  await page.waitForTimeout(120);
+  await page.keyboard.press('KeyE');
+  await page.waitForTimeout(120);
+  await page.keyboard.press('KeyE');
+  await page.waitForFunction(
+    (id) => window.__eko?.snapshot()?.world.doors.find((door) => door.id === id)?.isOpen === true,
+    puertaId,
+    { timeout: 3000 }
+  );
+
+  // El jugador tampoco debe quedar parado en el umbral mientras pasa Kobra 2.
+  await page.keyboard.down('KeyA');
+  try {
+    await page.waitForFunction(
+      (x) => (window.__eko?.snapshot()?.player?.x ?? x) <= x,
+      inicial.x + 4,
+      { timeout: 3000 }
+    );
+  } finally {
+    await page.keyboard.up('KeyA');
+  }
+  await page.waitForTimeout(200);
+}
+
+/**
  * @param {import('playwright').Page} page
  * @param {{ origin: string, badRequests: string[], consoleErrors: string[], prefijo?: string, fallosDeRed?: boolean }} opciones
  *   `prefijo` distingue los avisos del móvil en el informe; `fallosDeRed` añade

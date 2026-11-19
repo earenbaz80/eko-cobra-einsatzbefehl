@@ -22,7 +22,7 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { estadisticasCanvas } from '../canvas.mjs';
-import { arrancarMision } from '../navegador.mjs';
+import { abrirPuertaDeEntrada, arrancarMision } from '../navegador.mjs';
 import { fail } from '../informe.mjs';
 
 const ETIQUETA = 'art proof';
@@ -266,6 +266,321 @@ async function comprobarCapasSobreElArte(page, url) {
 }
 
 /**
+ * Congela el reloj ya en marcha (sin recargar): el bucle saca el dt del
+ * timestamp de rAF y el pase lee `performance.now()`, así que con ambos fijos la
+ * escena queda quieta y lo único que cambia entre dos cuadros es el grano, que
+ * sortea sus motas con `Math.random` en cada cuadro.
+ */
+async function congelarCuadros(page) {
+  await page.evaluate(() => {
+    if (window.__cuadrosCongelados) return;
+    const rafReal = window.requestAnimationFrame.bind(window);
+    const ahora = performance.now();
+    window.__cuadrosCongelados = true;
+    window.__reanudarCuadros = () => {
+      window.requestAnimationFrame = rafReal;
+      delete performance.now;
+      window.__cuadrosCongelados = false;
+    };
+    window.requestAnimationFrame = (callback) => rafReal(() => callback(ahora));
+    Object.defineProperty(performance, 'now', { value: () => ahora, configurable: true });
+  });
+  // El cuadro que ya estaba en vuelo trae su dt real: se deja que el bucle se
+  // re-registre con el timestamp fijo antes de medir, o las partículas se mueven.
+  await page.waitForTimeout(250);
+}
+
+async function reanudarCuadros(page) {
+  await page.evaluate(() => window.__reanudarCuadros?.());
+}
+
+/**
+ * Mide las dos capas de daño sobre el arte con el reloj quieto: `ruido` cuenta
+ * los píxeles que cambian entre dos cuadros consecutivos (grano) y `rojez` es la
+ * media de rojo menos azul en las franjas laterales, donde la viñeta de trauma
+ * tiñe de rojo; sano, el arte deja las franjas frías.
+ */
+function medirCuadros(page) {
+  return page.evaluate(async () => {
+    const el = document.querySelector('canvas');
+    const ctx = el.getContext('2d');
+    const ancho = el.width;
+    const alto = el.height;
+    const enHud = (x, y) =>
+      (x < 150 && y < 150) || (x > ancho - 220 && y < 152); // minimapa y PiP
+    const esperarCuadro = () =>
+      new Promise((listo) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => listo(true)))
+      );
+    const capturar = () => ctx.getImageData(0, 0, ancho, alto).data;
+    const antes = capturar();
+    await esperarCuadro();
+    const despues = capturar();
+    let ruido = 0;
+    let rojez = 0;
+    let muestras = 0;
+    const borde = Math.round(Math.min(ancho, alto) * 0.12);
+    for (let y = 0; y < alto; y += 1) {
+      for (let x = 0; x < ancho; x += 1) {
+        const i = (y * ancho + x) * 4;
+        if (!enHud(x, y)) {
+          const salto =
+            Math.abs(antes[i] - despues[i]) +
+            Math.abs(antes[i + 1] - despues[i + 1]) +
+            Math.abs(antes[i + 2] - despues[i + 2]);
+          if (salto > 30) ruido += 1;
+        }
+        if (x < borde || x >= ancho - borde || y < borde || y >= alto - borde) {
+          rojez += despues[i] - despues[i + 2];
+          muestras += 1;
+        }
+      }
+    }
+    return { ruido, rojez: rojez / muestras };
+  });
+}
+
+/**
+ * Mide un estado quieto. Congelar no detiene lo que ya estaba en movimiento
+ * (un fogonazo, una burbuja entrando), así que se toman hasta tres muestras y se
+ * queda la más limpia: el grano de daño está en todas, un resto de animación no.
+ */
+async function medirEstadoQuieto(page) {
+  let mejor = null;
+  for (let intento = 0; intento < 3; intento += 1) {
+    await congelarCuadros(page);
+    const medida = await medirCuadros(page);
+    await reanudarCuadros(page);
+    if (!mejor || medida.ruido < mejor.ruido) mejor = medida;
+    if (mejor.ruido <= 15) break;
+    await page.waitForTimeout(350);
+  }
+  return mejor;
+}
+
+/** Mantiene una tecla hasta que el jugador alcanza la coordenada pedida. */
+async function caminarHasta(page, tecla, condicion, valor, timeout = 8000) {
+  await page.keyboard.down(tecla);
+  try {
+    await page.waitForFunction(condicion, valor, { timeout });
+  } finally {
+    await page.keyboard.up(tecla);
+  }
+}
+
+/** Cian del retículo en una caja alrededor del puntero. */
+function contarCian(page, x, y) {
+  return page.evaluate(
+    ([px, py]) => {
+      const el = document.querySelector('canvas');
+      const ctx = el.getContext('2d');
+      const dpr = el.width / el.getBoundingClientRect().width;
+      const lado = 34;
+      const x0 = Math.max(0, Math.round(px * dpr - lado / 2));
+      const y0 = Math.max(0, Math.round(py * dpr - lado / 2));
+      const { data } = ctx.getImageData(x0, y0, lado, lado);
+      let cian = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        if (b - r >= 70 && b >= 100 && g >= 60) cian += 1;
+      }
+      return cian;
+    },
+    [x, y]
+  );
+}
+
+/** Media de color de una caja del canvas, para comparar antes y después del NVG. */
+function mediaDeColor(page, x, y, ancho, alto) {
+  return page.evaluate(
+    ([px, py, w, h]) => {
+      const el = document.querySelector('canvas');
+      const ctx = el.getContext('2d');
+      const { data } = ctx.getImageData(px, py, w, h);
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      const n = data.length / 4;
+      for (let i = 0; i < data.length; i += 4) {
+        r += data[i];
+        g += data[i + 1];
+        b += data[i + 2];
+      }
+      return { r: r / n, g: g / n, b: b / n };
+    },
+    [x, y, ancho, alto]
+  );
+}
+
+/**
+ * El grano de daño y la viñeta de trauma viajan por `renderScreenOverlays`, pero
+ * el pase de píxeles los pinta él mismo: si esa llamada se pierde, el humo no lo
+ * note. Aquí se provoca daño real (un sospechoso armado dispara al operador), se
+ * confirma que el impacto llegó y se mide el arte con el jugador sano y herido.
+ * Con el daño activo también deben seguir el minimapa, el PiP, el retículo y el NVG.
+ */
+async function comprobarGranoDeDanio(page, url) {
+  try {
+    await arrancarMision(page, url, 'Misión 1: Piso Graz - Lend', {
+      asentarMs: 600,
+      reiniciarAzar: true,
+    });
+  } catch (error) {
+    fail(`${ETIQUETA} daño: no arranca la misión (${error.message.split('\n')[0]})`);
+    return;
+  }
+
+  // Sano: al arrancar, con la escuadra en HOLD para que el cuadro quede quieto y
+  // nadie disparando. Más tarde el sospechoso puede abrir fuego sobre el
+  // corredor y la supresión encendería el grano sin que el operador esté herido.
+  try {
+    await page.keyboard.press('Digit2');
+    await page.waitForFunction(
+      () => {
+        const escuadra = window.__eko?.snapshot()?.squad;
+        if (!escuadra || escuadra.command !== 'HOLD') return false;
+        const previa = window.__escuadraFirme;
+        window.__escuadraFirme = { x: escuadra.x, y: escuadra.y };
+        return (
+          !!previa &&
+          Math.abs(previa.x - escuadra.x) < 0.3 &&
+          Math.abs(previa.y - escuadra.y) < 0.3
+        );
+      },
+      undefined,
+      { timeout: 8000, polling: 100 }
+    );
+  } catch (error) {
+    fail(`${ETIQUETA} daño: la escuadra no se queda firme (${error.message.split('\n')[0]})`);
+    return;
+  }
+  const sinDanio = await page.evaluate(() => window.__eko?.snapshot()?.player ?? null);
+  if (!sinDanio || sinDanio.hp < 100 || sinDanio.bleeding) {
+    fail(`${ETIQUETA} daño: el operador ya estaba herido antes de la prueba (${JSON.stringify(sinDanio)})`);
+    return;
+  }
+  const sano = await medirEstadoQuieto(page);
+
+  // Entrar al piso y a la cocina, donde patrulla un sospechoso armado.
+  try {
+    await abrirPuertaDeEntrada(page);
+    await caminarHasta(page, 'KeyD', (x) => (window.__eko?.snapshot()?.player?.x ?? 0) >= x, 390);
+    await caminarHasta(page, 'KeyW', (y) => (window.__eko?.snapshot()?.player?.y ?? 999) <= y, 302);
+  } catch (error) {
+    fail(`${ETIQUETA} daño: no se llega al corredor (${error.message.split('\n')[0]})`);
+    return;
+  }
+
+  try {
+    await page.keyboard.press('KeyE');
+    await page.waitForTimeout(120);
+    await page.keyboard.press('KeyE');
+    await page.waitForTimeout(120);
+    await page.keyboard.press('KeyE');
+    await caminarHasta(page, 'KeyW', (y) => (window.__eko?.snapshot()?.player?.y ?? 999) <= y, 250);
+    // Hasta la altura del sospechoso: a esa distancia contesta seguro.
+    await caminarHasta(page, 'KeyD', (x) => (window.__eko?.snapshot()?.player?.x ?? 0) >= x, 440);
+  } catch (error) {
+    fail(`${ETIQUETA} daño: no se entra a la cocina (${error.message.split('\n')[0]})`);
+    return;
+  }
+
+  // El sospechoso contesta al intruso. Se espera sangrado —no el simple fogonazo
+  // del impacto, que dura 0,42 s—: la herida abierta mantiene encendido el grano
+  // de daño y la viñeta de trauma mientras dure la medición.
+  let herido = false;
+  for (let intento = 0; intento < 3 && !herido; intento += 1) {
+    if (intento > 0) await page.mouse.click(1080, 300);
+    herido = await page
+      .waitForFunction(
+        () => window.__eko?.snapshot()?.player?.bleeding === true,
+        undefined,
+        { timeout: 7000, polling: 100 }
+      )
+      .then(() => true)
+      .catch(() => false);
+  }
+  if (!herido) {
+    const estado = await page.evaluate(() => window.__eko?.snapshot()?.player ?? null);
+    fail(`${ETIQUETA} daño: el sospechoso no llegó a herir al operador (${JSON.stringify(estado)})`);
+    return;
+  }
+
+  // Con el daño activo: grano, viñeta y las capas que no deben perderse.
+  await congelarCuadros(page);
+  let danio = await medirCuadros(page);
+  for (let intento = 0; intento < 2 && danio.ruido < 120; intento += 1) {
+    await reanudarCuadros(page);
+    await page.waitForTimeout(300);
+    await congelarCuadros(page);
+    const otra = await medirCuadros(page);
+    if (otra.ruido > danio.ruido) danio = otra;
+  }
+  // Las capas se comprueban con el reloj real: el retículo sigue al puntero y,
+  // con el cuadro congelado, se queda donde estaba antes del último movimiento.
+  await reanudarCuadros(page);
+  const rotulos = await page.evaluate(() => {
+    const textos = (window.__arteTextos ?? []).filter((t) => t.enDom).map((t) => t.texto);
+    return {
+      minimapa: textos.filter((t) => t === 'MINIMAP 2D').length,
+      piip: textos.filter((t) => t === 'HELMKAMERA · KOBRA-2').length,
+    };
+  });
+  // El retículo cambia de color cuando cae sobre un actor (rojo sobre el
+  // sospechoso), así que se prueban tres puntos: en dos tiene que seguir el cian
+  // táctico que dibuja sobre el arte.
+  const cianes = [];
+  for (const [x, y] of [[300, 600], [1000, 600], [700, 240]]) {
+    await page.mouse.move(x, y);
+    await page.waitForTimeout(220);
+    cianes.push(await contarCian(page, x, y));
+  }
+  const sinNvg = await mediaDeColor(page, 520, 260, 240, 120);
+  await page.keyboard.press('KeyN');
+  await page.waitForTimeout(220);
+  const conNvg = await mediaDeColor(page, 520, 260, 240, 120);
+  await page.keyboard.press('KeyN');
+
+  if (rotulos.minimapa === 0) {
+    fail(`${ETIQUETA} daño: el minimapa desaparece con el daño activo`);
+  }
+  if (rotulos.piip === 0) {
+    fail(`${ETIQUETA} daño: el PiP de la bodycam desaparece con el daño activo`);
+  }
+  if (cianes.filter((cuenta) => cuenta >= 8).length < 2) {
+    fail(
+      `${ETIQUETA} daño: el retículo desaparece con el daño activo (cian ${cianes.join('/')} en tres posiciones)`
+    );
+  }
+  const verdeAntes = sinNvg.g - sinNvg.r;
+  const verdeDespues = conNvg.g - conNvg.r;
+  if (verdeDespues - verdeAntes < 12) {
+    fail(
+      `${ETIQUETA} daño: el NVG no se aplica sobre el arte herido (verde ${verdeAntes.toFixed(1)} -> ${verdeDespues.toFixed(1)})`
+    );
+  }
+  if (danio.ruido < 120) {
+    fail(
+      `${ETIQUETA} daño: sin grano sobre el arte herido (ruido ${danio.ruido} con daño y ${sano.ruido} sano)`
+    );
+  }
+  if (sano.ruido > 15) {
+    fail(`${ETIQUETA} daño: el grano aparece con el jugador sano (ruido ${sano.ruido})`);
+  }
+  if (danio.rojez - sano.rojez < 8) {
+    fail(
+      `${ETIQUETA} daño: sin viñeta de trauma sobre el arte (rojez ${sano.rojez.toFixed(1)} sana y ${danio.rojez.toFixed(1)} herida)`
+    );
+  }
+
+  console.log(
+    `${ETIQUETA} · daño sobre el arte (grano ${sano.ruido}->${danio.ruido} px, viñeta rojez ${sano.rojez.toFixed(1)}->${danio.rojez.toFixed(1)}, minimapa/PiP/retículo cian ${cianes.join('/')}, NVG ${verdeAntes.toFixed(1)}->${verdeDespues.toFixed(1)})`
+  );
+}
+
+/**
  * El pase presenta su buffer 16:9 centrado. Antes se deducía de las bandas
  * negras del canvas, pero ahora las capas de pantalla (lluvia, minimapa,
  * retículo) las pintan, así que el encuadre se lee del propio pase: centro en el
@@ -323,8 +638,11 @@ function leerHuellas() {
 }
 
 export async function comprobarArtProof(page, { url }) {
-  await congelarTiempo(page);
   await vigilarTextoDelSistema(page);
+  // Antes de congelar el reloj: el daño se provoca jugando (disparos reales) y el
+  // congelado del arranque dejaría la simulación parada.
+  await comprobarGranoDeDanio(page, url);
+  await congelarTiempo(page);
   await comprobarChunkSeparado(page, url);
   await comprobarPaseClasico(page, url);
   await comprobarCapasSobreElArte(page, url);

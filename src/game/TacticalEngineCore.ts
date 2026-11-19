@@ -397,6 +397,10 @@ export interface EkoE2EState {
     readonly x: number;
     readonly y: number;
     readonly angle: number;
+    /** Salud actual, para comprobar que el daño llegó de verdad. */
+    readonly hp: number;
+    /** Herida abierta; activa el grano y la viñeta de trauma. */
+    readonly bleeding: boolean;
     /** Burbuja de texto situacional de Kobra-1; no es una locución. */
     readonly speechBubble: EkoE2ESpeechBubble | null;
   } | null;
@@ -9180,6 +9184,8 @@ public nightMode: boolean = false;
             x: player.x,
             y: player.y,
             angle: player.angle,
+            hp: player.hp,
+            bleeding: !!player.bodyHealth?.bleeding,
             speechBubble: player.speechBubble
               ? Object.freeze({
                   text: player.speechBubble.text,
