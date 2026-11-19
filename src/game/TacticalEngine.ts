@@ -510,6 +510,11 @@ export class TacticalEngine extends TacticalEngineCore {
     const isBleeding = player.bodyHealth?.bleeding;
     const isLowHp = player.hp < 40;
     const isDanger = isHit || isBleeding || isLowHp || this.suppressionTimer > 0;
+    // Se guarda aunque no se pinte: es lo que necesita el humo para saber si un
+    // cuadro sucio venía de este overlay o de otra capa.
+    this.ultimoGrano = isDanger;
+    this.ultimoImpacto = this.playerHitFlashTimer;
+    this.ultimoSupresion = this.suppressionTimer;
 
     if (!isDanger) return;
 

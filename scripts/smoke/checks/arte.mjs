@@ -20,10 +20,12 @@
  * Eso reescribe el archivo con lo medido y pasa la prueba; después se revisa el
  * diff de las huellas y se commitea junto con el cambio de arte.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { estadisticasCanvas } from '../canvas.mjs';
 import { contarCianEnPuntero, contarRotulosSobreElArte } from '../capas.mjs';
 import { abrirPuertaDeEntrada, arrancarMision } from '../navegador.mjs';
+import { DIR_DIAGNOSTICO } from '../diagnostico.mjs';
 import { fail } from '../informe.mjs';
 
 const ETIQUETA = 'art proof';
@@ -260,21 +262,58 @@ async function reanudarCuadros(page) {
 }
 
 /**
+ * Deja en `.smoke-fallos/` las dos capturas de una medición con ruido inesperado:
+ * así se ve qué cambió en la banda en vez de discutir un número. Si el humo corre
+ * en CI, el job ya sube ese directorio como artifact.
+ */
+function guardarBandas(nombre, instantaneas) {
+  if (!instantaneas) return;
+  try {
+    mkdirSync(DIR_DIAGNOSTICO, { recursive: true });
+    for (const [franja, par] of instantaneas.entries()) {
+      for (const [cuando, captura] of Object.entries(par)) {
+        const ruta = join(DIR_DIAGNOSTICO, `banda-${nombre}-${franja}-${cuando}.png`);
+        writeFileSync(ruta, Buffer.from(captura.png.split(',')[1], 'base64'));
+      }
+    }
+  } catch {
+    // Un diagnóstico que falla no debe tumbar la prueba.
+  }
+}
+
+/**
  * Mide las dos capas de daño con el reloj quieto en las bandas negras que deja
  * la presentación 16:9 del pase (arriba y abajo del arte). Ahí no hay arte,
  * lluvia, sprites ni cámara: solo llegan las capas de pantalla, así que `ruido`
  * (píxeles que cambian entre dos cuadros) es el grano y `rojez` (rojo menos azul)
  * es la viñeta de trauma. Se saltea el minimapa y el PiP de las esquinas.
+ *
+ * Se informa también el encuadre antes y después (`quieto`) y los cuadros que
+ * corrieron entre las dos capturas (`cuadros`, `simulacion`): si el HUD de radio
+ * cambia el tamaño del canvas, el borde del arte se corre y la banda mediría arte;
+ * y sin cuadros entre capturas no hay grano que medir. Con `pantalla` se sabe qué
+ * decidió el propio overlay (grano sí/no, temporizadores y calidad baja), que es lo
+ * único que explica un ruido raro sin adivinar.
  */
-function medirCuadros(page) {
-  return page.evaluate(async () => {
+function medirCuadros(page, conCapturas = false) {
+  return page.evaluate(async (conCapturas) => {
     const el = document.querySelector('canvas');
     const ctx = el.getContext('2d');
     const ancho = el.width;
     const alto = el.height;
-    const marco = window.__eko?.artFrame?.() ?? null;
-    const arteArriba = marco ? marco.y - 180 * marco.zoom : 0;
-    const arteAbajo = marco ? marco.y + 180 * marco.zoom : alto;
+    /** Encuadre del pase en este instante: si cambia, el arte se corre. */
+    const encuadre = () => {
+      const marco = window.__eko?.artFrame?.() ?? null;
+      return {
+        marco: marco ? { x: marco.x, y: marco.y, zoom: marco.zoom } : null,
+        ancho: el.width,
+        alto: el.height,
+      };
+    };
+    const antes = encuadre();
+    const marcoAntes = antes.marco;
+    const arteArriba = marcoAntes ? marcoAntes.y - 180 * marcoAntes.zoom : 0;
+    const arteAbajo = marcoAntes ? marcoAntes.y + 180 * marcoAntes.zoom : alto;
     const franjas = [
       [200, 4, ancho - 440, Math.max(0, arteArriba - 8)],
       [200, arteAbajo + 4, ancho - 440, Math.max(0, alto - arteAbajo - 8)],
@@ -286,15 +325,27 @@ function medirCuadros(page) {
       );
     const capturar = () =>
       franjas.map(([x, y, w, h]) => ctx.getImageData(x, y, w, h).data);
-    const antes = capturar();
+    const reloj = () => {
+      const instantanea = window.__eko?.snapshot();
+      return {
+        tick: instantanea?.tick ?? null,
+        tiempo: instantanea?.tiempo ?? null,
+        pantalla: instantanea?.pantalla ?? null,
+      };
+    };
+    const relojAntes = reloj();
+    const capturaAntes = capturar();
     await esperarCuadro();
-    const despues = capturar();
+    const despues = encuadre();
+    const relojDespues = reloj();
+    const capturaDespues = capturar();
+    const quieto = JSON.stringify(antes) === JSON.stringify(despues);
     let ruido = 0;
     let rojez = 0;
     let muestras = 0;
-    for (let f = 0; f < antes.length; f += 1) {
-      const a = antes[f];
-      const b = despues[f];
+    for (let f = 0; f < capturaAntes.length; f += 1) {
+      const a = capturaAntes[f];
+      const b = capturaDespues[f];
       for (let i = 0; i < a.length; i += 4) {
         const salto =
           Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]);
@@ -303,16 +354,69 @@ function medirCuadros(page) {
         muestras += 1;
       }
     }
-    return { ruido, rojez: muestras > 0 ? rojez / muestras : 0, franjas: franjas.length };
-  });
+    // Con ruido inesperado se guardan las dos capturas: sin los píxeles, un `ruido`
+    // alto en un cuadro sano no dice si es grano, una capa roja o arte que se corrió.
+    let instantaneas = null;
+    if (conCapturas && ruido > 15) {
+      const aPng = (datos, [x, y, w, h]) => {
+        const lienzo = document.createElement('canvas');
+        lienzo.width = w;
+        lienzo.height = h;
+        const contexto = lienzo.getContext('2d');
+        const imagen = contexto.createImageData(w, h);
+        imagen.data.set(datos);
+        contexto.putImageData(imagen, 0, 0);
+        return { franja: { x, y, w, h }, png: lienzo.toDataURL('image/png') };
+      };
+      instantaneas = franjas.map((rect, f) => ({
+        antes: aPng(capturaAntes[f], rect),
+        despues: aPng(capturaDespues[f], rect),
+      }));
+    }
+
+    return {
+      ruido,
+      rojez: muestras > 0 ? rojez / muestras : 0,
+      franjas: franjas.length,
+      instantaneas,
+      quieto,
+      cuadros: relojDespues.tick === null ? null : relojDespues.tick - relojAntes.tick,
+      simulacion: relojDespues.tiempo === null ? null : relojDespues.tiempo - relojAntes.tiempo,
+      pantallaAntes: relojAntes.pantalla,
+      pantallaDespues: relojDespues.pantalla,
+      encuadre: quieto ? undefined : { antes, despues },
+    };
+  }, conCapturas);
 }
 
 /** Congela el cuadro, mide y devuelve el reloj a su marcha. */
-async function medirCuadroQuieto(page) {
+/**
+ * El modo de baja calidad (`lowQualityMode`) no pinta el grano ni los indicadores
+ * acústicos: `renderScreenOverlays` los saltea. El motor entra ahí solo cuando tres
+ * cuadros seguidos pasan de ~33 ms, así que en una máquina cargada el grano
+ * desaparece del daño aunque la viñeta siga. Con el reloj quieto los cuadros vuelven
+ * a ser rápidos y el motor sale solo; se espera a que lo haga en vez de medir un
+ * cuadro en el que la capa ni se dibuja. Devuelve `false` si no sale.
+ */
+async function esperarCalidadNormal(page) {
+  try {
+    await page.waitForFunction(
+      () => window.__eko?.snapshot()?.pantalla?.calidadBaja === false,
+      undefined,
+      { timeout: 5000, polling: 100 }
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function medirCuadroQuieto(page, conCapturas = false) {
   await congelarCuadros(page);
-  const medida = await medirCuadros(page);
+  const calidadNormal = await esperarCalidadNormal(page);
+  const medida = await medirCuadros(page, conCapturas);
   await reanudarCuadros(page);
-  return medida;
+  return { ...medida, calidadNormal };
 }
 
 /** Mantiene una tecla hasta que el jugador alcanza la coordenada pedida. */
@@ -409,15 +513,41 @@ async function comprobarGranoDeDanio(page, url) {
   // crimson. Si el sospechoso alcanza al operador durante la medición, se repite.
   let sano = null;
   let ultimoSano = null;
-  for (let intento = 0; intento < 4 && !sano; intento += 1) {
+  for (let intento = 0; intento < 6 && !sano; intento += 1) {
     const antes = await page.evaluate(() => window.__eko?.snapshot()?.player ?? null);
-    const medida = await medirCuadroQuieto(page);
+    const medida = await medirCuadroQuieto(page, true);
     const despues = await page.evaluate(() => window.__eko?.snapshot()?.player ?? null);
-    ultimoSano = { ...medida, hpAntes: antes?.hp ?? null, hpDespues: despues?.hp ?? null };
+    const { instantaneas: _instantaneas, ...resumen } = medida;
+    ultimoSano = {
+      ...resumen,
+      hpAntes: antes?.hp ?? null,
+      hpDespues: despues?.hp ?? null,
+      peligroAntes: antes?.danger ?? null,
+      peligroDespues: despues?.danger ?? null,
+    };
+    // El fogonazo de un disparo cercano (supresión) enciende el grano y la viñeta
+    // **sin bajar HP**: hay que exigir calma antes y después de los dos cuadros,
+    // no solo en la espera previa, o se descarta un sano por un peligro ajeno.
+    // `quieto` añade que el encuadre del pase no se haya movido entre capturas, y
+    // `pantallaDespues.grano` es lo que decidió el overlay al pintar el último
+    // cuadro: si él vio peligro, el cuadro no sirve de referencia sana, diga lo que
+    // diga la instantánea del jugador. En calidad baja la capa no se pinta, así que
+    // ese cuadro tampoco vale como "sano limpio": podría tapar un grano real.
     const intacto =
-      antes?.hp === 100 && despues?.hp === 100 && !antes?.bleeding && !despues?.bleeding;
+      antes?.hp === 100 &&
+      despues?.hp === 100 &&
+      !antes?.bleeding &&
+      !despues?.bleeding &&
+      antes?.danger === false &&
+      despues?.danger === false &&
+      medida.quieto &&
+      medida.calidadNormal &&
+      medida.pantallaDespues?.grano === false;
     if (intacto && medida.ruido <= 15 && medida.rojez <= 5) sano = medida;
-    else await page.waitForTimeout(400);
+    else {
+      guardarBandas(`sano-${intento + 1}`, medida.instantaneas);
+      await page.waitForTimeout(400);
+    }
   }
   if (!sano) {
     fail(`${ETIQUETA} daño: sin un cuadro sano limpio (${JSON.stringify(ultimoSano)})`);
@@ -476,13 +606,24 @@ async function comprobarGranoDeDanio(page, url) {
 
   // Con el daño activo: grano, viñeta y las capas que no deben perderse.
   await congelarCuadros(page);
-  let danio = await medirCuadros(page);
-  for (let intento = 0; intento < 2 && danio.ruido < 120; intento += 1) {
-    await reanudarCuadros(page);
-    await page.waitForTimeout(300);
-    await congelarCuadros(page);
+  let danio = { ruido: 0, rojez: 0, calidadNormal: false };
+  for (let intento = 0; intento < 3 && danio.ruido < 120; intento += 1) {
+    if (intento > 0) {
+      await reanudarCuadros(page);
+      await page.waitForTimeout(300);
+      await congelarCuadros(page);
+    }
+    if (!(await esperarCalidadNormal(page))) {
+      const estado = await page.evaluate(() => window.__eko?.snapshot()?.pantalla ?? null);
+      await reanudarCuadros(page);
+      fail(
+        `${ETIQUETA} daño: el motor no sale de la calidad baja, que no pinta el grano (${JSON.stringify(estado)})`
+      );
+      return;
+    }
     const otra = await medirCuadros(page);
-    if (otra.ruido > danio.ruido) danio = otra;
+    const { instantaneas: _instantaneasOtra, ...resumenOtra } = otra;
+    if (otra.ruido > danio.ruido) danio = resumenOtra;
   }
   // Las capas se comprueban con el reloj real: el retículo sigue al puntero y,
   // con el cuadro congelado, se queda donde estaba antes del último movimiento.
@@ -526,7 +667,7 @@ async function comprobarGranoDeDanio(page, url) {
   }
   if (danio.ruido < 120) {
     fail(
-      `${ETIQUETA} daño: sin grano de daño en las bandas del pase (ruido ${danio.ruido} con daño y ${sano.ruido} sano)`
+      `${ETIQUETA} daño: sin grano de daño en las bandas del pase (${JSON.stringify(danio)} con daño y ${sano.ruido} sano)`
     );
   }
   if (danio.rojez - sano.rojez < 8) {

@@ -343,6 +343,12 @@ export interface EkoE2EWall extends EkoE2ESegment {
 export interface EkoE2EDoor extends EkoE2ESegment {
   readonly name: string;
   readonly isOpen: boolean;
+  /**
+   * Hoja girada del todo, no sólo abierta: el motor abre en tres pasos (28 %, 65 %,
+   * completa) y una hoja a medio abrir bloquea el vano al binomio aunque
+   * `isOpen` ya diga `true`.
+   */
+  readonly isFullyOpen: boolean;
   readonly isLocked: boolean;
   readonly isBreached: boolean;
   readonly isDestroyed: boolean;
@@ -410,7 +416,24 @@ export interface EkoE2EState {
     readonly speechBubble: EkoE2ESpeechBubble | null;
   } | null;
   readonly squad: EkoE2ESquad | null;
+  /**
+   * Estado con el que el overlay de daño decidió en el último cuadro pintado:
+   * `grano` es el `isDanger` real del render y los temporizadores son sus
+   * disparadores, para distinguir "no había peligro" de "el grano no se pintó".
+   */
+  readonly pantalla: {
+    readonly grano: boolean;
+    readonly impacto: number;
+    readonly supresion: number;
+    readonly calidadBaja: boolean;
+  };
   readonly tick: number;
+  /**
+   * Reloj de simulación: suma de los `dt` ya clampeados a `PASO_MAXIMO`. Bajo
+   * carga un fotograma largo avanza menos que el reloj de pared, así que las
+   * esperas del E2E se miden con esto y no con `Date.now()`.
+   */
+  readonly tiempo: number;
   readonly world: EkoE2EWorld;
   /** Recursos y equipo del operador/binomio para comprobar consumos. */
   readonly c4Count: number;
@@ -517,6 +540,10 @@ export class TacticalEngineCore {
   protected camPanOffsetY: number = 0;
   protected shakeIntensity: number = 0;
   protected hitstopTimer: number = 0;
+  /** Lo que decidió el overlay de grano en el último cuadro; solo para el E2E. */
+  protected ultimoGrano: boolean = false;
+  protected ultimoImpacto: number = 0;
+  protected ultimoSupresion: number = 0;
   protected flashScreenAlpha: number = 0;
   protected playerHitFlashTimer: number = 0;
   protected playerHitSourceAngle: number = 0;
@@ -9162,6 +9189,7 @@ public nightMode: boolean = false;
         x2: door.x2,
         y2: door.y2,
         isOpen: door.isOpen,
+        isFullyOpen: Math.abs(door.currentAngle - door.openAngle) < 0.05,
         isLocked: door.isLocked,
         isBreached: door.isBreached,
         isDestroyed: door.isDestroyed ?? false,
@@ -9228,6 +9256,13 @@ public nightMode: boolean = false;
           })
         : null,
       tick: this.ticks,
+      pantalla: Object.freeze({
+        grano: this.ultimoGrano,
+        impacto: this.ultimoImpacto,
+        supresion: this.ultimoSupresion,
+        calidadBaja: this.lowQualityMode,
+      }),
+      tiempo: this.elapsedSeconds,
       c4Count: this.c4.count,
       squadGear: this.plan.squadGear,
       radioFeed: Object.freeze(

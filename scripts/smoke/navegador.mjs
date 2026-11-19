@@ -75,18 +75,26 @@ export async function abrirPuertaDeEntrada(page, puertaId = 'DOOR_MAIN_A') {
   } finally {
     await page.keyboard.up('KeyD');
   }
-  // E abre en tres pasos (28 %, 65 %, completa). La primera apertura deja la
-  // hoja en el vano y Kobra 2 no puede atravesarla; hay que abrirla del todo.
-  await page.keyboard.press('KeyE');
-  await page.waitForTimeout(120);
-  await page.keyboard.press('KeyE');
-  await page.waitForTimeout(120);
-  await page.keyboard.press('KeyE');
-  await page.waitForFunction(
-    (id) => window.__eko?.snapshot()?.world.doors.find((door) => door.id === id)?.isOpen === true,
-    puertaId,
-    { timeout: 3000 }
+  // E abre en tres pasos (28 %, 65 %, completa). `isOpen` ya es `true` con la
+  // hoja al 28 %, que bloquea el vano: si una pulsación se pierde (el motor tiene
+  // su propia cadencia entre pasos), el binomio se queda clavado en el umbral. Por
+  // eso se pulsa hasta ver la hoja girada del todo (`isFullyOpen`) y no se acepta
+  // el primer `isOpen`.
+  for (let paso = 0; paso < 8; paso += 1) {
+    const abierta = await page.evaluate(
+      (id) =>
+        window.__eko?.snapshot()?.world.doors.find((door) => door.id === id)?.isFullyOpen === true,
+      puertaId
+    );
+    if (abierta) break;
+    await page.keyboard.press('KeyE');
+    await page.waitForTimeout(160);
+  }
+  const delTodo = await page.evaluate(
+    (id) => window.__eko?.snapshot()?.world.doors.find((door) => door.id === id)?.isFullyOpen === true,
+    puertaId
   );
+  if (!delTodo) throw new Error(`la puerta ${puertaId} no queda del todo abierta`);
 
   // El jugador tampoco debe quedar parado en el umbral mientras pasa Kobra 2.
   await page.keyboard.down('KeyA');
@@ -117,7 +125,14 @@ export function vigilarPagina(page, { origin, badRequests, consoleErrors, prefij
   });
   if (fallosDeRed) {
     page.on('requestfailed', (request) => {
-      if (request.url().startsWith(origin)) badRequests.push(`FALLO ${request.url()} (${request.failure()?.errorText})`);
+      if (!request.url().startsWith(origin)) return;
+      // `net::ERR_ABORTED` no es una caída de red: es el navegador cancelando una
+      // petición que el documento anterior tenía en vuelo, por ejemplo el SVG del
+      // emblema del título cuando el humo lanza el `goto` siguiente antes de que
+      // termine de bajarlo. Un recurso que falta llega como 404 por `response` y
+      // una conexión rota como otro `net::ERR_*`, así que esos dos siguen contando.
+      if (request.failure()?.errorText === 'net::ERR_ABORTED') return;
+      badRequests.push(`FALLO ${request.url()} (${request.failure()?.errorText})`);
     });
   }
   page.on('pageerror', (error) => consoleErrors.push(`${prefijo}excepción: ${error.message}`));

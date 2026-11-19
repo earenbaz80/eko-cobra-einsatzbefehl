@@ -29,6 +29,12 @@ export function instalarHookE2E(engine: TacticalEngineCore): () => void {
     get tick() {
       return engine.ticks;
     },
+    get tiempo() {
+      return engine.snapshotE2E().tiempo;
+    },
+    get pantalla() {
+      return engine.snapshotE2E().pantalla;
+    },
     get world() {
       return engine.snapshotE2E().world;
     },

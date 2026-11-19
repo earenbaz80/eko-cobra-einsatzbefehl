@@ -164,9 +164,13 @@ async function comprobarContextMenuPuerta(page, url) {
         .filter((puerta) => puerta.isOpen || puerta.isBreached || puerta.isDestroyed)
         .map((puerta) => puerta.id)
     );
+    const SEGUNDOS_DE_JUEGO = 8;
+    const TOPE_DE_PARED_SEGUNDOS = 120;
+    const tiempoInicial = antes.tiempo ?? 0;
+    const inicioDePared = Date.now();
     let objetivoAbierto = false;
 
-    for (let intento = 0; intento < 140; intento++) {
+    for (;;) {
       await page.waitForTimeout(100);
       const actual = await leerEstado(page);
       if (!actual?.squad) {
@@ -200,10 +204,26 @@ async function comprobarContextMenuPuerta(page, url) {
         fail(`órdenes · contexto: se abrió otra puerta antes de llegar (${otraAbierta.id})`);
         return;
       }
+
+      // El presupuesto se gasta en tiempo de simulación, no de reloj: el motor
+      // avanza como mucho `PASO_MAXIMO` (50 ms) por fotograma, así que con la CPU
+      // cargada un segundo de juego cuesta varios de pared. Este trayecto tarda
+      // unos 3 s de simulación; se le dan 8. El tope de pared solo cubre que la
+      // simulación se detenga de verdad (pausa o excepción bajo el motor).
+      const jugado = (actual.tiempo ?? 0) - tiempoInicial;
+      if (jugado >= SEGUNDOS_DE_JUEGO || Date.now() - inicioDePared >= TOPE_DE_PARED_SEGUNDOS * 1000) {
+        break;
+      }
     }
 
     if (!objetivoAbierto) {
-      fail(`órdenes · contexto: Kobra-2 no abrió ${puertaObjetivo.name} a tiempo`);
+      const final = await leerEstado(page);
+      const jugado = (final?.tiempo ?? 0) - tiempoInicial;
+      const pared = (Date.now() - inicioDePared) / 1000;
+      const entrada = final?.world.doors.find((item) => item.id === 'DOOR_MAIN_A');
+      fail(
+        `órdenes · contexto: Kobra-2 no abrió ${puertaObjetivo.name} en ${jugado.toFixed(1)} s de simulación (${pared.toFixed(1)} s de pared; pila en ${Math.round(final?.squad?.x ?? -1)},${Math.round(final?.squad?.y ?? -1)} objetivo ${final?.squad?.target ? `${Math.round(final.squad.target.x)},${Math.round(final.squad.target.y)}` : 'ninguno'}; operador en ${Math.round(final?.player?.x ?? -1)},${Math.round(final?.player?.y ?? -1)} danger ${final?.player?.danger ?? '?'}; entrada abierta ${entrada?.isOpen ?? '?'} del todo ${entrada?.isFullyOpen ?? '?'})`
+      );
       return;
     }
 
