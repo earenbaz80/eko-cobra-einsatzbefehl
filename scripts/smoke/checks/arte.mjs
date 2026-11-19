@@ -260,10 +260,11 @@ async function reanudarCuadros(page) {
 }
 
 /**
- * Mide las dos capas de daño sobre el arte con el reloj quieto: `ruido` cuenta
- * los píxeles que cambian entre dos cuadros consecutivos (grano) y `rojez` es la
- * media de rojo menos azul en las franjas laterales, donde la viñeta de trauma
- * tiñe de rojo; sano, el arte deja las franjas frías.
+ * Mide las dos capas de daño con el reloj quieto en las bandas negras que deja
+ * la presentación 16:9 del pase (arriba y abajo del arte). Ahí no hay arte,
+ * lluvia, sprites ni cámara: solo llegan las capas de pantalla, así que `ruido`
+ * (píxeles que cambian entre dos cuadros) es el grano y `rojez` (rojo menos azul)
+ * es la viñeta de trauma. Se saltea el minimapa y el PiP de las esquinas.
  */
 function medirCuadros(page) {
   return page.evaluate(async () => {
@@ -271,56 +272,47 @@ function medirCuadros(page) {
     const ctx = el.getContext('2d');
     const ancho = el.width;
     const alto = el.height;
-    const enHud = (x, y) =>
-      (x < 150 && y < 150) || (x > ancho - 220 && y < 152); // minimapa y PiP
+    const marco = window.__eko?.artFrame?.() ?? null;
+    const arteArriba = marco ? marco.y - 180 * marco.zoom : 0;
+    const arteAbajo = marco ? marco.y + 180 * marco.zoom : alto;
+    const franjas = [
+      [200, 4, ancho - 440, Math.max(0, arteArriba - 8)],
+      [200, arteAbajo + 4, ancho - 440, Math.max(0, alto - arteAbajo - 8)],
+    ].filter(([, , w, h]) => w > 0 && h > 0);
+
     const esperarCuadro = () =>
       new Promise((listo) =>
         requestAnimationFrame(() => requestAnimationFrame(() => listo(true)))
       );
-    const capturar = () => ctx.getImageData(0, 0, ancho, alto).data;
+    const capturar = () =>
+      franjas.map(([x, y, w, h]) => ctx.getImageData(x, y, w, h).data);
     const antes = capturar();
     await esperarCuadro();
     const despues = capturar();
     let ruido = 0;
     let rojez = 0;
     let muestras = 0;
-    const borde = Math.round(Math.min(ancho, alto) * 0.12);
-    for (let y = 0; y < alto; y += 1) {
-      for (let x = 0; x < ancho; x += 1) {
-        const i = (y * ancho + x) * 4;
-        if (!enHud(x, y)) {
-          const salto =
-            Math.abs(antes[i] - despues[i]) +
-            Math.abs(antes[i + 1] - despues[i + 1]) +
-            Math.abs(antes[i + 2] - despues[i + 2]);
-          if (salto > 30) ruido += 1;
-        }
-        if (x < borde || x >= ancho - borde || y < borde || y >= alto - borde) {
-          rojez += despues[i] - despues[i + 2];
-          muestras += 1;
-        }
+    for (let f = 0; f < antes.length; f += 1) {
+      const a = antes[f];
+      const b = despues[f];
+      for (let i = 0; i < a.length; i += 4) {
+        const salto =
+          Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]);
+        if (salto > 30) ruido += 1;
+        rojez += b[i] - b[i + 2];
+        muestras += 1;
       }
     }
-    return { ruido, rojez: rojez / muestras };
+    return { ruido, rojez: muestras > 0 ? rojez / muestras : 0, franjas: franjas.length };
   });
 }
 
-/**
- * Mide un estado quieto. Congelar no detiene lo que ya estaba en movimiento
- * (un fogonazo, una burbuja entrando), así que se toman hasta tres muestras y se
- * queda la más limpia: el grano de daño está en todas, un resto de animación no.
- */
-async function medirEstadoQuieto(page) {
-  let mejor = null;
-  for (let intento = 0; intento < 3; intento += 1) {
-    await congelarCuadros(page);
-    const medida = await medirCuadros(page);
-    await reanudarCuadros(page);
-    if (!mejor || medida.ruido < mejor.ruido) mejor = medida;
-    if (mejor.ruido <= 15) break;
-    await page.waitForTimeout(350);
-  }
-  return mejor;
+/** Congela el cuadro, mide y devuelve el reloj a su marcha. */
+async function medirCuadroQuieto(page) {
+  await congelarCuadros(page);
+  const medida = await medirCuadros(page);
+  await reanudarCuadros(page);
+  return medida;
 }
 
 /** Mantiene una tecla hasta que el jugador alcanza la coordenada pedida. */
@@ -397,12 +389,40 @@ async function comprobarGranoDeDanio(page, url) {
     fail(`${ETIQUETA} daño: la escuadra no se queda firme (${error.message.split('\n')[0]})`);
     return;
   }
-  const sinDanio = await page.evaluate(() => window.__eko?.snapshot()?.player ?? null);
-  if (!sinDanio || sinDanio.hp < 100 || sinDanio.bleeding) {
-    fail(`${ETIQUETA} daño: el operador ya estaba herido antes de la prueba (${JSON.stringify(sinDanio)})`);
+  // El propio motor dice si está en peligro (impacto, sangrado, salud crítica o
+  // supresión): el baseline sano solo vale en calma, no a mitad de un intercambio
+  // de disparos ni con la supresión de un proyectil cercano todavía viva.
+  try {
+    await page.waitForFunction(
+      () => window.__eko?.snapshot()?.player?.danger === false,
+      undefined,
+      { timeout: 8000, polling: 100 }
+    );
+  } catch {
+    const estado = await page.evaluate(() => window.__eko?.snapshot()?.player ?? null);
+    fail(`${ETIQUETA} daño: el motor no sale del estado de peligro (${JSON.stringify(estado)})`);
     return;
   }
-  const sano = await medirEstadoQuieto(page);
+
+  // Sano de verdad: no basta con que el muestreo salga limpio, el operador tiene
+  // que seguir intacto antes y después y el borde no puede llevar la viñeta
+  // crimson. Si el sospechoso alcanza al operador durante la medición, se repite.
+  let sano = null;
+  let ultimoSano = null;
+  for (let intento = 0; intento < 4 && !sano; intento += 1) {
+    const antes = await page.evaluate(() => window.__eko?.snapshot()?.player ?? null);
+    const medida = await medirCuadroQuieto(page);
+    const despues = await page.evaluate(() => window.__eko?.snapshot()?.player ?? null);
+    ultimoSano = { ...medida, hpAntes: antes?.hp ?? null, hpDespues: despues?.hp ?? null };
+    const intacto =
+      antes?.hp === 100 && despues?.hp === 100 && !antes?.bleeding && !despues?.bleeding;
+    if (intacto && medida.ruido <= 15 && medida.rojez <= 5) sano = medida;
+    else await page.waitForTimeout(400);
+  }
+  if (!sano) {
+    fail(`${ETIQUETA} daño: sin un cuadro sano limpio (${JSON.stringify(ultimoSano)})`);
+    return;
+  }
 
   // Entrar al piso y a la cocina, donde patrulla un sospechoso armado.
   try {
@@ -448,6 +468,11 @@ async function comprobarGranoDeDanio(page, url) {
     fail(`${ETIQUETA} daño: el sospechoso no llegó a herir al operador (${JSON.stringify(estado)})`);
     return;
   }
+  const enPeligro = await page.evaluate(() => window.__eko?.snapshot()?.player?.danger === true);
+  if (!enPeligro) {
+    fail(`${ETIQUETA} daño: el motor no marca peligro con el operador herido`);
+    return;
+  }
 
   // Con el daño activo: grano, viñeta y las capas que no deben perderse.
   await congelarCuadros(page);
@@ -462,12 +487,17 @@ async function comprobarGranoDeDanio(page, url) {
   // Las capas se comprueban con el reloj real: el retículo sigue al puntero y,
   // con el cuadro congelado, se queda donde estaba antes del último movimiento.
   await reanudarCuadros(page);
+  const juego = await page.evaluate(() => window.__eko?.snapshot()?.gameState ?? null);
+  if (juego !== 'PLAYING') {
+    fail(`${ETIQUETA} daño: la partida terminó durante la comprobación (${juego})`);
+    return;
+  }
   const rotulos = await contarRotulosSobreElArte(page);
   // El retículo cambia de color cuando cae sobre un actor (rojo sobre el
-  // sospechoso), así que se prueban tres puntos: en dos tiene que seguir el cian
-  // táctico que dibuja sobre el arte.
+  // sospechoso), así que se prueban cuatro puntos y basta con que en uno siga el
+  // cian táctico; el centro es el operador, donde el tono no depende del reparto.
   const cianes = [];
-  for (const [x, y] of [[300, 600], [1000, 600], [700, 240]]) {
+  for (const [x, y] of [[300, 600], [1000, 600], [700, 240], [640, 400]]) {
     cianes.push(await contarCianEnPuntero(page, x, y));
   }
   const sinNvg = await mediaDeColor(page, 520, 260, 240, 120);
@@ -482,9 +512,9 @@ async function comprobarGranoDeDanio(page, url) {
   if (rotulos.piip === 0) {
     fail(`${ETIQUETA} daño: el PiP de la bodycam desaparece con el daño activo`);
   }
-  if (cianes.filter((cuenta) => cuenta >= 8).length < 2) {
+  if (Math.max(...cianes) < 8) {
     fail(
-      `${ETIQUETA} daño: el retículo desaparece con el daño activo (cian ${cianes.join('/')} en tres posiciones)`
+      `${ETIQUETA} daño: el retículo desaparece con el daño activo (cian ${cianes.join('/')} en cuatro posiciones)`
     );
   }
   const verdeAntes = sinNvg.g - sinNvg.r;
@@ -496,15 +526,12 @@ async function comprobarGranoDeDanio(page, url) {
   }
   if (danio.ruido < 120) {
     fail(
-      `${ETIQUETA} daño: sin grano sobre el arte herido (ruido ${danio.ruido} con daño y ${sano.ruido} sano)`
+      `${ETIQUETA} daño: sin grano de daño en las bandas del pase (ruido ${danio.ruido} con daño y ${sano.ruido} sano)`
     );
-  }
-  if (sano.ruido > 15) {
-    fail(`${ETIQUETA} daño: el grano aparece con el jugador sano (ruido ${sano.ruido})`);
   }
   if (danio.rojez - sano.rojez < 8) {
     fail(
-      `${ETIQUETA} daño: sin viñeta de trauma sobre el arte (rojez ${sano.rojez.toFixed(1)} sana y ${danio.rojez.toFixed(1)} herida)`
+      `${ETIQUETA} daño: sin viñeta de trauma en las bandas del pase (rojez ${sano.rojez.toFixed(1)} sana y ${danio.rojez.toFixed(1)} herida)`
     );
   }
 

@@ -401,6 +401,11 @@ export interface EkoE2EState {
     readonly hp: number;
     /** Herida abierta; activa el grano y la viñeta de trauma. */
     readonly bleeding: boolean;
+    /**
+     * Estado de peligro del motor (impacto, sangrado, salud crítica o
+     * supresión), que es el que enciende grano y viñeta.
+     */
+    readonly danger: boolean;
     /** Burbuja de texto situacional de Kobra-1; no es una locución. */
     readonly speechBubble: EkoE2ESpeechBubble | null;
   } | null;
@@ -9186,6 +9191,11 @@ public nightMode: boolean = false;
             angle: player.angle,
             hp: player.hp,
             bleeding: !!player.bodyHealth?.bleeding,
+            danger:
+              this.playerHitFlashTimer > 0 ||
+              player.hp < 40 ||
+              !!player.bodyHealth?.bleeding ||
+              this.suppressionTimer > 0,
             speechBubble: player.speechBubble
               ? Object.freeze({
                   text: player.speechBubble.text,
