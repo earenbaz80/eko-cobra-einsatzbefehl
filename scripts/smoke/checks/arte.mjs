@@ -77,14 +77,16 @@ async function vigilarTextoDelSistema(page) {
   await page.addInitScript(() => {
     const original = CanvasRenderingContext2D.prototype.fillText;
     const registrados = [];
-    CanvasRenderingContext2D.prototype.fillText = function (texto, ...resto) {
+    CanvasRenderingContext2D.prototype.fillText = function (texto, x, y, ...resto) {
       registrados.push({
         texto: String(texto),
+        x,
+        y,
         ancho: this.canvas.width,
         alto: this.canvas.height,
         enDom: this.canvas.isConnected,
       });
-      return original.call(this, texto, ...resto);
+      return original.call(this, texto, x, y, ...resto);
     };
     Object.defineProperty(window, '__arteTextos', { value: registrados, configurable: true });
   });
@@ -170,51 +172,143 @@ async function comprobarPaseClasico(page, url) {
 }
 
 /**
- * El pase dibuja su buffer 16:9 centrado sobre negro. En esta ventana (1280x800)
- * el encaje da 2,00 y sobran 40 px de banda arriba y abajo; en otras
- * proporciones la banda cae a los lados. El render normal pinta de borde a borde
- * y no deja ninguna, así que el marco es la prueba de que el pase de píxeles se aplicó.
+ * El pase presenta su buffer y retorna, así que las capas que el motor pinta a
+ * resolución de pantalla —minimapa, retículo, PiP, NVG, grano— las repinta él
+ * sobre el arte. Se comprueba en el render por defecto: el rótulo del minimapa
+ * aparece en el canvas visible y en su posición, y el retículo sigue al puntero.
  */
-async function comprobarMarco(page) {
-  const marco = await page.evaluate(() => {
+async function comprobarCapasSobreElArte(page, url) {
+  try {
+    await arrancarMision(page, url, 'Misión 1: Piso Graz - Lend', {
+      asentarMs: 700,
+      reiniciarAzar: true,
+    });
+  } catch (error) {
+    fail(`${ETIQUETA} capas: no arranca la misión (${error.message.split('\n')[0]})`);
+    return;
+  }
+
+  // `minimapCenter` por defecto es (74, 74): el rótulo cae en (52, 141).
+  const rotulo = await page.evaluate(
+    () =>
+      (window.__arteTextos ?? []).filter(
+        (t) =>
+          t.texto === 'MINIMAP 2D' &&
+          t.enDom &&
+          Math.abs(t.x - 52) <= 2 &&
+          Math.abs(t.y - 141) <= 2
+      ).length
+  );
+  if (rotulo === 0) {
+    fail(`${ETIQUETA} capas: el minimapa no se pinta sobre el arte (sin rótulo en el canvas visible)`);
+  }
+
+  // Más fuerte que el rótulo: el marcador del jugador en el centro del minimapa
+  // tiene que verse. Si otra capa lo tapa, no queda ámbar en esa caja.
+  const marcador = await page.evaluate(() => {
     const el = document.querySelector('canvas');
     const ctx = el.getContext('2d');
-    const fila = Math.floor(el.height / 2);
-    const columna = Math.floor(el.width / 2);
-    const pintado = (x, y) => {
-      const [r, g, b] = ctx.getImageData(x, y, 1, 1).data;
-      return r + g + b > 0;
+    const dpr = el.width / el.getBoundingClientRect().width;
+    const lado = 18;
+    const x0 = Math.round(74 * dpr - lado / 2);
+    const y0 = Math.round(74 * dpr - lado / 2);
+    const { data } = ctx.getImageData(x0, y0, lado, lado);
+    let ambar = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] > 190 && data[i + 1] > 110 && data[i + 1] < 200 && data[i + 2] < 90) ambar += 1;
+    }
+    return ambar;
+  });
+  if (marcador < 5) {
+    fail(`${ETIQUETA} capas: el minimapa no se ve sobre el arte (${marcador} px ámbar en su centro)`);
+    return;
+  }
+
+  // El retículo acampa en el puntero: se cuenta cian saturado en una caja
+  // alrededor de dos posiciones. Sin retículo, el arte de fondo no da ese tono.
+  const medirCian = async (x, y) => {
+    await page.mouse.move(x, y);
+    await page.waitForTimeout(220);
+    return page.evaluate(
+      ([px, py]) => {
+        const el = document.querySelector('canvas');
+        const ctx = el.getContext('2d');
+        const dpr = el.width / el.getBoundingClientRect().width;
+        const lado = 34;
+        const x0 = Math.max(0, Math.round(px * dpr - lado / 2));
+        const y0 = Math.max(0, Math.round(py * dpr - lado / 2));
+        const { data } = ctx.getImageData(x0, y0, lado, lado);
+        let cian = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          if (b - r >= 70 && b >= 100 && g >= 60) cian += 1;
+        }
+        return cian;
+      },
+      [x, y]
+    );
+  };
+
+  const enA = await medirCian(700, 240);
+  const enB = await medirCian(1010, 240);
+  if (enA < 8 || enB < 8) {
+    fail(
+      `${ETIQUETA} capas: el retículo no se pinta sobre el arte (cian ${enA} en 700,240 y ${enB} en 1010,240)`
+    );
+    return;
+  }
+
+  console.log(
+    `${ETIQUETA} · minimapa y retículo sobre el arte (${marcador} px de marcador; cian ${enA}/${enB} en dos posiciones)`
+  );
+}
+
+/**
+ * El pase presenta su buffer 16:9 centrado. Antes se deducía de las bandas
+ * negras del canvas, pero ahora las capas de pantalla (lluvia, minimapa,
+ * retículo) las pintan, así que el encuadre se lee del propio pase: centro en el
+ * panel, 16:9 exacto y el encaje que corresponde a la ventana.
+ */
+async function comprobarEncuadre(page) {
+  const datos = await page.evaluate(() => {
+    const el = document.querySelector('canvas');
+    const rect = el.getBoundingClientRect();
+    return {
+      frame: window.__eko?.artFrame?.() ?? null,
+      ancho: rect.width,
+      alto: rect.height,
     };
-    let izquierda = 0;
-    while (izquierda < el.width && !pintado(izquierda, fila)) izquierda += 1;
-    let derecha = 0;
-    while (derecha < el.width && !pintado(el.width - 1 - derecha, fila)) derecha += 1;
-    let arriba = 0;
-    while (arriba < el.height && !pintado(columna, arriba)) arriba += 1;
-    let abajo = 0;
-    while (abajo < el.height && !pintado(columna, el.height - 1 - abajo)) abajo += 1;
-    return { ancho: el.width, alto: el.height, izquierda, derecha, arriba, abajo };
   });
 
-  const anchoArte = marco.ancho - marco.izquierda - marco.derecha;
-  const altoArte = marco.alto - marco.arriba - marco.abajo;
-  const banda = Math.max(marco.izquierda, marco.derecha, marco.arriba, marco.abajo);
-  if (banda < 8 || anchoArte <= 0 || altoArte <= 0) {
-    fail(
-      `${ETIQUETA}: sin marco del buffer cenital (${marco.izquierda}/${marco.derecha}/${marco.arriba}/${marco.abajo} px): el pase no llegó al canvas`
-    );
+  if (!datos.frame || datos.ancho <= 0 || datos.alto <= 0) {
+    fail(`${ETIQUETA}: el pase no reporta su presentación (${JSON.stringify(datos.frame)})`);
     return false;
   }
-  const centrado =
-    Math.abs(marco.izquierda - marco.derecha) <= 2 && Math.abs(marco.arriba - marco.abajo) <= 2;
-  const dieciseisNueve = Math.abs(anchoArte / altoArte - 16 / 9) <= 0.02;
-  if (!centrado || !dieciseisNueve) {
-    fail(
-      `${ETIQUETA}: el marco no es 16:9 centrado (${anchoArte}x${altoArte}, márgenes ${marco.izquierda}/${marco.derecha}/${marco.arriba}/${marco.abajo})`
-    );
+
+  const { x, y, zoom } = datos.frame;
+  const encaje = Math.min(datos.ancho / 640, datos.alto / 360);
+  const banda = Math.max(0, (datos.alto - 360 * zoom) / 2, (datos.ancho - 640 * zoom) / 2);
+
+  if (Math.abs(zoom - encaje) > 0.02) {
+    fail(`${ETIQUETA}: el encuadre del pase no encaja en la ventana (zoom ${zoom}, esperado ${encaje})`);
     return false;
   }
-  console.log(`${ETIQUETA} · marco ${anchoArte}x${altoArte} con banda ${banda} px`);
+  if (Math.abs(x - datos.ancho / 2) > 1 || Math.abs(y - datos.alto / 2) > 1) {
+    fail(`${ETIQUETA}: el pase no está centrado (${x},${y} en un panel de ${datos.ancho}x${datos.alto})`);
+    return false;
+  }
+  if (Math.abs((640 * zoom) / (360 * zoom) - 16 / 9) > 0.02) {
+    fail(`${ETIQUETA}: el pase no presenta 16:9 (zoom ${zoom})`);
+    return false;
+  }
+  if (banda < 8) {
+    fail(`${ETIQUETA}: el pase no deja banda (${banda} px); el encaje no es el de 640x360`);
+    return false;
+  }
+
+  console.log(`${ETIQUETA} · encuadre 640x360 ×${zoom.toFixed(2)} centrado con banda ${banda.toFixed(0)} px`);
   return true;
 }
 
@@ -233,6 +327,7 @@ export async function comprobarArtProof(page, { url }) {
   await vigilarTextoDelSistema(page);
   await comprobarChunkSeparado(page, url);
   await comprobarPaseClasico(page, url);
+  await comprobarCapasSobreElArte(page, url);
 
   const medidos = {};
   for (const [indice, escenario] of ESCENARIOS.entries()) {
@@ -280,7 +375,7 @@ export async function comprobarArtProof(page, { url }) {
         );
         continue;
       }
-      if (!(await comprobarMarco(page))) continue;
+      if (!(await comprobarEncuadre(page))) continue;
     }
 
     const hash = await page.evaluate(() => window.__eko?.artBufferHash() ?? null);

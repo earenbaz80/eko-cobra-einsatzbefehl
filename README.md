@@ -102,6 +102,8 @@ El motor dibuja la escena táctica con arte de píxeles —tileset y sprites dib
 
 El pase viaja en su propio chunk y se pide en cuanto el motor pinta el primer cuadro de la escena; mientras llega, se dibuja el render anterior, así que la partida nunca queda en blanco ni parpadea. `?art=classic` recupera ese render anterior para comparar y, en ese caso, el chunk no se descarga.
 
+Las capas que el motor pinta a resolución de pantalla —minimapa, retículo diegético, PiP de la bodycam, NVG, gas CS, clima, trauma, supresión, C4, impacto, grano y burbujas del binomio— se dibujan después de presentar el buffer, igual que en el render anterior: el arte las conserva y no se duplican, porque el pase de píxeles no las pinta.
+
 | Parámetro | Efecto |
 |---|---|
 | `?art=classic` | Vuelve al render anterior (sin descargar el pase). |

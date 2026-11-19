@@ -45,6 +45,7 @@ export function instalarHookE2E(engine: TacticalEngineCore): () => void {
     worldToScreen: (x: number, y: number) => engine.worldToScreen(x, y),
     artBufferHash: () => paseDeArteCargado()?.artProofBufferHash() ?? null,
     artBufferSize: () => paseDeArteCargado()?.artBufferSize() ?? null,
+    artFrame: () => paseDeArteCargado()?.geometriaPresentada() ?? null,
   });
 
   Object.defineProperty(window, '__eko', {

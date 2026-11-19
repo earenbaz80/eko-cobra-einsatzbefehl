@@ -419,6 +419,12 @@ export interface EkoE2EHook extends EkoE2EState {
   artBufferHash(): string | null;
   /** Tamaño de ese buffer; null mientras el chunk del pase no esté cargado. */
   artBufferSize(): { readonly width: number; readonly height: number } | null;
+  /**
+   * Encuadre de la última presentación del pase en píxeles CSS (centro de cámara
+   * y píxeles por unidad de mundo); null si no presentó. El humo lo usa para
+   * comprobar el 16:9 centrado, que ahora las capas de pantalla tapan.
+   */
+  artFrame(): { readonly x: number; readonly y: number; readonly zoom: number } | null;
 }
 
 export class TacticalEngineCore {

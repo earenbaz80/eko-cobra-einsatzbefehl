@@ -240,10 +240,21 @@ export class TacticalEngine extends TacticalEngineCore {
         activeTool: this.activeTool,
         renderScale: this.renderScale
       });
-      // El pase returna antes de `renderActors`, así que las capas que el motor
-      // dibuja sobre la escena hay que repintarlas acá: sin esto, las órdenes al
-      // binomio se quedaban sin burbuja en el render por defecto.
+      // El pase returna antes de `renderActors` y de las capas de pantalla, así
+      // que el HUD que dibuja el motor hay que repintarlo acá: sin esto, el
+      // render por defecto perdía burbujas, minimapa y retículo.
       this.renderSpeechBubblesOverlay(ctx);
+      // `present` deja el lienzo en píxeles del backing store: se vuelve a la
+      // escala CSS para que las capas caigan igual que en el pase clásico.
+      ctx.setTransform(this.renderScale, 0, 0, this.renderScale, 0, 0);
+      this.renderScreenOverlays(
+        ctx,
+        this.viewWidth,
+        this.viewHeight,
+        this.getPlayer(),
+        this.getSquadmate(),
+        true
+      );
       return;
     }
 
@@ -342,7 +353,28 @@ export class TacticalEngine extends TacticalEngineCore {
       ctx.restore();
     }
 
-    // 11. Render Night Vision (NVG) Post-Processing Filter, Trauma Vignette, Directional Hit Flash, Peripheral Acoustic Edge Indicators & Minimap
+    // 11. Capas de pantalla compartidas con el pase de píxeles (ver abajo).
+    this.renderScreenOverlays(ctx, width, height, player, squad, false);
+  }
+
+  /**
+   * Capas que se pintan a resolución de pantalla sobre cualquier pase: NVG, gas
+   * CS, clima, trauma, supresión, aviso de C4, impacto, grano, indicadores
+   * acústicos, minimapa, PiP de la bodycam y retículo diegético.
+   *
+   * Viven acá y no en `render()` porque el pase de píxeles presenta su buffer y
+   * retorna antes: si sólo las pintara el render clásico, el juego por defecto
+   * perdería el minimapa y el retículo. `nocheYaPintada` evita el velo de noche
+   * duplicado cuando el pase ya lo aplicó en su pase de luz.
+   */
+  private renderScreenOverlays(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    player: ActorEntity | undefined,
+    squad: ActorEntity | undefined,
+    nocheYaPintada: boolean
+  ) {
     if (player && this.gameState === 'PLAYING') {
       if (this.nvgActive) {
         this.renderNightVisionPostProcess(ctx, width, height);
@@ -364,7 +396,7 @@ export class TacticalEngine extends TacticalEngineCore {
       this.renderSmartDiegeticReticle(ctx, width, height, player);
     }
 
-    if (this.nightMode) {
+    if (this.nightMode && !nocheYaPintada) {
       ctx.fillStyle = 'rgba(0, 0, 12, 0.45)';
       ctx.fillRect(0, 0, width, height);
     }
@@ -3512,7 +3544,9 @@ export class TacticalEngine extends TacticalEngineCore {
 
     const pipW = 190;
     const pipH = 120;
-    const pipX = 16;
+    // Arriba a la derecha: el minimapa vive en (74, 74) y, pegado a la izquierda,
+    // este PiP lo tapaba por completo.
+    const pipX = Math.max(16, this.viewWidth - pipW - 16);
     const pipY = 16;
 
     ctx.save();
