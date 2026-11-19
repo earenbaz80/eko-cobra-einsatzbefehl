@@ -22,6 +22,7 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { estadisticasCanvas } from '../canvas.mjs';
+import { contarCianEnPuntero, contarRotulosSobreElArte } from '../capas.mjs';
 import { abrirPuertaDeEntrada, arrancarMision } from '../navegador.mjs';
 import { fail } from '../informe.mjs';
 
@@ -188,18 +189,8 @@ async function comprobarCapasSobreElArte(page, url) {
     return;
   }
 
-  // `minimapCenter` por defecto es (74, 74): el rótulo cae en (52, 141).
-  const rotulo = await page.evaluate(
-    () =>
-      (window.__arteTextos ?? []).filter(
-        (t) =>
-          t.texto === 'MINIMAP 2D' &&
-          t.enDom &&
-          Math.abs(t.x - 52) <= 2 &&
-          Math.abs(t.y - 141) <= 2
-      ).length
-  );
-  if (rotulo === 0) {
+  const rotulos = await contarRotulosSobreElArte(page);
+  if (rotulos.minimapa === 0) {
     fail(`${ETIQUETA} capas: el minimapa no se pinta sobre el arte (sin rótulo en el canvas visible)`);
   }
 
@@ -224,35 +215,9 @@ async function comprobarCapasSobreElArte(page, url) {
     return;
   }
 
-  // El retículo acampa en el puntero: se cuenta cian saturado en una caja
-  // alrededor de dos posiciones. Sin retículo, el arte de fondo no da ese tono.
-  const medirCian = async (x, y) => {
-    await page.mouse.move(x, y);
-    await page.waitForTimeout(220);
-    return page.evaluate(
-      ([px, py]) => {
-        const el = document.querySelector('canvas');
-        const ctx = el.getContext('2d');
-        const dpr = el.width / el.getBoundingClientRect().width;
-        const lado = 34;
-        const x0 = Math.max(0, Math.round(px * dpr - lado / 2));
-        const y0 = Math.max(0, Math.round(py * dpr - lado / 2));
-        const { data } = ctx.getImageData(x0, y0, lado, lado);
-        let cian = 0;
-        for (let i = 0; i < data.length; i += 4) {
-          const r = data[i];
-          const g = data[i + 1];
-          const b = data[i + 2];
-          if (b - r >= 70 && b >= 100 && g >= 60) cian += 1;
-        }
-        return cian;
-      },
-      [x, y]
-    );
-  };
-
-  const enA = await medirCian(700, 240);
-  const enB = await medirCian(1010, 240);
+  // El retículo acampa en el puntero: sin él, el arte de fondo no da ese cian.
+  const enA = await contarCianEnPuntero(page, 700, 240);
+  const enB = await contarCianEnPuntero(page, 1010, 240);
   if (enA < 8 || enB < 8) {
     fail(
       `${ETIQUETA} capas: el retículo no se pinta sobre el arte (cian ${enA} en 700,240 y ${enB} en 1010,240)`
@@ -366,30 +331,6 @@ async function caminarHasta(page, tecla, condicion, valor, timeout = 8000) {
   } finally {
     await page.keyboard.up(tecla);
   }
-}
-
-/** Cian del retículo en una caja alrededor del puntero. */
-function contarCian(page, x, y) {
-  return page.evaluate(
-    ([px, py]) => {
-      const el = document.querySelector('canvas');
-      const ctx = el.getContext('2d');
-      const dpr = el.width / el.getBoundingClientRect().width;
-      const lado = 34;
-      const x0 = Math.max(0, Math.round(px * dpr - lado / 2));
-      const y0 = Math.max(0, Math.round(py * dpr - lado / 2));
-      const { data } = ctx.getImageData(x0, y0, lado, lado);
-      let cian = 0;
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        if (b - r >= 70 && b >= 100 && g >= 60) cian += 1;
-      }
-      return cian;
-    },
-    [x, y]
-  );
 }
 
 /** Media de color de una caja del canvas, para comparar antes y después del NVG. */
@@ -521,21 +462,13 @@ async function comprobarGranoDeDanio(page, url) {
   // Las capas se comprueban con el reloj real: el retículo sigue al puntero y,
   // con el cuadro congelado, se queda donde estaba antes del último movimiento.
   await reanudarCuadros(page);
-  const rotulos = await page.evaluate(() => {
-    const textos = (window.__arteTextos ?? []).filter((t) => t.enDom).map((t) => t.texto);
-    return {
-      minimapa: textos.filter((t) => t === 'MINIMAP 2D').length,
-      piip: textos.filter((t) => t === 'HELMKAMERA · KOBRA-2').length,
-    };
-  });
+  const rotulos = await contarRotulosSobreElArte(page);
   // El retículo cambia de color cuando cae sobre un actor (rojo sobre el
   // sospechoso), así que se prueban tres puntos: en dos tiene que seguir el cian
   // táctico que dibuja sobre el arte.
   const cianes = [];
   for (const [x, y] of [[300, 600], [1000, 600], [700, 240]]) {
-    await page.mouse.move(x, y);
-    await page.waitForTimeout(220);
-    cianes.push(await contarCian(page, x, y));
+    cianes.push(await contarCianEnPuntero(page, x, y));
   }
   const sinNvg = await mediaDeColor(page, 520, 260, 240, 120);
   await page.keyboard.press('KeyN');
