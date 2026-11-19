@@ -406,8 +406,16 @@ export default function App() {
     rafId = requestAnimationFrame(loop);
 
     const onKeyDown = (e: KeyboardEvent) => {
-      // Browser defaults are blocked on every event, repeats included.
-      if (BLOCKED_BROWSER_KEYS.has(e.code)) e.preventDefault();
+      // Los atajos del navegador solo se bloquean en juego y sin modal abierto: en
+      // el título y en los modales, Tab tiene que mover el foco y Space/flechas
+      // activar y desplazar los botones como cualquier formulario.
+      if (
+        engine.gameState === 'PLAYING' &&
+        activeModalRef.current === 'NONE' &&
+        BLOCKED_BROWSER_KEYS.has(e.code)
+      ) {
+        e.preventDefault();
+      }
       // Auto-repeat must not re-trigger actions or UI toggles (Space, G, 1-8, M, Tab, Esc).
       if (e.repeat) return;
       if (isRebindingNvgKeyRef.current) {
@@ -455,7 +463,7 @@ export default function App() {
         openModalExclusive(activeModalRef.current === 'PAD' ? 'NONE' : 'PAD');
         return;
       }
-      if (e.code === 'Tab' && engine.gameState === 'PLAYING') {
+      if (e.code === 'Tab' && engine.gameState === 'PLAYING' && activeModalRef.current === 'NONE') {
         toggleHudCompactMode();
         return;
       }

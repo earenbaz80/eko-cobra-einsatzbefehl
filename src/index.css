@@ -34,6 +34,112 @@
   background: #334155;
 }
 
+/* ==================== HUD EN JUEGO CON ARTE DE PÍXELES ====================
+   Tiny5 se dibuja sobre una rejilla de 5 px: a 10 px cae justo en la rejilla
+   (×2) y se lee como bitmap, sin suavizado de bordes. La escala 10/12/15 se
+   aplica por tamaño de Tailwind en vez de retocar cada nodo de texto, así el
+   HUD conserva datos, estructura y posiciones. */
+@layer base {
+  .hud-pixel {
+    font-family: 'Tiny5', 'JetBrains Mono', monospace;
+    font-synthesis: none;
+    -webkit-font-smoothing: none;
+    font-variant-ligatures: none;
+    /* Tiny5 es más ancha que la monoespaciada anterior a igual tamaño: el
+       tracking negativo recupera el ancho de los bloques sin sacar el texto de
+       la rejilla de 10 px. */
+    letter-spacing: -0.4px;
+    line-height: 1.1;
+  }
+
+  .hud-pixel * {
+    font-family: inherit;
+    font-synthesis: none;
+    -webkit-font-smoothing: none;
+  }
+
+  /* El HUD no usa blur, gradientes, sombras difusas ni esquinas redondeadas:
+     cada capa es opaca y con bordes duros, como el resto del arte. */
+  .hud-pixel,
+  .hud-pixel * {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background-image: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  /* Etiquetas pequeñas al tamaño de la rejilla (10 px); textos de lectura a 12
+     y subtítulos a 15. Ningún tamaño queda entre dos píxeles de rejilla. */
+  .hud-pixel .text-\[7\.5px\],
+  .hud-pixel .text-\[8px\],
+  .hud-pixel .text-\[8\.5px\],
+  .hud-pixel .text-\[9px\],
+  .hud-pixel .text-\[9\.5px\],
+  .hud-pixel .text-\[10px\],
+  .hud-pixel .text-\[10\.5px\],
+  .hud-pixel .text-\[11px\] {
+    font-size: 10px !important;
+  }
+
+  .hud-pixel .text-\[11\.5px\],
+  .hud-pixel .text-\[12px\],
+  .hud-pixel .text-xs,
+  .hud-pixel .text-sm {
+    font-size: 12px !important;
+  }
+
+  /* Texto de lectura larga (subtítulos de radio): 12 px en móvil y 15 px (tres
+     rejillas) desde tablet, para no empujar los controles táctiles. */
+  .text-lectura {
+    font-family: 'Tiny5', 'JetBrains Mono', monospace;
+    font-size: 12px !important;
+    line-height: 1.25;
+  }
+
+  @media (min-width: 640px) {
+    .text-lectura {
+      font-size: 15px !important;
+    }
+  }
+}
+
+/* Marco de 9 cortes sin relleno: conserva el fondo propio del elemento (las
+   misiones del título usan color para distinguir tipo de operación). */
+.pixel-edge {
+  border: 2px solid transparent;
+  border-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' shape-rendering='crispEdges'><path fill='%23334155' d='M2 0h4v2H2zM2 6h4v2H2zM0 2h2v4H0zM6 2h2v4H6z'/></svg>") 2 / 2px / 0 stretch;
+}
+
+.pixel-edge:hover {
+  border-image-source: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' shape-rendering='crispEdges'><path fill='%2338BDF8' d='M2 0h4v2H2zM2 6h4v2H2zM0 2h2v4H0zM6 2h2v4H6z'/></svg>");
+}
+
+/* Foco de teclado visible y coherente con la paleta del HUD. */
+.hud-pixel button:focus-visible,
+.hud-pixel a:focus-visible,
+.hud-pixel input:focus-visible {
+  outline: 2px solid #38BDF8;
+  outline-offset: 2px;
+}
+
+/* Marco de 9 cortes: 8×8 con esquinas recortadas y borde de 2 px, escalado en
+   los cuatro lados para que cualquier panel conserve el mismo grosor. */
+/* Marcos y botones: globales porque ticker y subtítulos llevan `hud-pixel` en el
+   propio elemento, y el reset de blur/gradientes ya queda acotado al HUD. */
+.pixel-frame {
+  border: 2px solid transparent;
+  border-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' shape-rendering='crispEdges'><path fill='%230B111A' d='M0 0h8v8H0z'/><path fill='%23334155' d='M2 0h4v2H2zM2 6h4v2H2zM0 2h2v4H0zM6 2h2v4H6z'/></svg>") 2 fill / 2px / 0 stretch;
+  background-color: #0B111A;
+}
+
+.pixel-frame-tenue {
+  border: 2px solid transparent;
+  border-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' shape-rendering='crispEdges'><path fill='%230B111A' d='M0 0h8v8H0z'/><path fill='%231E293B' d='M2 0h4v2H2zM2 6h4v2H2zM0 2h2v4H0zM6 2h2v4H6z'/></svg>") 2 fill / 2px / 0 stretch;
+  background-color: #0B111A;
+}
+
 /* ==================== TACTICAL C4I FADE-IN / FADE-OUT & POPOVER TRANSITIONS ==================== */
 @keyframes tacticalFadeIn {
   from {
