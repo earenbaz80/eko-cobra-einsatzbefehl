@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   chooseSquadSteeringAngle,
   computeSquadNavTarget,
+  isPathClear,
   SQUAD_OVERWATCH_LEAD,
   SQUAD_STAGGERED_DISTANCE,
   SQUAD_STAGGERED_OFFSET,
@@ -97,6 +98,33 @@ describe('computeSquadNavTarget', () => {
 
   it('returns the desired bearing when every probe is blocked', () => {
     expect(chooseSquadSteeringAngle(1.2, () => true)).toBe(1.2);
+  });
+
+  it('el sondeo recorre el tramo y ve el codo que frena el paso', () => {
+    // Vano de 70 px con la hoja abierta: el binomio queda pegado al jambá de
+    // abajo, mirando a la pila del salón. A 24 px el punto ya pasó el codo y
+    // está libre, pero el primer tramo de 8 px choca con la pared.
+    const origen = { x: 246.6, y: 428.02 };
+    const rumbo = Math.atan2(493 - origen.y, 482 - origen.x);
+    const tocaPared = (x: number, y: number) => Math.hypot(x - 250, y - 445) < 17;
+
+    expect(tocaPared(origen.x + Math.cos(rumbo) * 24, origen.y + Math.sin(rumbo) * 24)).toBe(false);
+    expect(tocaPared(origen.x + Math.cos(rumbo) * 8, origen.y + Math.sin(rumbo) * 8)).toBe(true);
+    expect(isPathClear(origen, rumbo, 24, tocaPared)).toBe(false);
+    expect(isPathClear(origen, rumbo - 0.55, 24, tocaPared)).toBe(true);
+  });
+
+  it('isPathClear acepta un tramo libre y respeta el paso pedido', () => {
+    const visitas: number[] = [];
+    const espiado = (x: number) => {
+      visitas.push(x);
+      return false;
+    };
+
+    expect(isPathClear({ x: 0, y: 0 }, 0, 24, espiado)).toBe(true);
+    expect(visitas).toHaveLength(3);
+    expect(isPathClear({ x: 0, y: 0 }, 0, 10, espiado, 5)).toBe(true);
+    expect(visitas).toHaveLength(5);
   });
 
   it('holds the sector for hold, breach and support orders', () => {

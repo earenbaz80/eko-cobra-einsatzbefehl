@@ -62,7 +62,8 @@ import {
 } from './c4Charges';
 import {
   chooseSquadSteeringAngle,
-  computeSquadNavTarget
+  computeSquadNavTarget,
+  isPathClear
 } from './squadAi';
 import {
   canSurrender,
@@ -7250,15 +7251,19 @@ public nightMode: boolean = false;
         }
 
         // Probe ahead instead of rubbing against the first wall/furniture. The
-        // steering side persists until the direct bearing is clear again.
+        // steering side persists until the direct bearing is clear again. The
+        // probe walks the whole run: checking only its far end lets a door jamb
+        // look free (the probe lands inside the room) while the next step still
+        // hits the corner, and the binomio stalls on the threshold forever.
         const probeDistance = Math.max(24, step * 2.4);
         const steeringAngle = chooseSquadSteeringAngle(
           ang,
           (candidate) =>
-            this.collidesAt(
-              squad.x + Math.cos(candidate) * probeDistance,
-              squad.y + Math.sin(candidate) * probeDistance,
-              squad.radius
+            !isPathClear(
+              squad,
+              candidate,
+              probeDistance,
+              (x, y) => this.collidesAt(x, y, squad.radius)
             ),
           this.squadSteerSide
         );
@@ -7267,11 +7272,22 @@ public nightMode: boolean = false;
           this.squadSteerSide = steeringDelta > 0 ? 1 : -1;
         }
         movementDirectionAngle = steeringAngle;
+        const pasoXAntes = squad.x;
+        const pasoYAntes = squad.y;
         this.moveActorWithCollision(
           squad,
           squad.x + Math.cos(steeringAngle) * step,
           squad.y + Math.sin(steeringAngle) * step
         );
+        // Si el rumbo recto tenía el tramo libre y aun así no avanzó ni un
+        // píxel, quedó encajado en un codo: alterna el lado de desvío para que
+        // el fotograma siguiente pruebe el espejo en vez de repetir el empuje.
+        if (
+          Math.abs(steeringDelta) < 0.05 &&
+          Math.hypot(squad.x - pasoXAntes, squad.y - pasoYAntes) < 0.5
+        ) {
+          this.squadSteerSide = this.squadSteerSide === 1 ? -1 : 1;
+        }
       }
     }
 

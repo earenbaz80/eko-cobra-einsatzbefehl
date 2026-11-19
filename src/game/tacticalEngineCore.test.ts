@@ -27,8 +27,17 @@ function createEngine(overrides: Record<string, unknown> = {}): any {
     actors: [],
     evidenceList: [],
     doors: [],
+    walls: [],
+    furniture: [],
     commandPulseTimer: 0,
     squadHoldAnchorAngle: 0,
+    squadScanningTimer: 0,
+    squadSteerSide: 1,
+    squadDoorCooldown: 0,
+    squadDoorWarnCooldown: 0,
+    squadFatigue: 0,
+    currentMovementGait: 'RESTING',
+    reloadTimer: 0,
     c4,
     pushRadio: vi.fn(),
     emitHudSnapshot: vi.fn(),
@@ -376,6 +385,37 @@ describe('órdenes de Kobra 2', () => {
     const engine = createEngine({ doors: [openDoor, destroyedDoor, closedDoor] });
 
     expect(engine.findNearestClosedDoor(185, 410)).toBe(closedDoor);
+  });
+
+  it('sale del jambá cuando el sondeo lejano está libre pero el paso choca', () => {
+    // Reproducción del atasco del humo: con la hoja del todo abierta, el binomio
+    // quedó pegado al jambá de abajo en 246,428 mirando a la pila del salón. El
+    // punto a 24 px ya pasó el codo y estaba libre, pero el primer tramo de 8 px
+    // chocaba con la pared, así que el rumbo recto no avanzaba ni un píxel.
+    const openDoor = { ...mainDoor, isOpen: true, isLocked: false, currentAngle: 0 } as DoorEntity;
+    const atascado = {
+      ...squad,
+      x: 246.6,
+      y: 428.02,
+      investigateTarget: { x: 482, y: 493 },
+    } as ActorEntity;
+    const engine = createEngine({
+      squadCommand: 'BREACH_AND_CLEAR',
+      walls: [
+        { id: 'w4', x1: 250, y1: 100, x2: 250, y2: 375 },
+        { id: 'w5', x1: 250, y1: 445, x2: 250, y2: 720 },
+      ],
+      doors: [openDoor],
+      getPlayer: vi.fn(() => player),
+      getSquadmate: vi.fn(() => atascado),
+      getRoomAt: vi.fn(() => 'STIEGENHAUS'),
+      findNearestDoor: vi.fn(() => null),
+    });
+
+    for (let frame = 0; frame < 80; frame += 1) engine.updateSquadmateAI(0.05, player);
+
+    expect(atascado.x).toBeGreaterThan(300);
+    expect(Math.hypot(atascado.x - 482, atascado.y - 493)).toBeLessThan(10);
   });
 
   it('la acumulación horizontal también evita el centro de la puerta', () => {
