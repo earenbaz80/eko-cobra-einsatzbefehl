@@ -7,29 +7,41 @@
  */
 
 /**
+ * Re-siembra el `Math.random` determinista y pulsa en la misma tarea.
+ *
+ * La generación procedural del mundo consume el flujo al arrancar la misión, así
+ * que sin sembrar antes del clic el mobiliario depende de cuántos frames corrió
+ * el título y cambia de una pasada a otra. Cualquier arranque de misión del humo
+ * debe pulsar por aquí: la misma semilla deja el mismo mundo.
+ */
+export async function pulsarConAzarSembrado(locator) {
+  const nodo = await locator.elementHandle();
+  const sembrado = await nodo.evaluate((elemento) => {
+    const azar = window.__ekoAzar;
+    if (!azar) return false;
+    azar.reiniciar(window.__ekoSeed);
+    elemento.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    return true;
+  });
+  if (!sembrado) throw new Error('el azar reiniciable no está instalado');
+}
+
+/**
  * Abre la URL, arranca la misión y espera al HUD en juego.
  *
- * `reiniciarAzar` re-siembra el `Math.random` determinista y pulsa el botón en
- * la misma tarea: la generación procedural del mundo consume el flujo al
- * arrancar, así que sin eso el mobiliario depende de cuántos frames corrió el
- * título. Lo usa la regresión visual del pase de arte.
+ * Por defecto siembra el mundo antes del clic (`reiniciarAzar`), para que el
+ * mobiliario procedural sea el mismo en cada pasada con la misma semilla y un
+ * fallo se pueda reproducir. `reiniciarAzar: false` solo para un arranque que
+ * deba heredar el flujo de azar que traía la página.
  */
-export async function arrancarMision(page, url, nombre, { asentarMs = 1000, reiniciarAzar = false } = {}) {
+export async function arrancarMision(page, url, nombre, { asentarMs = 1000, reiniciarAzar = true } = {}) {
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForSelector('canvas', { timeout: 20000 });
 
   const boton = page.getByRole('button', { name: nombre, exact: true });
   await boton.waitFor({ timeout: 15000 });
   if (reiniciarAzar) {
-    const nodo = await boton.elementHandle();
-    const sembrado = await nodo.evaluate((elemento) => {
-      const azar = window.__ekoAzar;
-      if (!azar) return false;
-      azar.reiniciar(window.__ekoSeed);
-      elemento.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-      return true;
-    });
-    if (!sembrado) throw new Error('el azar reiniciable no está instalado');
+    await pulsarConAzarSembrado(boton);
   } else {
     await boton.click();
   }

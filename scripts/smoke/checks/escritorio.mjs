@@ -8,6 +8,7 @@ import { exigirTipo, fail } from '../informe.mjs';
 import { imageSize } from '../archivos.mjs';
 import { BASE, ES_REMOTO } from '../config.mjs';
 import { estadisticasCanvas } from '../canvas.mjs';
+import { pulsarConAzarSembrado } from '../navegador.mjs';
 import { comprobarTransiciones } from './transiciones.mjs';
 
 /** Carga la página, arranca la misión y mide el canvas. */
@@ -17,7 +18,7 @@ async function comprobarPartida(page, url) {
 
   const mision = page.getByRole('button', { name: 'Misión 1: Piso Graz - Lend' });
   await mision.waitFor({ timeout: 15000 });
-  await mision.click();
+  await pulsarConAzarSembrado(mision);
 
   // El HUD en partida solo existe con la simulación arrancada.
   await page.getByText('K1 OPERATIVO').first().waitFor({ timeout: 20000 });

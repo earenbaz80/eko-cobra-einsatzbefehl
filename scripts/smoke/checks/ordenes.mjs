@@ -9,7 +9,7 @@
  * estado del motor, no el texto de la interfaz.
  */
 import { fail, fallos } from '../informe.mjs';
-import { abrirPuertaDeEntrada, arrancarMision } from '../navegador.mjs';
+import { abrirPuertaDeEntrada, arrancarMision, pulsarConAzarSembrado } from '../navegador.mjs';
 
 const MISION = 'Misión 1: Piso Graz - Lend';
 const MISION_LINZ = 'Misión 3: Laboratorio Químico';
@@ -116,6 +116,7 @@ async function comprobarContextMenuPuerta(page, url) {
 
     const midX = (puertaObjetivo.x1 + puertaObjetivo.x2) * 0.5;
     const midY = (puertaObjetivo.y1 + puertaObjetivo.y2) * 0.5;
+    await acercarJugadorHastaVer(page, midX, midY);
     const pantalla = await page.evaluate(
       ({ x, y }) => window.__eko.worldToScreen(x, y),
       { x: midX, y: midY }
@@ -268,7 +269,7 @@ async function iniciarConAriete(page, url) {
   await dialogo.waitFor({ timeout: 10000 });
   await dialogo.getByRole('button', { name: /04\. Equipamiento de Kobra-2/ }).click();
   await dialogo.getByRole('button', { name: /Türramme/ }).click();
-  await dialogo.getByRole('button', { name: /Iniciar Intervención/ }).click();
+  await pulsarConAzarSembrado(dialogo.getByRole('button', { name: /Iniciar Intervención/ }));
 
   await page.getByText('K1 OPERATIVO').first().waitFor({ timeout: 20000 });
   await page.waitForFunction(
@@ -280,6 +281,30 @@ async function iniciarConAriete(page, url) {
     { timeout: 20000 }
   );
   await page.waitForTimeout(400);
+}
+
+/**
+ * Avanza al operador hasta que un punto del mundo caiga dentro del viewport.
+ *
+ * El encuadre se asienta con el zoom de la misión: con el mundo ya sembrado, el
+ * asentamiento termina antes y una puerta al borde puede quedar a 25 px de más.
+ * En vez de fiarse del instante, se camina lo justo hasta verla para poder
+ * pulsarla con el botón derecho.
+ */
+async function acercarJugadorHastaVer(page, x, y) {
+  const enPantalla = ({ wx, wy }) => {
+    const punto = window.__eko?.worldToScreen(wx, wy);
+    return !!punto && punto.x >= 0 && punto.y >= 0 && punto.x <= 1280 && punto.y <= 800;
+  };
+  if (await page.evaluate(enPantalla, { wx: x, wy: y })) return;
+
+  await page.keyboard.down('KeyD');
+  try {
+    await page.waitForFunction(enPantalla, { wx: x, wy: y }, { timeout: 5000 });
+  } finally {
+    await page.keyboard.up('KeyD');
+  }
+  await page.waitForTimeout(300);
 }
 
 /** Acerca al operador para que la puerta objetivo quede dentro del viewport. */

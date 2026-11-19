@@ -14,6 +14,7 @@
  */
 import { fail, fallos } from '../informe.mjs';
 import { estadisticasCanvas } from '../canvas.mjs';
+import { pulsarConAzarSembrado } from '../navegador.mjs';
 import { comprobarPesoDeArranque } from './entrega.mjs';
 import { comprobarOrdenesEscuadron } from './ordenes.mjs';
 import { comprobarTransiciones, esperarEstado } from './transiciones.mjs';
@@ -60,7 +61,7 @@ export async function comprobarRapido(page, { url }) {
 
   const mision = page.getByRole('button', { name: MISION_1, exact: true });
   await mision.waitFor({ timeout: 15000 });
-  await mision.click();
+  await pulsarConAzarSembrado(mision);
   await page.getByText('K1 OPERATIVO').first().waitFor({ timeout: 20000 });
   await esperarEstado(page, 'PLAYING');
   await page.waitForTimeout(1000);

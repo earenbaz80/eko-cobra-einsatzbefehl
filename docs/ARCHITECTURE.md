@@ -88,7 +88,10 @@ La prueba de humo sale del CI con `VITE_BASE_PATH=/eko-cobra-einsatzbefehl/`; en
 sirve `dist/` en la raíz y reintenta las rutas absolutas de metadatos sin el base.
 Todos los contextos de Playwright reciben una semilla fija de `mulberry32` antes de
 cargar la app (`SMOKE_SEED`, por defecto `0xE2E0`) para que el mobiliario, las
-partículas y la IA no dependan de `Math.random`.
+partículas y la IA no dependan de `Math.random`. Además, cada arranque de misión del
+humo vuelve a sembrar justo antes del clic (`pulsarConAzarSembrado`): la generación
+procedural consume el flujo al arrancar, así que sin eso el mobiliario cambiaba entre
+pasadas aunque la semilla fuera la misma.
 
 ## Deuda técnica conocida
 

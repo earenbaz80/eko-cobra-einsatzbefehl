@@ -4,7 +4,7 @@
  * joystick, botones, subtítulos y barra inferior no se pisan a 390, 360 y 320 px.
  */
 import { fail, fallos } from '../informe.mjs';
-import { vigilarPagina } from '../navegador.mjs';
+import { pulsarConAzarSembrado, vigilarPagina } from '../navegador.mjs';
 import { capturarPantalla } from '../diagnostico.mjs';
 import { instalarAzarDeterminista } from '../determinismo.mjs';
 
@@ -277,7 +277,7 @@ export async function comprobarMovil(browser, contexto) {
 
     await comprobarAudio(movil);
 
-    await movil.getByRole('button', { name: MISION_1 }).click();
+    await pulsarConAzarSembrado(movil.getByRole('button', { name: MISION_1 }));
     await movil.getByText('K1 OPERATIVO').first().waitFor({ timeout: 20000 });
     await movil.waitForTimeout(1800);
 

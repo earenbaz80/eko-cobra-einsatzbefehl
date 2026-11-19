@@ -35,7 +35,10 @@
  *   npm run smoke:quick  feedback de PR: peso de arranque, canvas, Misión 1 y transiciones
  *
  * La aleatoriedad se fija con mulberry32 antes de cargar la app. La semilla por
- * defecto es 0xE2E0 y `SMOKE_SEED` permite repetir una pasada concreta.
+ * defecto es 0xE2E0 y `SMOKE_SEED` permite repetir una pasada concreta. Cada
+ * arranque de misión vuelve a sembrar justo antes del clic: el mobiliario
+ * procedural sale del mismo mundo en cada pasada y un fallo se reproduce con la
+ * misma semilla.
  *
  * Uso local (lo que corre el CI): VITE_BASE_PATH=/eko-cobra-einsatzbefehl/ npm run build && npm run smoke
  * Uso contra lo publicado:        npm run smoke:prod   (o `node scripts/smoke.mjs <url>`)

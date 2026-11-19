@@ -139,10 +139,7 @@ async function comprobarPaseClasico(page, url) {
   const clasica = new URL(url);
   clasica.searchParams.set('art', 'classic');
   try {
-    await arrancarMision(page, clasica.href, 'Misión 1: Piso Graz - Lend', {
-      asentarMs: 600,
-      reiniciarAzar: true,
-    });
+    await arrancarMision(page, clasica.href, 'Misión 1: Piso Graz - Lend', { asentarMs: 600 });
   } catch (error) {
     fail(`${ETIQUETA} classic: no arranca la misión (${error.message.split('\n')[0]})`);
     return;
@@ -182,10 +179,7 @@ async function comprobarPaseClasico(page, url) {
  */
 async function comprobarCapasSobreElArte(page, url) {
   try {
-    await arrancarMision(page, url, 'Misión 1: Piso Graz - Lend', {
-      asentarMs: 700,
-      reiniciarAzar: true,
-    });
+    await arrancarMision(page, url, 'Misión 1: Piso Graz - Lend', { asentarMs: 700 });
   } catch (error) {
     fail(`${ETIQUETA} capas: no arranca la misión (${error.message.split('\n')[0]})`);
     return;
@@ -259,6 +253,26 @@ async function congelarCuadros(page) {
 
 async function reanudarCuadros(page) {
   await page.evaluate(() => window.__reanudarCuadros?.());
+}
+
+/**
+ * Congela con el cuadro limpio y verifica el estado ya congelado.
+ *
+ * Los temporizadores de daño y supresión se apagan con el reloj en marcha, pero el
+ * grano lo decide el cuadro que se pinta al congelar: un disparo que expira en ese
+ * hueco deja un residuo diminuto que `pantalla.grano` delata. Si el cuadro congelado
+ * quedó sucio se reanuda y se vuelve a intentar, en vez de medir un sano falso.
+ * Devuelve si el intento terminó con un cuadro limpio.
+ */
+async function congelarCuadroLimpio(page, intentos = 12) {
+  for (let intento = 0; intento < intentos; intento += 1) {
+    await congelarCuadros(page);
+    const pantalla = await page.evaluate(() => window.__eko?.snapshot()?.pantalla ?? null);
+    if (pantalla && pantalla.grano === false) return true;
+    await reanudarCuadros(page);
+    await page.waitForTimeout(200);
+  }
+  return false;
 }
 
 /**
@@ -411,12 +425,18 @@ async function esperarCalidadNormal(page) {
   }
 }
 
-async function medirCuadroQuieto(page, conCapturas = false) {
-  await congelarCuadros(page);
+/**
+ * Mide con el reloj quieto. Con `esperarLimpio` el congelado aguarda a que el
+ * último cuadro pintado no lleve grano: `player.danger` se apaga cuando el
+ * temporizador de supresión llega a cero, pero el grano lo decidió el cuadro
+ * anterior, y congelar en ese hueco deja fijo un residuo de un disparo ya expirado.
+ */
+async function medirCuadroQuieto(page, conCapturas = false, esperarLimpio = false) {
+  const limpio = esperarLimpio ? await congelarCuadroLimpio(page) : (await congelarCuadros(page), true);
   const calidadNormal = await esperarCalidadNormal(page);
   const medida = await medirCuadros(page, conCapturas);
   await reanudarCuadros(page);
-  return { ...medida, calidadNormal };
+  return { ...medida, calidadNormal, limpio };
 }
 
 /** Mantiene una tecla hasta que el jugador alcanza la coordenada pedida. */
@@ -460,10 +480,7 @@ function mediaDeColor(page, x, y, ancho, alto) {
  */
 async function comprobarGranoDeDanio(page, url) {
   try {
-    await arrancarMision(page, url, 'Misión 1: Piso Graz - Lend', {
-      asentarMs: 600,
-      reiniciarAzar: true,
-    });
+    await arrancarMision(page, url, 'Misión 1: Piso Graz - Lend', { asentarMs: 600 });
   } catch (error) {
     fail(`${ETIQUETA} daño: no arranca la misión (${error.message.split('\n')[0]})`);
     return;
@@ -515,7 +532,8 @@ async function comprobarGranoDeDanio(page, url) {
   let ultimoSano = null;
   for (let intento = 0; intento < 6 && !sano; intento += 1) {
     const antes = await page.evaluate(() => window.__eko?.snapshot()?.player ?? null);
-    const medida = await medirCuadroQuieto(page, true);
+    // El cuadro que se congela tiene que estar limpio: se espera con el reloj en marcha.
+    const medida = await medirCuadroQuieto(page, true, true);
     const despues = await page.evaluate(() => window.__eko?.snapshot()?.player ?? null);
     const { instantaneas: _instantaneas, ...resumen } = medida;
     ultimoSano = {
@@ -754,7 +772,6 @@ export async function comprobarArtProof(page, { url }) {
     try {
       await arrancarMision(page, urlDelEscenario(url, escenario.consulta), escenario.mision, {
         asentarMs: 900,
-        reiniciarAzar: true,
       });
     } catch (error) {
       fail(`${etiqueta}: no arranca la misión (${error.message.split('\n')[0]})`);
