@@ -91,7 +91,7 @@ La app queda en <http://localhost:3000>.
 | `npm run build` | Build de producción en `dist/` |
 | `npm run preview` | Sirve el build |
 | `npm run smoke` | Smoke E2E completo: misiones, móvil, persistencia y rendimiento |
-| `npm run smoke:quick` | Smoke rápido para PR: canvas, Misión 1, transiciones y peso de arranque |
+| `npm run smoke:quick` | Smoke rápido para PR: canvas, Misión 1, transiciones, pase por pantalla y peso de arranque |
 | `npm test` | Tests con Vitest |
 | `npm run lint` | Typecheck con `tsc --noEmit` |
 | `npm run clean` | Borra `dist/` y `server.js` |
@@ -116,7 +116,7 @@ La escala sale del menor de los dos ajustes a la ventana (`ancho/640` y `alto/36
 
 La etiqueta de la esquina inferior izquierda indica la resolución y el factor en uso (`ART PROOF · 640×360 ×2 · APARTMENT`) y se mantiene dentro del panel aunque el arte se recorte.
 
-La prueba de humo hashea el buffer con FNV-1a en cinco escenarios —salón, Tirol, estación, estación nocturna y Schwechat— con la semilla fija y el reloj congelado, y compara contra las huellas de `scripts/smoke/huellas-arte.json`. Cuando el arte cambie a propósito, se regeneran con `ART_PROOF_HUELLAS=1 npm run smoke:quick`, se revisa el diff de las huellas y se commitean junto con el cambio.
+La prueba de humo hashea el buffer con FNV-1a en cinco escenarios —salón, Tirol, estación, estación nocturna y Schwechat— con la semilla fija y el reloj congelado, y compara contra las huellas de `scripts/smoke/huellas-arte.json`. Cuando el arte cambie a propósito, se regeneran con `ART_PROOF_HUELLAS=1 npm run smoke:quick`, se revisa el diff de las huellas y se commitean junto con el cambio. Además, el humo recorre título, misión, pausa y EKO-PAD en escritorio y en un viewport móvil de 390×844, y falla si en alguna de esas pantallas el pase no pintó (`artBufferHash` nulo) o si su buffer no mide 640×360: así una pantalla que se quede con el render anterior no pasa desapercibida aunque el canvas siga lleno.
 
 ## Tests y CI
 

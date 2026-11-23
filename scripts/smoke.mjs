@@ -28,6 +28,7 @@
  *   smoke/checks/rendimiento.mjs p50/p95 de frame time en escritorio y móvil emulado
  *   smoke/checks/movil.mjs       audio al primer toque, joystick y franjas del HUD
  *   smoke/checks/arte.mjs       pase de píxeles por defecto y opt-out clásico (rápido y completo)
+ *   smoke/checks/pantallas-de-arte.mjs  pase y buffer 640x360 en título, misión, pausa, EKO-PAD y móvil
  * y las piezas comunes en smoke/config, informa, archivos, servidor-local, navegador y canvas.
  *
  * Perfiles:
@@ -60,6 +61,7 @@ import { comprobarPersistencia } from './smoke/checks/persistencia.mjs';
 import { comprobarRendimiento } from './smoke/checks/rendimiento.mjs';
 import { comprobarMovil } from './smoke/checks/movil.mjs';
 import { comprobarArtProof } from './smoke/checks/arte.mjs';
+import { comprobarPantallasDeArte, comprobarPantallasDeArteMovil } from './smoke/checks/pantallas-de-arte.mjs';
 
 const args = process.argv.slice(2);
 const perfil = (
@@ -107,6 +109,7 @@ vigilarPagina(page, { origin, badRequests, consoleErrors });
 try {
   if (ES_RAPIDO) {
     await comprobarRapido(page, contexto);
+    await comprobarPantallasDeArte(page, contexto);
     await comprobarArtProof(page, contexto);
   } else {
     await comprobarEntrega(contexto);
@@ -118,6 +121,10 @@ try {
     // Al final: la recarga y los cinco segundos de autoguardado no deben contaminar
     // la medición de frames, que es la comprobación más sensible al ruido del runner.
     await comprobarPersistencia(page, contexto);
+    // Recorre cada pantalla con el pase ya caliente: título, misión, pausa y EKO-PAD en
+    // escritorio, y las mismas cuatro en un contexto táctil de 390x844.
+    await comprobarPantallasDeArte(page, contexto);
+    await comprobarPantallasDeArteMovil(browser, contexto);
     // Al final: recarga la página (pase por defecto, opt-out y misiones) y no depende del estado previo.
     await comprobarArtProof(page, contexto);
   }
@@ -140,6 +147,6 @@ if (fallos.length) {
   process.exit(1);
 }
 const cobertura = ES_RAPIDO
-  ? 'perfil rápido: peso de arranque, canvas, Misión 1, transiciones y art proof'
-  : 'cobertura completa: misiones, móvil, persistencia, metadatos y rendimiento';
+  ? 'perfil rápido: peso de arranque, canvas, Misión 1, transiciones, pase por pantalla y art proof'
+  : 'cobertura completa: misiones, móvil, persistencia, metadatos, pase por pantalla y rendimiento';
 console.log(`\n✓ Prueba de humo correcta${ES_REMOTO ? ' (URL publicada)' : ''}: ${cobertura}.`);
