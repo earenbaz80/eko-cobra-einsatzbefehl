@@ -93,12 +93,12 @@ export function TacticalHud({
         <div
           style={{ opacity: hudOpacity / 100 }}
           ref={hudStackRef}
-          className="absolute inset-0 z-10 pointer-events-none flex flex-col justify-end transition-opacity duration-150"
+          className="hud-pixel absolute inset-0 z-10 pointer-events-none flex flex-col justify-end transition-opacity duration-150"
         >
           {/* ==================== SITUACIÓN DE PELIGRO HUD BADGE (DOCKED ABOVE FOOTER) ==================== */}
           {hud.dangerState?.active && (
-            <div className="pointer-events-auto self-center mb-1.5 max-w-[calc(100vw-1rem)] px-3 py-1 bg-[#EF4444]/90 backdrop-blur-sm border border-[#FCA5A5] text-black font-mono-tabular font-extrabold text-[11px] shadow-[0_0_22px_rgba(239,68,68,0.9)] flex items-center gap-2 animate-pulse shrink-0">
-              <AlertTriangle className="w-4 h-4 fill-current shrink-0 text-black" />
+            <div className="pixel-frame-alerta pointer-events-auto self-center mb-1.5 max-w-[calc(100vw-1rem)] px-3 py-1 text-[#FCA5A5] font-extrabold text-[11px] flex items-center gap-2 animate-pulse shrink-0">
+              <AlertTriangle className="w-4 h-4 fill-current shrink-0 text-[#FCA5A5]" />
               <span>⚠ SITUACIÓN DE PELIGRO: {hud.dangerState.reason}</span>
             </div>
           )}
@@ -106,7 +106,7 @@ export function TacticalHud({
           {/* ==================== TRAINING MODE DOCKED STRIP (ONLY WHEN IN TRAINING) ==================== */}
           {hud.isTrainingMode && (
             <div className="pointer-events-auto self-center mb-1.5 flex flex-col items-center gap-1 font-mono-tabular">
-              <div className="flex flex-wrap items-center justify-center gap-2 bg-[#080C11]/95 backdrop-blur-md border border-[#F59E0B]/75 px-3 py-1 shadow-[0_0_20px_rgba(245,158,11,0.25)] text-[10.5px] text-white">
+              <div className="pixel-frame flex flex-wrap items-center justify-center gap-2 px-3 py-1 text-[10.5px] text-white">
                 <span className="font-extrabold text-[#FBBF24] flex items-center gap-1.5">
                   <Target className="w-3.5 h-3.5 text-[#F59E0B]" />
                   GALERÍA DE TIRO
@@ -116,7 +116,7 @@ export function TacticalHud({
                   <span className="text-[#94A3B8]">SACUDIDA:</span>
                   <div className="w-16 h-2 bg-[#1E293B] overflow-hidden flex items-center">
                     <div
-                      className="h-full bg-gradient-to-r from-[#10B981] via-[#F59E0B] to-[#EF4444]"
+                      className="pixel-fill h-full text-[#F59E0B]"
                       style={{
                         width: `${Math.min(100, Math.max(0, ((hud.trainingTelemetry?.currentShake || 0) / 14) * 100))}%`,
                       }}
@@ -145,7 +145,7 @@ export function TacticalHud({
                   ▶ Desplegar
                 </button>
               </div>
-              <div className="flex flex-wrap items-center justify-center gap-1 bg-[#080C11]/90 backdrop-blur-sm border border-[#334155]/70 px-2.5 py-1 text-[9.5px]">
+              <div className="pixel-frame-tenue flex flex-wrap items-center justify-center gap-1 px-2.5 py-1 text-[9.5px]">
                 <span className="text-[#94A3B8] font-semibold mr-1">CALIBRES [1–4]:</span>
                 {[
                   { id: 'AUG_A3' as const, key: '1', label: 'AUG A3' },
@@ -192,7 +192,7 @@ export function TacticalHud({
           {/* ==================== SINGLE COMPACT CONTEXTUAL PROMPT (TRANSLUCENT) ==================== */}
           <div className="mb-1.5 flex flex-col items-center pointer-events-none px-2">
             {hud.c4Planting ? (
-              <div className="px-4 py-1.5 bg-[#080C11]/80 backdrop-blur-sm border border-[#EF4444]/80 shadow-[0_0_20px_rgba(239,68,68,0.35)] flex items-center gap-3 font-mono-tabular text-[11px] text-white">
+              <div className="pixel-frame-alerta px-4 py-1.5 flex items-center gap-3 text-[11px] text-white">
                 <span className="font-bold text-[#FCA5A5]">
                   ⚙ PLANTANDO C4 · {hud.c4Planting.targetName.toUpperCase()}
                 </span>
@@ -205,7 +205,7 @@ export function TacticalHud({
                 <span className="text-[10px] text-[#CBD5E1]">{hud.c4Planting.executionTime} · MANTÉN POSICIÓN</span>
               </div>
             ) : hud.breachAction ? (
-              <div className="px-4 py-1.5 bg-[#080C11]/55 backdrop-blur-sm border border-[#D97706]/80 shadow-lg flex items-center gap-3 font-mono-tabular text-[11px]">
+              <div className="pixel-frame px-4 py-1.5 flex items-center gap-3 text-[11px]">
                 <span className="font-bold text-[#FDE68A]">
                   💥 {hud.breachAction.name.toUpperCase()}
                 </span>
@@ -218,11 +218,11 @@ export function TacticalHud({
                 <span className="text-[10px] text-[#CBD5E1]">{hud.breachAction.executionTime}</span>
               </div>
             ) : hud.contextPrompt ? (
-              <div className="px-3.5 py-1 bg-[#080C11]/50 backdrop-blur-sm border border-[#D97706]/70 text-[11px] font-mono-tabular text-[#FDE68A]">
+              <div className="pixel-frame px-3.5 py-1 text-[11px] text-[#FDE68A]">
                 {hud.contextPrompt}
               </div>
             ) : hud.bodyHealth.bleeding ? (
-              <div className="px-3 py-1 bg-[#7F1D1D]/55 backdrop-blur-sm border border-[#EF4444]/80 text-[11px] font-mono-tabular text-[#FECACA] animate-pulse">
+              <div className="pixel-frame-alerta px-3 py-1 text-[11px] text-[#FECACA] animate-pulse">
                 HEMORRAGIA ACTIVA · PULSA [H] PARA TORNIQUETE IFAK
               </div>
             ) : null}
@@ -232,7 +232,7 @@ export function TacticalHud({
           {hud.activeC4Charges && hud.activeC4Charges.length > 0 && (
             <div className="pointer-events-auto fixed bottom-24 right-4 z-40 flex flex-col gap-2 max-w-xs select-none animate-fadeIn">
               {hud.activeC4Charges.map((charge) => (
-                <div key={charge.id} className="border-2 border-[#EF4444] bg-[#080C11]/95 p-3 shadow-[0_0_35px_rgba(239,68,68,0.75)] font-mono-tabular text-white flex flex-col gap-1.5">
+                <div key={charge.id} className="pixel-frame-alerta p-3 text-white flex flex-col gap-1.5">
                   <div className="flex items-center justify-between border-b border-[#EF4444]/60 pb-1.5">
                     <div className="flex items-center gap-1.5 text-xs font-black text-[#FCA5A5]">
                       <span>💥</span>
@@ -287,13 +287,13 @@ export function TacticalHud({
           )}
 
           {/* ==================== UNIFIED TACTICAL HUD FOOTER ==================== */}
-          <div className="pointer-events-auto bg-[#080C11]/92 backdrop-blur-md border-t border-[#334155]/70 px-1.5 sm:px-2 py-0.5 font-mono-tabular shadow-2xl flex flex-row flex-wrap sm:flex-nowrap items-center gap-1 sm:gap-1.5 overflow-visible sm:overflow-x-auto whitespace-nowrap z-20">
+          <div className="pointer-events-auto pixel-frame px-1.5 sm:px-2 py-0.5 flex flex-row flex-wrap sm:flex-nowrap items-center gap-1 sm:gap-1.5 overflow-visible sm:overflow-x-auto whitespace-nowrap z-20">
             {/* 1. OPERATOR & SQUADMATE TELEMETRY */}
             <div className="hud-operador relative flex items-center gap-3 shrink-0">
               {/* Upward Popover 1: Anatomical Telemetry */}
               <div
                 aria-hidden={!anatomyDrawerOpen}
-                className={`tactical-popover-up origin-bottom-left absolute left-0 bottom-full mb-2 w-64 bg-[#080C11]/95 backdrop-blur-md border border-[#334155]/65 p-2.5 shadow-2xl text-[10px] space-y-1 z-30 ${
+                className={`tactical-popover-up pixel-frame origin-bottom-left absolute left-0 bottom-full mb-2 w-64 p-2.5 text-[10px] space-y-1 z-30 ${
                   anatomyDrawerOpen ? 'tactical-popover-up-open' : 'tactical-popover-up-closed'
                 }`}
               >
@@ -331,7 +331,7 @@ export function TacticalHud({
               {/* Upward Popover 2: Squadmate Tactical Orders & Vitals */}
               <div
                 aria-hidden={!squadDrawerOpen}
-                className={`tactical-popover-up origin-bottom-left absolute left-0 sm:left-48 bottom-full mb-2 bg-[#080C11]/95 backdrop-blur-md border border-[#334155]/65 p-3 shadow-2xl text-[11px] space-y-2 w-80 sm:w-96 z-30 ${
+                className={`tactical-popover-up pixel-frame origin-bottom-left absolute left-0 sm:left-48 bottom-full mb-2 p-3 text-[11px] space-y-2 w-80 sm:w-96 z-30 ${
                   squadDrawerOpen ? 'tactical-popover-up-open' : 'tactical-popover-up-closed'
                 }`}
               >
@@ -406,7 +406,7 @@ export function TacticalHud({
 
               {/* K1 Leader: Diegetic Status, Armor, IFAK */}
               <div className="flex items-center gap-2">
-                <div className="w-28 sm:w-32">
+                <div className="w-32 sm:w-36">
                   <div className="flex items-center justify-between text-[10px]">
                     <span
                       className={`flex items-center gap-1 font-bold ${
@@ -558,7 +558,7 @@ export function TacticalHud({
                   {/* Upward Popover: Rank Tiers & Mission Performance Details */}
                   <div
                     aria-hidden={!rankDrawerOpen}
-                    className={`tactical-popover-up origin-bottom-center absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-80 sm:w-96 bg-[#080C11]/98 backdrop-blur-md border border-[#334155]/75 p-3 shadow-2xl text-[10.5px] space-y-2.5 z-40 ${
+                    className={`tactical-popover-up pixel-frame origin-bottom-center absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-80 sm:w-96 p-3 text-[10.5px] space-y-2.5 z-40 ${
                       rankDrawerOpen ? 'tactical-popover-up-open' : 'tactical-popover-up-closed'
                     }`}
                   >
@@ -658,7 +658,7 @@ export function TacticalHud({
                       setRankDrawerOpen((v) => !v);
                     }}
                     title="Rango táctico del operador en la misión. Clic para ver detalles y tabla de ascensos."
-                    className="flex items-center gap-2 px-2.5 py-1 bg-[#0F172A]/85 hover:bg-[#1E293B]/80 border transition-all cursor-pointer group shadow-inner"
+                    className="pixel-btn flex items-center gap-2 px-2.5 py-1 cursor-pointer group"
                     style={{ borderColor: `${rank.color}70` }}
                   >
                     <div
@@ -720,7 +720,7 @@ export function TacticalHud({
                   engineRef.current?.togglePlayerStance();
                 }}
                 title="Postura táctica: Clic para alternar Parado / Agachado [Z]"
-                className={`hidden sm:flex px-2.5 py-1.5 bg-[#080C11]/95 border items-center gap-2 font-mono-tabular transition-all duration-200 transform cursor-pointer hover:scale-105 active:scale-95 scale-100 rotate-0 ${
+                className={`pixel-btn hidden sm:flex px-2.5 py-1.5 items-center gap-2 cursor-pointer ${
                   hud.playerStance === 'AGACHADO'
                     ? 'border-[#10B981] bg-[#064E3B]/60 text-[#34D399] shadow-[0_0_15px_rgba(16,185,129,0.5)]'
                     : 'border-[#38BDF8] bg-[#0F172A]/95 text-[#38BDF8] shadow-[0_0_15px_rgba(56,189,248,0.4)]'
@@ -756,7 +756,7 @@ export function TacticalHud({
                   engineRef.current?.triggerVerbalNegotiation();
                 }}
                 title="Negociación Verbal / Desescalada con sospechosos [Y]"
-                className="px-2.5 py-1.5 bg-[#080C11]/95 border border-[#38BDF8]/70 hover:border-[#38BDF8] text-[#38BDF8] hover:bg-[#38BDF8]/20 flex items-center gap-2 font-mono-tabular transition-all cursor-pointer shadow-[0_0_12px_rgba(56,189,248,0.3)]"
+                className="pixel-btn px-2.5 py-1.5 text-[#38BDF8] flex items-center gap-2 cursor-pointer"
               >
                 <div className="w-5 h-5 flex items-center justify-center text-sm font-bold">
                   🗣
@@ -779,7 +779,7 @@ export function TacticalHud({
                     engineRef.current?.cycleThermalPaletteMode();
                   }}
                   title="Cambiar paleta de colores térmica: White-Hot, Black-Hot, Ironbow [K]"
-                  className="hidden sm:flex px-2.5 py-1.5 bg-[#080C11]/95 border border-pink-500/70 hover:border-pink-500 text-pink-500 hover:bg-pink-500/20 items-center gap-2 font-mono-tabular transition-all cursor-pointer shadow-[0_0_12px_rgba(236,72,153,0.3)]"
+                  className="pixel-btn hidden sm:flex px-2.5 py-1.5 text-pink-500 items-center gap-2 cursor-pointer"
                 >
                   <div className="w-5 h-5 flex items-center justify-center text-xs font-bold">
                     FLIR
@@ -798,7 +798,7 @@ export function TacticalHud({
               {/* Primary Weapon & Smart Diegetic HUD Telemetry indicator */}
               <div
                 title="HUD Diegético Activo: El contador de balas, cargador y modo de disparo [V] flotan en la retícula del cursor para evitar el viaje ocular."
-                className="hidden sm:flex items-center gap-2 px-2.5 py-1.5 bg-[#080C11]/85 border border-[#334155]/70"
+                className="pixel-frame hidden sm:flex items-center gap-2 px-2.5 py-1.5"
               >
                 <div className="w-5 h-5 flex items-center justify-center text-xs text-[#F59E0B]">
                   <Zap className="w-3.5 h-3.5" />
@@ -826,7 +826,7 @@ export function TacticalHud({
                 onTouchStart={(e) => { e.preventDefault(); startVoiceCapture(); }}
                 onTouchEnd={(e) => { e.preventDefault(); stopVoiceCapture(); }}
                 title="Mantener pulsado para transmitir comandos tácticos por voz [Y / CapsLock]"
-                className={`hidden sm:flex items-center gap-2 px-2.5 py-1.5 border transition-all cursor-pointer shadow-lg font-mono-tabular ${
+                className={`pixel-btn hidden sm:flex items-center gap-2 px-2.5 py-1.5 cursor-pointer ${
                   isListening
                     ? 'bg-red-600 border-red-400 text-white animate-pulse'
                     : 'bg-[#080C11]/95 border-[#EF4444]/70 text-[#EF4444] hover:bg-[#EF4444]/20 hover:border-[#EF4444]'
@@ -847,14 +847,14 @@ export function TacticalHud({
 
               {/* Compact Radio TETRA Bar */}
               <div
-                className={`relative hidden sm:flex items-center gap-1.5 px-2 py-1 bg-[#0F172A]/80 border text-[10px] max-w-xs md:max-w-sm transition-colors ${
+                className={`pixel-frame-tenue relative hidden sm:flex items-center gap-1.5 px-2 py-1 text-[10px] max-w-xs md:max-w-sm ${
                   hud.radioTransmitting ? 'border-[#10B981] bg-[#064E3B]/30' : 'border-[#334155]/60'
                 }`}
               >
                 {/* Radio History Upward Popover */}
                 <div
                   aria-hidden={!radioLogOpen}
-                  className={`tactical-popover-up origin-bottom-right absolute right-0 bottom-full mb-2 w-80 sm:w-96 bg-[#080C11]/95 backdrop-blur-md border p-2.5 shadow-2xl space-y-1 text-[10px] z-30 ${
+                  className={`tactical-popover-up pixel-frame origin-bottom-right absolute right-0 bottom-full mb-2 w-80 sm:w-96 p-2.5 space-y-1 text-[10px] z-30 ${
                     hud.radioTransmitting ? 'border-[#10B981]/70' : 'border-[#334155]/65'
                   } ${radioLogOpen ? 'tactical-popover-up-open' : 'tactical-popover-up-closed'}`}
                 >
@@ -925,7 +925,7 @@ export function TacticalHud({
                     soundEngine.playUiClick();
                     setRadioLogOpen((v) => !v);
                   }}
-                  className="text-[9px] text-[#CBD5E1] hover:text-white px-1 border border-[#334155]/60 bg-[#080C11]/50 cursor-pointer shrink-0"
+                  className="pixel-btn text-[9px] text-[#CBD5E1] hover:text-white px-1 cursor-pointer shrink-0"
                 >
                   {radioLogOpen ? '▾' : '▴'} Log
                 </button>
@@ -935,7 +935,7 @@ export function TacticalHud({
               <button
                 onClick={() => openModalExclusive('PAD')}
                 title="Abrir Pad Táctico C4I [M]"
-                className="px-2.5 py-1.5 text-[10px] font-bold border bg-[#0F172A]/85 border-[#38BDF8]/80 text-[#38BDF8] hover:bg-[#38BDF8] hover:text-black transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1.5 shadow-md"
+                className="pixel-btn px-2.5 py-1.5 text-[10px] font-bold text-[#38BDF8] whitespace-nowrap cursor-pointer flex items-center gap-1.5"
               >
                 <Tablet className="w-3.5 h-3.5" />
                 <span>[M] PAD</span>
@@ -948,10 +948,8 @@ export function TacticalHud({
                     soundEngine.playUiClick();
                     setCommandMenuOpen((v) => !v);
                   }}
-                  className={`px-2.5 py-1.5 text-[10px] font-bold border transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1 ${
-                    commandMenuOpen
-                      ? 'bg-[#D97706] text-black border-[#F59E0B]'
-                      : 'bg-[#080C11]/90 border-[#38BDF8]/60 text-[#38BDF8] hover:bg-[#0F172A]'
+                  className={`pixel-btn px-2.5 py-1.5 text-[10px] font-bold whitespace-nowrap cursor-pointer flex items-center gap-1 ${
+                    commandMenuOpen ? 'text-[#F59E0B]' : 'text-[#38BDF8]'
                   }`}
                 >
                   <Menu className="w-3.5 h-3.5" />
@@ -961,7 +959,7 @@ export function TacticalHud({
                 {/* Upward Dropdown Menu */}
                 <div
                   aria-hidden={!commandMenuOpen}
-                  className={`tactical-popover-up origin-bottom-right absolute right-0 bottom-full mb-2 w-64 bg-[#080C11]/95 backdrop-blur-md border border-[#334155]/65 shadow-2xl p-2 flex flex-col gap-1 text-xs z-30 ${
+                  className={`tactical-popover-up pixel-frame origin-bottom-right absolute right-0 bottom-full mb-2 w-64 p-2 flex flex-col gap-1 text-xs z-30 ${
                     commandMenuOpen ? 'tactical-popover-up-open' : 'tactical-popover-up-closed'
                   }`}
                 >

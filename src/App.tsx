@@ -970,7 +970,7 @@ export default function App() {
         <div
           onClick={() => engineRef.current?.replayRadioMessage(activeTickerMessage)}
           title="Clic para repetir transmisión de radio TETRA"
-          className="fixed top-3 left-1/2 -translate-x-1/2 z-40 max-w-xl sm:max-w-2xl px-3.5 py-1.5 bg-[#060B12]/92 backdrop-blur-md border border-[#38BDF8]/60 shadow-[0_0_25px_rgba(0,0,0,0.85)] flex items-center gap-2.5 text-[10.5px] cursor-pointer animate-fade-in transition-all duration-300 hover:border-[#38BDF8]"
+          className="hud-pixel pixel-frame text-hud fixed top-3 left-1/2 -translate-x-1/2 z-40 max-w-xl sm:max-w-2xl px-3.5 py-1.5 flex items-center gap-2.5 cursor-pointer animate-fade-in"
         >
           <div className="flex items-center gap-1.5 shrink-0 border-r border-[#334155]/70 pr-2">
             <Radio className="w-3.5 h-3.5 text-[#38BDF8] animate-pulse" />
@@ -988,7 +988,7 @@ export default function App() {
 
       {/* SUBTITLES OVERLAY */}
       {subtitlesEnabled && gameState === 'PLAYING' && activeTickerMessage && (
-        <div className="radio-subtitles fixed left-1/2 -translate-x-1/2 z-40 w-[calc(100vw-1.5rem)] max-w-3xl px-3 py-1.5 bg-[#080C11]/85 backdrop-blur-md border border-[#334155]/70 text-center text-[11.5px] leading-snug text-white font-medium shadow-lg sm:bottom-16 sm:w-auto sm:px-4 sm:py-2 sm:text-sm">
+        <div className="hud-pixel pixel-frame radio-subtitles fixed left-1/2 -translate-x-1/2 z-40 w-[calc(100vw-1.5rem)] max-w-3xl px-3 py-1.5 text-center text-lectura text-white sm:bottom-16 sm:w-auto sm:px-4 sm:py-2">
           <strong className={activeTickerMessage.tone === 'alert' ? 'text-[#EF4444]' : activeTickerMessage.tone === 'ok' ? 'text-[#34D399]' : 'text-[#38BDF8]'}>
             {activeTickerMessage.speaker}:
           </strong>{' '}

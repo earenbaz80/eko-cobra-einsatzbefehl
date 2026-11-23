@@ -98,6 +98,11 @@
     line-height: 1.25;
   }
 
+  .text-hud {
+    font-family: 'Tiny5', 'JetBrains Mono', monospace;
+    font-size: 10px !important;
+  }
+
   @media (min-width: 640px) {
     .text-lectura {
       font-size: 15px !important;
@@ -138,6 +143,37 @@
   border: 2px solid transparent;
   border-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' shape-rendering='crispEdges'><path fill='%230B111A' d='M0 0h8v8H0z'/><path fill='%231E293B' d='M2 0h4v2H2zM2 6h4v2H2zM0 2h2v4H0zM6 2h2v4H6z'/></svg>") 2 fill / 2px / 0 stretch;
   background-color: #0B111A;
+}
+
+.pixel-frame-alerta {
+  border: 2px solid transparent;
+  border-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' shape-rendering='crispEdges'><path fill='%231B0A0A' d='M0 0h8v8H0z'/><path fill='%23EF4444' d='M2 0h4v2H2zM2 6h4v2H2zM0 2h2v4H0zM6 2h2v4H6z'/></svg>") 2 fill / 2px / 0 stretch;
+  background-color: #1B0A0A;
+}
+
+.pixel-btn {
+  border: 2px solid transparent;
+  border-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' shape-rendering='crispEdges'><path fill='%230B111A' d='M0 0h8v8H0z'/><path fill='%23334155' d='M2 0h4v2H2zM2 6h4v2H2zM0 2h2v4H0zM6 2h2v4H6z'/></svg>") 2 fill / 2px / 0 stretch;
+  background-color: #0B111A;
+  transition: none;
+}
+
+.pixel-btn:hover {
+  border-image-source: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' shape-rendering='crispEdges'><path fill='%2312212E' d='M0 0h8v8H0z'/><path fill='%2338BDF8' d='M2 0h4v2H2zM2 6h4v2H2zM0 2h2v4H0zM6 2h2v4H6z'/></svg>");
+  background-color: #12212E;
+}
+
+.pixel-btn:active {
+  transform: translate(1px, 1px);
+}
+
+/* Barra de progreso segmentada: bloques de 2 px en vez de un degradado. */
+.pixel-fill {
+  background-image: repeating-linear-gradient(
+    90deg,
+    currentColor 0 2px,
+    transparent 2px 4px
+  ) !important;
 }
 
 /* ==================== TACTICAL C4I FADE-IN / FADE-OUT & POPOVER TRANSITIONS ==================== */

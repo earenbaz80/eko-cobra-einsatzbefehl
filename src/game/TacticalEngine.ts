@@ -463,6 +463,27 @@ export class TacticalEngine extends TacticalEngineCore {
     return paseDeArteCargado()?.geometriaPresentada() ?? super.framing;
   }
 
+  /** Lado en px CSS de un píxel del buffer de arte (1 con el render clásico). */
+  private get ladoPixelArte(): number {
+    return Math.max(1, paseDeArteCargado()?.geometriaPresentada()?.zoom ?? 1);
+  }
+
+  /**
+   * Coordenada sobre la grilla del buffer: cada paso mide un píxel de arte, así
+   * el minimapa, el PiP, el retículo y los avisos acústicos caen en la misma
+   * rejilla que los tiles aunque la escala de presentación sea fraccionaria.
+   */
+  private aGrilla(valor: number): number {
+    const lado = this.ladoPixelArte;
+    return Math.round(valor / lado) * lado;
+  }
+
+  /** Grosor de trazo en píxeles enteros del arte (mínimo uno). */
+  private grosorArte(valor: number): number {
+    const lado = this.ladoPixelArte;
+    return Math.max(1, Math.round(valor / lado)) * lado;
+  }
+
   private renderDirectionalPlayerHitEffect(
     ctx: CanvasRenderingContext2D,
     width: number,
@@ -603,8 +624,10 @@ export class TacticalEngine extends TacticalEngineCore {
       const tx = Math.abs(cos) > 0.0001 ? halfW / Math.abs(cos) : Infinity;
       const ty = Math.abs(sin) > 0.0001 ? halfH / Math.abs(sin) : Infinity;
       const tEdge = Math.min(tx, ty);
-      const edgeX = cx + cos * tEdge;
-      const edgeY = cy + sin * tEdge;
+      // El aviso cae sobre la grilla del arte: el borde del aviso se dibuja en un
+      // píxel entero del buffer, no en una fracción de la escala de pantalla.
+      const edgeX = this.aGrilla(cx + cos * tEdge);
+      const edgeY = this.aGrilla(cy + sin * tEdge);
 
       const lifeRatio = Math.max(0, Math.min(1, ind.life / ind.maxLife));
       const smoothFade = Math.sin(lifeRatio * Math.PI * 0.5);
@@ -635,7 +658,7 @@ export class TacticalEngine extends TacticalEngineCore {
       // 2. Concentric acoustic sound-wave arcs curving inward from the border
       const waveOffset = ((1 - lifeRatio) * 12) % 6;
       ctx.strokeStyle = `rgba(${primaryRgb}, ${baseAlpha * 0.85})`;
-      ctx.lineWidth = ind.kind === 'GUNSHOT' ? 2.0 : 1.5;
+      ctx.lineWidth = this.grosorArte(ind.kind === 'GUNSHOT' ? 2.0 : 1.5);
       ctx.lineCap = 'round';
 
       // Outer curved acoustic arc
@@ -645,7 +668,7 @@ export class TacticalEngine extends TacticalEngineCore {
 
       // Inner secondary acoustic ripple arc
       ctx.strokeStyle = `rgba(${primaryRgb}, ${baseAlpha * 0.52})`;
-      ctx.lineWidth = 1.2;
+      ctx.lineWidth = this.grosorArte(1.2);
       ctx.beginPath();
       ctx.arc(-14, 0, 8 + waveOffset * 0.4, -0.44, 0.44);
       ctx.stroke();
@@ -3547,12 +3570,14 @@ export class TacticalEngine extends TacticalEngineCore {
   ) {
     if (this.gameState !== 'PLAYING') return;
 
-    const pipW = 190;
-    const pipH = 120;
+    // Lados y posición en píxeles enteros del arte: el marco y el recorte del
+    // PiP quedan en la misma grilla que los tiles del fondo.
+    const pipW = this.grosorArte(190);
+    const pipH = this.grosorArte(120);
     // Arriba a la derecha: el minimapa vive en (74, 74) y, pegado a la izquierda,
     // este PiP lo tapaba por completo.
-    const pipX = Math.max(16, this.viewWidth - pipW - 16);
-    const pipY = 16;
+    const pipX = this.aGrilla(Math.max(16, this.viewWidth - pipW - 16));
+    const pipY = this.aGrilla(16);
 
     ctx.save();
     ctx.globalAlpha = this.hudOpacity;
@@ -3561,7 +3586,7 @@ export class TacticalEngine extends TacticalEngineCore {
     ctx.fillStyle = 'rgba(6, 11, 18, 0.92)';
     ctx.fillRect(pipX - 4, pipY - 18, pipW + 8, pipH + 22);
     ctx.strokeStyle = squad && squad.hp > 0 ? 'rgba(56, 189, 248, 0.7)' : 'rgba(239, 68, 68, 0.7)';
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = this.grosorArte(1.5);
     ctx.strokeRect(pipX - 4, pipY - 18, pipW + 8, pipH + 22);
 
     // Title Bar
@@ -3728,10 +3753,12 @@ export class TacticalEngine extends TacticalEngineCore {
     player: ActorEntity,
     squad?: ActorEntity
   ) {
-    const halfSize = 54;
+    const halfSize = this.grosorArte(54);
     const size = halfSize * 2;
-    const cx = this.minimapCenter.x;
-    const cy = this.minimapCenter.y;
+    // El panel se ancla a la grilla del arte: centro y lados en píxeles enteros
+    // del buffer, para que el marco no quede a medio píxel al reescalar.
+    const cx = this.aGrilla(this.minimapCenter.x);
+    const cy = this.aGrilla(this.minimapCenter.y);
 
     ctx.save();
     ctx.globalAlpha = this.hudOpacity;
@@ -3741,7 +3768,7 @@ export class TacticalEngine extends TacticalEngineCore {
     ctx.fillStyle = 'rgba(8, 12, 17, 0.82)';
     ctx.fillRect(cx - halfSize - 4, cy - halfSize - 4, size + 8, size + 8);
     ctx.strokeStyle = 'rgba(56, 189, 248, 0.6)';
-    ctx.lineWidth = 1.8;
+    ctx.lineWidth = this.grosorArte(1.8);
     ctx.strokeRect(cx - halfSize - 4, cy - halfSize - 4, size + 8, size + 8);
 
     // 2. Square Radar Crop Path
@@ -3755,7 +3782,7 @@ export class TacticalEngine extends TacticalEngineCore {
 
     // Square Grid Lines & Crosshairs
     ctx.strokeStyle = 'rgba(56, 189, 248, 0.16)';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = this.grosorArte(1);
     ctx.beginPath();
     ctx.moveTo(cx - halfSize, cy);
     ctx.lineTo(cx + halfSize, cy);
@@ -3769,7 +3796,7 @@ export class TacticalEngine extends TacticalEngineCore {
     // Opposing City Buildings / Urban Blocks on Minimap
     ctx.fillStyle = 'rgba(30, 41, 59, 0.45)';
     ctx.strokeStyle = 'rgba(71, 85, 105, 0.45)';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = this.grosorArte(1);
     const oppBlocks = [
       { x: -350, y: -450, w: 1950, h: 325 }, // North block
       { x: -350, y: 885, w: 1950, h: 365 },  // South block
@@ -3789,7 +3816,7 @@ export class TacticalEngine extends TacticalEngineCore {
 
     // Walls
     ctx.strokeStyle = 'rgba(148, 163, 184, 0.52)';
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = this.grosorArte(1.5);
     for (const w of this.walls) {
       const x1 = cx + (w.x1 - player.x) * scale;
       const y1 = cy + (w.y1 - player.y) * scale;
@@ -3923,8 +3950,10 @@ export class TacticalEngine extends TacticalEngineCore {
     // Ignore if cursor is far outside the viewport
     if (rx < -20 || rx > width + 20 || ry < -20 || ry > height + 20) return;
 
-    const clampedX = Math.max(18, Math.min(width - 18, rx));
-    const clampedY = Math.max(18, Math.min(height - 18, ry));
+    // El retículo se ancla a la grilla del buffer aunque el ratón llegue con
+    // fracciones: si no, a escala ×2 el punto y las muescas caen entre píxeles.
+    const clampedX = this.aGrilla(Math.max(18, Math.min(width - 18, rx)));
+    const clampedY = this.aGrilla(Math.max(18, Math.min(height - 18, ry)));
 
     const weaponSpec = EKO_COBRA_WEAPONS[this.plan.primaryWeapon];
     const isTaser = this.activeTool === 'TASER';
@@ -3959,8 +3988,10 @@ export class TacticalEngine extends TacticalEngineCore {
     const fireCooldownKick = this.fireCooldown > 0 ? 4 : 0;
 
     const baseGap = 7;
-    const gap = Math.max(4, Math.min(26, baseGap + armPenalty + movePenalty + crouchBonus + focusedBonus + fireCooldownKick));
-    const tickLen = 6;
+    const gap = this.grosorArte(
+      Math.max(4, Math.min(26, baseGap + armPenalty + movePenalty + crouchBonus + focusedBonus + fireCooldownKick))
+    );
+    const tickLen = this.grosorArte(6);
 
     // Reticle theme colors
     let reticleColor = 'rgba(56, 189, 248, 0.90)'; // Tactical cyan
@@ -3991,13 +4022,13 @@ export class TacticalEngine extends TacticalEngineCore {
     ctx.fillStyle = reticleColor;
     ctx.shadowColor = reticleGlow;
     ctx.shadowBlur = 4;
-    ctx.beginPath();
-    ctx.arc(clampedX, clampedY, 1.5, 0, Math.PI * 2);
-    ctx.fill();
+    // Punto central cuadrado, de un píxel de arte (o dos): sin medio píxel.
+    const punto = this.grosorArte(2);
+    ctx.fillRect(clampedX - punto * 0.5, clampedY - punto * 0.5, punto, punto);
 
     // 2. Crosshair Ticks with Dynamic Spread Gap
     ctx.strokeStyle = reticleColor;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = this.grosorArte(1.5);
     ctx.beginPath();
     // Top
     ctx.moveTo(clampedX, clampedY - gap - tickLen);
@@ -4014,9 +4045,9 @@ export class TacticalEngine extends TacticalEngineCore {
     ctx.stroke();
 
     // 3. Subtle Outer Framing Corner Brackets
-    const cornerDist = gap + tickLen + 5;
-    const cornerSize = 4;
-    ctx.lineWidth = 1;
+    const cornerDist = gap + tickLen + this.grosorArte(5);
+    const cornerSize = this.grosorArte(4);
+    ctx.lineWidth = this.grosorArte(1);
     ctx.strokeStyle = targetType !== 'NONE' ? reticleColor : 'rgba(148, 163, 184, 0.45)';
     ctx.beginPath();
     // Top-Left
