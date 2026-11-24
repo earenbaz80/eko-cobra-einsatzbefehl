@@ -122,6 +122,76 @@ export async function abrirPuertaDeEntrada(page, puertaId = 'DOOR_MAIN_A') {
   await page.waitForTimeout(200);
 }
 
+/** Radio con el que [E] elige la puerta más cercana (`findNearestDoor(x, y, 62)`). */
+export const RADIO_PUERTA = 62;
+/** Holgura bajo el radio: la puerta se acciona con margen, no al filo. */
+const HOLGURA_PUERTA = 12;
+
+/** Centro de la hoja y jugador del último cuadro, con la distancia entre ambos. */
+async function medirPuerta(page, puertaId) {
+  return page.evaluate((id) => {
+    const estado = window.__eko?.snapshot();
+    const jugador = estado?.player;
+    const puerta = estado?.world.doors.find((item) => item.id === id);
+    if (!jugador || !puerta) return null;
+    const centro = { x: (puerta.x1 + puerta.x2) / 2, y: (puerta.y1 + puerta.y2) / 2 };
+    return {
+      jugador: { x: jugador.x, y: jugador.y },
+      centro,
+      distancia: Math.hypot(jugador.x - centro.x, jugador.y - centro.y),
+    };
+  }, puertaId);
+}
+
+/** Distancia del operador al centro de la puerta, ya formateada para un fallo. */
+export async function distanciaAPuerta(page, puertaId) {
+  const medida = await medirPuerta(page, puertaId);
+  if (!medida) return `sin lectura de ${puertaId} ni del jugador`;
+  return (
+    `jugador en ${medida.jugador.x.toFixed(1)}, ${medida.jugador.y.toFixed(1)} ` +
+    `a ${medida.distancia.toFixed(1)} px del centro de ${puertaId} (radio ${RADIO_PUERTA})`
+  );
+}
+
+/**
+ * Deja al operador dentro del radio con el que [E] elige la puerta.
+ *
+ * `caminarHasta` corta en el primer cuadro que cruza su umbral y la tecla sigue
+ * pisada hasta que el navegador procesa el `keyup`: ese sobrante depende de la
+ * carga de la máquina, así que el operador puede quedar fuera de los 62 px y [E]
+ * no acciona nada. Aquí se mide la distancia al centro de la hoja y, sólo si está
+ * fuera del radio, se dan pulsos cortos hacia él hasta entrar con holgura. Dentro
+ * del radio no se mueve nada: caminar hace ruido y alteraría el escenario.
+ * Devuelve la distancia final, o null si no hay lectura.
+ */
+export async function acercarseAPuerta(page, puertaId) {
+  let medida = await medirPuerta(page, puertaId);
+  if (!medida || medida.distancia < RADIO_PUERTA) return medida?.distancia ?? null;
+  const objetivo = RADIO_PUERTA - HOLGURA_PUERTA;
+  const bloqueado = { x: false, y: false };
+  for (let paso = 0; paso < 16 && medida.distancia > objetivo; paso += 1) {
+    const dX = medida.centro.x - medida.jugador.x;
+    const dY = medida.centro.y - medida.jugador.y;
+    const ejes = Math.abs(dX) >= Math.abs(dY) ? ['x', 'y'] : ['y', 'x'];
+    const eje = ejes.find(
+      (candidato) => !bloqueado[candidato] && Math.abs(candidato === 'x' ? dX : dY) > 1
+    );
+    if (!eje) break;
+    const delta = eje === 'x' ? dX : dY;
+    const tecla = eje === 'x' ? (delta > 0 ? 'KeyD' : 'KeyA') : delta > 0 ? 'KeyS' : 'KeyW';
+    const antes = eje === 'x' ? medida.jugador.x : medida.jugador.y;
+    await page.keyboard.down(tecla);
+    await page.waitForTimeout(70);
+    await page.keyboard.up(tecla);
+    await page.waitForTimeout(60);
+    medida = await medirPuerta(page, puertaId);
+    if (!medida) return null;
+    const despues = eje === 'x' ? medida.jugador.x : medida.jugador.y;
+    if (Math.abs(despues - antes) < 1) bloqueado[eje] = true;
+  }
+  return medida.distancia;
+}
+
 /**
  * @param {import('playwright').Page} page
  * @param {{ origin: string, badRequests: string[], consoleErrors: string[], prefijo?: string, fallosDeRed?: boolean }} opciones

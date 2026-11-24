@@ -11,7 +11,13 @@
  * estado del motor, no el texto de la interfaz.
  */
 import { fail, fallos } from '../informe.mjs';
-import { abrirPuertaDeEntrada, arrancarMision, pulsarConAzarSembrado } from '../navegador.mjs';
+import {
+  abrirPuertaDeEntrada,
+  acercarseAPuerta,
+  arrancarMision,
+  distanciaAPuerta,
+  pulsarConAzarSembrado,
+} from '../navegador.mjs';
 
 const MISION = 'Misión 1: Piso Graz - Lend';
 const MISION_LINZ = 'Misión 3: Laboratorio Químico';
@@ -708,6 +714,7 @@ async function comprobarHoldCancelaBrecha(page, url) {
 
 /** Pulsa [E] hasta dejar la puerta franca; false si no lo logra. */
 async function abrirPuertaPorCompleto(page, puertaId) {
+  await acercarseAPuerta(page, puertaId);
   const leer = () =>
     page.evaluate(
       (id) => window.__eko?.snapshot()?.world.doors.find((puerta) => puerta.id === id) ?? null,
@@ -930,6 +937,7 @@ async function comprobarSupresionDesdeRellano(page, url) {
 
 /** Cierra la puerta de entrada con el jugador al lado; false si no lo logra. */
 async function cerrarPuertaDeEntrada(page) {
+  await acercarseAPuerta(page, PUERTA);
   for (let paso = 0; paso < 8; paso += 1) {
     const puerta = await leerPuerta(page);
     if (puerta && puerta.isOpen === false) return true;
@@ -961,7 +969,10 @@ async function comprobarPuntoEnPad(page, url) {
     await abrirPuertaDeEntrada(page);
     await acercarJugadorDerecha(page, 300);
     if (!(await cerrarPuertaDeEntrada(page))) {
-      fail(`órdenes · punto: ${PUERTA} no queda cerrada antes de marcar el punto`);
+      fail(
+        `órdenes · punto: ${PUERTA} no queda cerrada antes de marcar el punto ` +
+          `(${await distanciaAPuerta(page, PUERTA)})`
+      );
       return;
     }
     await acercarJugadorDerecha(page, 390);

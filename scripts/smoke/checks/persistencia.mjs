@@ -55,7 +55,12 @@
  * regla mide de verdad, el intel del jugador.
  */
 import { fail } from '../informe.mjs';
-import { abrirPuertaDeEntrada, arrancarMision } from '../navegador.mjs';
+import {
+  abrirPuertaDeEntrada,
+  acercarseAPuerta,
+  arrancarMision,
+  distanciaAPuerta,
+} from '../navegador.mjs';
 import { leerHud as leerDespejeHud, leerPad as leerDespejePad } from './despeje.mjs';
 
 const MISION = 'Misión 1: Piso Graz - Lend';
@@ -78,6 +83,12 @@ const SALA_CONTACTO = 'WOHNKUECHE';
 const NOMBRE_SALA_CONTACTO = 'Cocina-Comedor';
 /** Punto al este de la cocina: lejos del hostil y fuera del cono de la mira. */
 const MIRA_BARRIDO = { x: 700, y: 320 };
+/** Punto de barrido base, en el fondo de la cocina (la estancia llega a x = 660). */
+const PUNTO_BARRIDO = { x: 540, y: 262 };
+/** El rendido entra en intel a menos de 95 px: se barre con 25 px de margen. */
+const DISTANCIA_BARRIDO = 120;
+/** Pared este del comedor (x = 660) menos 20 px de aire. */
+const X_MAXIMA_BARRIDO = 640;
 
 /** Lee una instantánea atómica del motor; falla si no hay jugador creado. */
 async function leerEstado(page) {
@@ -204,9 +215,11 @@ async function apuntarA(page, destino) {
 /**
  * Pulsa [E] hasta que la puerta cumpla `hecho`. [E] la cicla en tres pasos de
  * apertura (28 %, 65 % y franca) y la cierra desde la hoja franca; con la hoja a
- * medio girar el vano sigue bloqueado.
+ * medio girar el vano sigue bloqueado. Antes de la primera pulsación se deja al
+ * operador dentro del radio de la puerta (ver `acercarseAPuerta`).
  */
 async function accionarPuerta(page, puertaId, hecho) {
+  await acercarseAPuerta(page, puertaId);
   for (let paso = 0; paso < 8; paso += 1) {
     const puerta = await leerPuerta(page, puertaId);
     if (puerta && hecho(puerta)) return true;
@@ -398,7 +411,10 @@ export async function comprobarPersistencia(page, { url }) {
     // del jugador y la estancia no podría quedar despejada.
     await caminarHasta(page, 'KeyD', 300);
     if (!(await accionarPuerta(page, PUERTA_ENTRADA, (puerta) => puerta.isOpen === false))) {
-      fail(`persistencia: ${PUERTA_ENTRADA} no queda cerrada antes del barrido`);
+      fail(
+        `persistencia: ${PUERTA_ENTRADA} no queda cerrada antes del barrido ` +
+          `(${await distanciaAPuerta(page, PUERTA_ENTRADA)})`
+      );
       return;
     }
     await caminarHasta(page, 'KeyD', 390);
@@ -409,7 +425,10 @@ export async function comprobarPersistencia(page, { url }) {
     await caminarHasta(page, 'KeyS', 430);
     await caminarHasta(page, 'KeyD', 500);
     if (!(await accionarPuerta(page, PUERTA_SALON, (puerta) => puerta.isFullyOpen))) {
-      fail(`persistencia: ${PUERTA_SALON} no se abre para entrar al salón`);
+      fail(
+        `persistencia: ${PUERTA_SALON} no se abre para entrar al salón ` +
+          `(${await distanciaAPuerta(page, PUERTA_SALON)})`
+      );
       return;
     }
     await caminarHasta(page, 'KeyD', 545);
@@ -419,7 +438,10 @@ export async function comprobarPersistencia(page, { url }) {
     }
     await caminarHasta(page, 'KeyA', 500);
     if (!(await accionarPuerta(page, PUERTA_SALON, (puerta) => puerta.isOpen === false))) {
-      fail(`persistencia: ${PUERTA_SALON} no queda cerrada al salir del salón`);
+      fail(
+        `persistencia: ${PUERTA_SALON} no queda cerrada al salir del salón ` +
+          `(${await distanciaAPuerta(page, PUERTA_SALON)})`
+      );
       return;
     }
     await caminarHasta(page, 'KeyA', 390);
@@ -456,7 +478,7 @@ export async function comprobarPersistencia(page, { url }) {
     if (!(await accionarPuerta(page, PUERTA_COCINA, (puerta) => puerta.isFullyOpen))) {
       fail(
         `persistencia: ${PUERTA_COCINA} no queda franca para entrar ` +
-          `(jugador en ${await dondeEsta(page)})`
+          `(${await distanciaAPuerta(page, PUERTA_COCINA)})`
       );
       return;
     }
@@ -464,8 +486,8 @@ export async function comprobarPersistencia(page, { url }) {
     // Barrido sin verlo: la mira se queda al este, contra la pared, mientras el
     // operador camina hasta el fondo de la cocina. A más de 95 px y fuera del
     // cono, el rendido no entra en la intel del jugador y la estancia queda
-    // DESPEJADA aunque él siga dentro. La distancia se afirma sobre la posición
-    // real del sospechoso, no se da por supuesta.
+    // DESPEJADA aunque él siga dentro. La distancia se afirma sobre la posición real
+    // del sospechoso y el punto de barrido se deriva de ella, no se da por supuesta.
     const sospechoso = await hostilEnSala(page, SALA_CONTACTO);
     if (!sospechoso || sospechoso.state !== 'SURRENDERED') {
       fail(
@@ -474,17 +496,31 @@ export async function comprobarPersistencia(page, { url }) {
       );
       return;
     }
-    const distanciaAlBarrido = Math.hypot(sospechoso.x - 540, sospechoso.y - 262);
+    // El punto de barrido se corre hacia la pared este lo justo para dejar al rendido
+    // a `DISTANCIA_BARRIDO` px: su IA está inerte (SURRENDERED), así que la distancia
+    // medida aquí es la que habrá al barrer. Con el punto fijo en 540 el rendido se
+    // detenía a ~48 px del último ruido y quedaba a 94 px, un px dentro del intel: el
+    // rojo dependía de dónde se parara. La regla no cambia —se barre a más de 95 px—,
+    // lo que cambia es que el punto se deriva de la posición real del sospechoso.
+    const puntoBarrido = {
+      x: Math.min(X_MAXIMA_BARRIDO, Math.max(PUNTO_BARRIDO.x, sospechoso.x + DISTANCIA_BARRIDO)),
+      y: PUNTO_BARRIDO.y,
+    };
+    const distanciaAlBarrido = Math.hypot(
+      sospechoso.x - puntoBarrido.x,
+      sospechoso.y - puntoBarrido.y
+    );
     if (distanciaAlBarrido <= 95) {
       fail(
-        `persistencia: el rendido quedó a ${distanciaAlBarrido.toFixed(0)} px del punto de ` +
-          `barrido (${sospechoso.x.toFixed(0)}, ${sospechoso.y.toFixed(0)}); con menos de 95 entra en intel`
+        `persistencia: el rendido (${sospechoso.x.toFixed(0)}, ${sospechoso.y.toFixed(0)}) queda a ` +
+          `${distanciaAlBarrido.toFixed(0)} px del punto de barrido más lejano ` +
+          `(${puntoBarrido.x.toFixed(0)}, ${puntoBarrido.y.toFixed(0)}); con menos de 95 entra en intel`
       );
       return;
     }
     await apuntarA(page, MIRA_BARRIDO);
-    await caminarHasta(page, 'KeyW', 262);
-    await caminarHasta(page, 'KeyD', 540);
+    await caminarHasta(page, 'KeyW', puntoBarrido.y);
+    await caminarHasta(page, 'KeyD', puntoBarrido.x);
     await apuntarA(page, MIRA_BARRIDO);
 
     // La visita relámpago al salón sumó otra despejada a la cuenta de partida.
@@ -563,7 +599,10 @@ export async function comprobarPersistencia(page, { url }) {
     await caminarHasta(page, 'KeyA', 390);
     await caminarHasta(page, 'KeyS', 330);
     if (!(await accionarPuerta(page, PUERTA_COCINA, (puerta) => puerta.isOpen === false))) {
-      fail(`persistencia: ${PUERTA_COCINA} no queda cerrada al salir`);
+      fail(
+        `persistencia: ${PUERTA_COCINA} no queda cerrada al salir ` +
+          `(${await distanciaAPuerta(page, PUERTA_COCINA)})`
+      );
       return;
     }
     await caminarHasta(page, 'KeyS', 430);
@@ -629,29 +668,34 @@ export async function comprobarPersistencia(page, { url }) {
     }
     const hudSonada = await leerDespejeHud(page);
 
-    // El operador vuelve a la cocina para el arresto, con la mira en la pared: así la
-    // estancia queda sostenida por su presencia cuando el arresto saque al rendido de
-    // la cuenta de hostiles conocidos.
+    // El operador vuelve a la cocina para el arresto, con la mira en la pared y al mismo
+    // punto del barrido: así la estancia queda sostenida por su presencia cuando el
+    // arresto saque al rendido de la cuenta de hostiles conocidos, y el rendido sigue
+    // fuera del intel del operador (a más de 95 px y sin entrar en el cono) mientras el
+    // binomio entra a la estancia.
     await caminarHasta(page, 'KeyA', 390);
     await caminarHasta(page, 'KeyW', 330);
     if (!(await accionarPuerta(page, PUERTA_COCINA, (puerta) => puerta.isFullyOpen))) {
-      fail(`persistencia: ${PUERTA_COCINA} no queda franca para volver a entrar`);
+      fail(
+        `persistencia: ${PUERTA_COCINA} no queda franca para volver a entrar ` +
+          `(${await distanciaAPuerta(page, PUERTA_COCINA)})`
+      );
       return;
     }
     await apuntarA(page, MIRA_BARRIDO);
-    await caminarHasta(page, 'KeyW', 262);
-    await caminarHasta(page, 'KeyD', 540);
+    await caminarHasta(page, 'KeyW', puntoBarrido.y);
+    await caminarHasta(page, 'KeyD', puntoBarrido.x);
     await apuntarA(page, MIRA_BARRIDO);
 
-    // [6]: desde el recibidor la orden cruza el mismo vano que la sonda. La cámara de
-    // casco del binomio confirma el contacto con el operador mirando a la pared, y un
-    // mismo sondeo cubre las dos cosas: ese cuadro y el arresto que lo cierra.
-    await page.keyboard.press('Digit6');
-    let porCamara = false;
-    let arrestado = false;
-    const limite = Date.now() + 25000;
-    while (!arrestado && Date.now() < limite) {
-      const lectura = await page
+    // [6] esposa al rendido más cercano al binomio, no al que el operador tiene delante:
+    // con Kobra-2 parado en el vano del salón, Milán —a un paso y todavía en contacto por
+    // el espejo de la sonda— gana la carrera a Lukas y la orden se lo lleva a él. Por eso
+    // se le manda seguir [1] hasta la cocina y se espera el contacto de su cámara de
+    // casco con el rendido antes de pedir el arresto: con el binomio dentro, Lukas es el
+    // más cercano y la elección deja de depender de dónde se pare cada uno.
+    await page.keyboard.press('Digit1');
+    const leerContactoDeCamara = () =>
+      page
         .evaluate(
           ({ selector, sala }) => {
             const snap = window.__eko?.snapshot();
@@ -662,23 +706,56 @@ export async function comprobarPersistencia(page, { url }) {
               contacto: document.querySelector(selector)?.getAttribute('data-en-contacto') ?? '',
               visibleToSquad: Boolean(actor?.visibleToSquad),
               visibleToPlayer: Boolean(actor?.visibleToPlayer),
-              arrestado: (snap?.radioFeed ?? []).some(
-                (linea) =>
-                  /Lukas/.test(linea?.text ?? '') &&
-                  /asegurado y esposado/.test(linea?.text ?? '')
-              ),
             };
           },
           { selector: PANEL_DESPEJE, sala: SALA_CONTACTO }
         )
         .catch(() => null);
-      if (!lectura) break;
-      porCamara ||=
-        lectura.contacto === NOMBRE_SALA_CONTACTO &&
-        lectura.visibleToSquad &&
-        !lectura.visibleToPlayer;
-      arrestado = lectura.arrestado;
-      if (!arrestado) await page.waitForTimeout(60);
+    let porCamara = false;
+    let lecturaCamara = null;
+    const limiteDelSeguimiento = Date.now() + 20000;
+    while (!porCamara && Date.now() < limiteDelSeguimiento) {
+      lecturaCamara = await leerContactoDeCamara();
+      if (!lecturaCamara) break;
+      porCamara =
+        lecturaCamara.contacto === NOMBRE_SALA_CONTACTO &&
+        lecturaCamara.visibleToSquad &&
+        !lecturaCamara.visibleToPlayer;
+      if (!porCamara) await page.waitForTimeout(60);
+    }
+    if (!porCamara) {
+      const squad = await leerBinomio(page);
+      fail(
+        `persistencia: la cámara de Kobra-2 no puso ${SALA_CONTACTO} en contacto antes de la ` +
+          `orden [6] (binomio en ${squad ? `${squad.x.toFixed(1)}, ${squad.y.toFixed(1)}` : 'sin binomio'}; ` +
+          `contacto ${lecturaCamara?.contacto || 'ninguno'}, a la vista del binomio ` +
+          `${lecturaCamara?.visibleToSquad === true}, del operador ` +
+          `${lecturaCamara?.visibleToPlayer === true})`
+      );
+      return;
+    }
+
+    // Con el contacto ya establecido la orden no puede engancharse a otro rendido; si aun
+    // así el radio confirma un arresto que no es el de Lukas, se corta con esa línea en
+    // vez de esperar 25 s a una que nunca va a llegar.
+    await page.keyboard.press('Digit6');
+    let arrestado = false;
+    let otroRendido = '';
+    const limite = Date.now() + 25000;
+    while (!arrestado && !otroRendido && Date.now() < limite) {
+      const linea = await page
+        .evaluate(() =>
+          (window.__eko?.snapshot()?.radioFeed ?? [])
+            .map((entrada) => entrada?.text ?? '')
+            .find((texto) => /asegurado y esposado/.test(texto))
+        )
+        .catch(() => '');
+      if (!linea) {
+        await page.waitForTimeout(60);
+        continue;
+      }
+      if (/Lukas/.test(linea)) arrestado = true;
+      else otroRendido = linea;
     }
     if (!arrestado) {
       const squad = await leerBinomio(page);
@@ -687,16 +764,13 @@ export async function comprobarPersistencia(page, { url }) {
         .slice(0, 4)
         .join(' | ');
       fail(
-        `persistencia: Kobra-2 no llegó a esposar al rendido de ${SALA_CONTACTO} ` +
-          `(binomio en ${squad ? `${squad.x.toFixed(1)}, ${squad.y.toFixed(1)}` : 'sin binomio'}; ` +
-          `radio: ${radio || 'vacía'})`
-      );
-      return;
-    }
-    if (!porCamara) {
-      fail(
-        `persistencia: la cámara de Kobra-2 nunca puso ${SALA_CONTACTO} en contacto con el ` +
-          'rendido dentro de su campo de visión y fuera del del operador'
+        otroRendido
+          ? `persistencia: la orden [6] se enganchó a otro rendido antes que a Lukas ` +
+              `(binomio en ${squad ? `${squad.x.toFixed(1)}, ${squad.y.toFixed(1)}` : 'sin binomio'}; ` +
+              `radio: ${otroRendido})`
+          : `persistencia: Kobra-2 no llegó a esposar al rendido de ${SALA_CONTACTO} ` +
+              `(binomio en ${squad ? `${squad.x.toFixed(1)}, ${squad.y.toFixed(1)}` : 'sin binomio'}; ` +
+              `radio: ${radio || 'vacía'})`
       );
       return;
     }
