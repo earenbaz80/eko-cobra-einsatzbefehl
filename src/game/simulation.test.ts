@@ -351,4 +351,23 @@ describe('movimiento y colisión', () => {
     expect(a.jugador).toEqual(b.jugador);
     expect(a.tiempo).toBeCloseTo(b.tiempo);
   });
+
+  it('dos partidas de Graz con la misma semilla comparten muebles y trayectoria', () => {
+    const a = crearPartida('graz', 7);
+    const b = crearPartida('graz', 7);
+    // El mobiliario del piso también sale de la semilla: mismo piso, mismos muebles.
+    expect(a.mundo.muebles).toEqual(b.mundo.muebles);
+    expect(a.mundo.muebles.some((mueble) => mueble.blocksMovement)).toBe(true);
+
+    a.entrada = { x: 1, y: 1 };
+    b.entrada = { x: 1, y: 1 };
+    correr(a, 40);
+    correr(b, 40);
+    expect(a.jugador).toEqual(b.jugador);
+    expect(a.tick).toBe(b.tick);
+    expect(a.tiempo).toBeCloseTo(b.tiempo);
+
+    // Otra semilla siembra otro piso: el mobiliario ya no coincide.
+    expect(crearPartida('graz', 8).mundo.muebles).not.toEqual(a.mundo.muebles);
+  });
 });

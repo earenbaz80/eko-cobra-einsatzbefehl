@@ -361,7 +361,7 @@ export function computeLoadoutMetrics(plan: MissionPlan) {
 export const WORLD_WIDTH = 1280;
 export const WORLD_HEIGHT = 820;
 
-export function createGrazApartmentLayout(): {
+export function createGrazApartmentLayout(azar: () => number = Math.random): {
   rooms: RoomZone[];
   walls: WallSegment[];
   doors: DoorEntity[];
@@ -876,7 +876,8 @@ export function createGrazApartmentLayout(): {
     rooms,
     furniture,
     doors,
-    'APARTMENT'
+    'APARTMENT',
+    azar
   );
 
   return { rooms, walls: finalWalls, doors, furniture: enrichedFurniture, wallSconces };
@@ -1140,7 +1141,7 @@ export function createGrazActors(plan: MissionPlan): ActorEntity[] {
   ];
 }
 
-export function createTrainingFacilityLayout(): {
+export function createTrainingFacilityLayout(azar: () => number = Math.random): {
   rooms: RoomZone[];
   walls: WallSegment[];
   doors: DoorEntity[];
@@ -1333,7 +1334,8 @@ export function createTrainingFacilityLayout(): {
     rooms,
     furniture,
     doors,
-    'TRAINING'
+    'TRAINING',
+    azar
   );
 
   return { rooms, walls, doors, furniture: enrichedFurniture, wallSconces };

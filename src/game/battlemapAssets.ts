@@ -3176,7 +3176,8 @@ export function populateRandomBattlemapElements(
   rooms: RoomZone[],
   baseFurniture: FurnitureItem[],
   doors: DoorEntity[],
-  mode: 'APARTMENT' | 'TRAINING' | 'STATION' = 'APARTMENT'
+  mode: 'APARTMENT' | 'TRAINING' | 'STATION' = 'APARTMENT',
+  azar: () => number = Math.random
 ): FurnitureItem[] {
   battlemapAssetCache.ensureLoaded();
 
@@ -3201,7 +3202,7 @@ export function populateRandomBattlemapElements(
         f.zLayer = 'BASE';
         break;
       case 'f_dining_table':
-        f.spriteId = Math.random() < 0.5 ? 'WOOD_TABLE_SMOOTH' : 'WOOD_TABLE_SLATTED';
+        f.spriteId = azar() < 0.5 ? 'WOOD_TABLE_SMOOTH' : 'WOOD_TABLE_SLATTED';
         f.rotation = Math.PI / 2;
         f.zLayer = 'BASE';
         break;
@@ -3221,7 +3222,7 @@ export function populateRandomBattlemapElements(
         f.zLayer = 'BASE';
         break;
       case 'f_coffeetable':
-        f.spriteId = Math.random() < 0.5 ? 'WOOD_TABLE_SLATTED' : 'WOOD_TABLE_SMOOTH';
+        f.spriteId = azar() < 0.5 ? 'WOOD_TABLE_SLATTED' : 'WOOD_TABLE_SMOOTH';
         f.rotation = Math.PI / 2;
         f.zLayer = 'BASE';
         break;
@@ -3284,7 +3285,7 @@ export function populateRandomBattlemapElements(
         id: nextId('tf_crate'),
         label: 'MUNITIONSKISTE',
         x: 118,
-        y: 175 + Math.floor(Math.random() * 40),
+        y: 175 + Math.floor(azar() * 40),
         w: 36,
         h: 25,
         color: '#334155',
@@ -3299,7 +3300,7 @@ export function populateRandomBattlemapElements(
         id: nextId('tf_woodcrate'),
         label: 'HOLZKISTE',
         x: 120,
-        y: 380 + Math.floor(Math.random() * 35),
+        y: 380 + Math.floor(azar() * 35),
         w: 28,
         h: 28,
         color: '#784F2B',
@@ -3328,30 +3329,30 @@ export function populateRandomBattlemapElements(
       {
         id: nextId('tf_car'),
         label: 'EINSATZFAHRZEUG (DECKUNG)',
-        x: 790 + Math.floor(Math.random() * 80),
+        x: 790 + Math.floor(azar() * 80),
         y: 590,
         w: 122,
         h: 58,
         color: '#1E3A8A',
         blocksSight: false,
         blocksMovement: true,
-        spriteId: Math.random() < 0.5 ? 'SEDAN_CAR_BLUE' : 'SEDAN_CAR_AMBER',
-        rotation: Math.random() < 0.5 ? 0 : Math.PI,
+        spriteId: azar() < 0.5 ? 'SEDAN_CAR_BLUE' : 'SEDAN_CAR_AMBER',
+        rotation: azar() < 0.5 ? 0 : Math.PI,
         zLayer: 'BASE',
         isRandomProp: true,
       },
       {
         id: nextId('tf_crate_breach'),
         label: 'DECKUNGSKISTE',
-        x: 525 + Math.floor(Math.random() * 60),
-        y: 555 + Math.floor(Math.random() * 90),
+        x: 525 + Math.floor(azar() * 60),
+        y: 555 + Math.floor(azar() * 90),
         w: 38,
         h: 26,
         color: '#334155',
         blocksSight: false,
         blocksMovement: true,
         spriteId: 'MILITARY_CRATE',
-        rotation: Math.random() < 0.5 ? 0 : Math.PI / 2,
+        rotation: azar() < 0.5 ? 0 : Math.PI / 2,
         zLayer: 'BASE',
         isRandomProp: true,
       },
@@ -3489,7 +3490,7 @@ export function populateRandomBattlemapElements(
   // 2. Surface & appliance attachments on top of counters/tables (scaled to 22px human scale)
   const kitchenCounter = items.find((i) => i.id === 'f_kitchen_counter');
   if (kitchenCounter) {
-    const swapKitchenLayout = Math.random() < 0.5;
+    const swapKitchenLayout = azar() < 0.5;
     items.push(
       {
         id: nextId('rnd_sink'),
@@ -3525,12 +3526,12 @@ export function populateRandomBattlemapElements(
 
     const counterSmallPool: BattlemapSpriteId[] = ['TOASTER', 'COFFEE_CARAFE', 'CAST_IRON_PAN'];
     const chosenSmall =
-      counterSmallPool[Math.floor(Math.random() * counterSmallPool.length)];
+      counterSmallPool[Math.floor(azar() * counterSmallPool.length)];
     const smallSpec = BATTLEMAP_SPRITE_SPECS[chosenSmall];
     items.push({
       id: nextId('rnd_ksmall'),
       label: smallSpec.labelDe,
-      x: kitchenCounter.x + 128 + Math.floor(Math.random() * 14),
+      x: kitchenCounter.x + 128 + Math.floor(azar() * 14),
       y: kitchenCounter.y + 7,
       w: smallSpec.defaultW,
       h: smallSpec.defaultH,
@@ -3538,7 +3539,7 @@ export function populateRandomBattlemapElements(
       blocksSight: false,
       blocksMovement: false,
       spriteId: chosenSmall,
-      rotation: (Math.random() - 0.5) * 0.4,
+      rotation: (azar() - 0.5) * 0.4,
       zLayer: 'SURFACE',
       isRandomProp: true,
     });
@@ -3548,20 +3549,20 @@ export function populateRandomBattlemapElements(
   const diningTable = items.find((i) => i.id === 'f_dining_table');
   if (diningTable) {
     const tableTopSprites: BattlemapSpriteId[] = ['FRUIT_BOWL', 'COFFEE_CARAFE', 'CAST_IRON_PAN'];
-    const tableProp = tableTopSprites[Math.floor(Math.random() * tableTopSprites.length)];
+    const tableProp = tableTopSprites[Math.floor(azar() * tableTopSprites.length)];
     const propSpec = BATTLEMAP_SPRITE_SPECS[tableProp];
     items.push({
       id: nextId('rnd_dining_top'),
       label: propSpec.labelDe,
-      x: diningTable.x + 16 + Math.floor(Math.random() * 32),
-      y: diningTable.y + 12 + Math.floor(Math.random() * 16),
+      x: diningTable.x + 16 + Math.floor(azar() * 32),
+      y: diningTable.y + 12 + Math.floor(azar() * 16),
       w: propSpec.defaultW,
       h: propSpec.defaultH,
       color: '#7F1D1D',
       blocksSight: false,
       blocksMovement: false,
       spriteId: tableProp,
-      rotation: Math.random() * Math.PI * 2,
+      rotation: azar() * Math.PI * 2,
       zLayer: 'SURFACE',
       isRandomProp: true,
     });
@@ -3573,19 +3574,19 @@ export function populateRandomBattlemapElements(
       { x: diningTable.x + 42, y: diningTable.y + diningTable.h + 1, rot: Math.PI },
     ];
     for (const cp of chairPositions) {
-      if (Math.random() < 0.78) {
+      if (azar() < 0.78) {
         items.push({
           id: nextId('rnd_dchair'),
           label: 'STUHL',
-          x: cp.x + Math.floor((Math.random() - 0.5) * 5),
+          x: cp.x + Math.floor((azar() - 0.5) * 5),
           y: cp.y,
           w: 18,
           h: 18,
           color: '#452719',
           blocksSight: false,
           blocksMovement: false,
-          spriteId: Math.random() < 0.5 ? 'WOOD_CHAIR_A' : 'WOOD_CHAIR_B',
-          rotation: cp.rot + (Math.random() - 0.5) * 0.25,
+          spriteId: azar() < 0.5 ? 'WOOD_CHAIR_A' : 'WOOD_CHAIR_B',
+          rotation: cp.rot + (azar() - 0.5) * 0.25,
           zLayer: 'BASE',
           isRandomProp: true,
         });
@@ -3595,21 +3596,21 @@ export function populateRandomBattlemapElements(
 
   // Coffee table in Wohnzimmer: random fruit bowl or coffee carafe + TV on Schrankwand
   const coffeeTable = items.find((i) => i.id === 'f_coffeetable');
-  if (coffeeTable && Math.random() < 0.85) {
-    const pick: BattlemapSpriteId = Math.random() < 0.55 ? 'FRUIT_BOWL' : 'COFFEE_CARAFE';
+  if (coffeeTable && azar() < 0.85) {
+    const pick: BattlemapSpriteId = azar() < 0.55 ? 'FRUIT_BOWL' : 'COFFEE_CARAFE';
     const pickSpec = BATTLEMAP_SPRITE_SPECS[pick];
     items.push({
       id: nextId('rnd_ctable_top'),
       label: pickSpec.labelDe,
-      x: coffeeTable.x + 12 + Math.floor(Math.random() * 22),
-      y: coffeeTable.y + 7 + Math.floor(Math.random() * 8),
+      x: coffeeTable.x + 12 + Math.floor(azar() * 22),
+      y: coffeeTable.y + 7 + Math.floor(azar() * 8),
       w: pickSpec.defaultW,
       h: pickSpec.defaultH,
       color: '#334155',
       blocksSight: false,
       blocksMovement: false,
       spriteId: pick,
-      rotation: Math.random() * Math.PI * 2,
+      rotation: azar() * Math.PI * 2,
       zLayer: 'SURFACE',
       isRandomProp: true,
     });
@@ -3620,7 +3621,7 @@ export function populateRandomBattlemapElements(
     items.push({
       id: nextId('rnd_tv'),
       label: 'TV-GERÄT',
-      x: schrankwand.x + 22 + Math.floor(Math.random() * 18),
+      x: schrankwand.x + 22 + Math.floor(azar() * 18),
       y: schrankwand.y + 5,
       w: 54,
       h: 16,
@@ -3637,19 +3638,19 @@ export function populateRandomBattlemapElements(
   // 3. Exterior City Road Props (from City Roads sheet: parked cars, street trees, grates, crates)
   // Parked cars on East diagonal parking bay & North/South streets
   const eastCarModel: BattlemapSpriteId =
-    Math.random() < 0.5 ? 'SEDAN_CAR_BLUE' : 'SEDAN_CAR_AMBER';
+    azar() < 0.5 ? 'SEDAN_CAR_BLUE' : 'SEDAN_CAR_AMBER';
   items.push({
     id: nextId('rnd_ext_car_e'),
     label: 'PKW (PARKBUCHT)',
     x: 1175,
-    y: 410 + Math.floor(Math.random() * 130),
+    y: 410 + Math.floor(azar() * 130),
     w: 56,
     h: 118,
     color: '#1E3A8A',
     blocksSight: false,
     blocksMovement: true,
     spriteId: eastCarModel,
-    rotation: Math.random() < 0.5 ? Math.PI / 2 : -Math.PI / 2,
+    rotation: azar() < 0.5 ? Math.PI / 2 : -Math.PI / 2,
     zLayer: 'BASE',
     isRandomProp: true,
   });
@@ -3660,7 +3661,7 @@ export function populateRandomBattlemapElements(
   items.push({
     id: nextId('rnd_ext_car_n'),
     label: 'PKW (HERRENGASSE)',
-    x: 240 + Math.floor(Math.random() * 160),
+    x: 240 + Math.floor(azar() * 160),
     y: 12,
     w: 116,
     h: 54,
@@ -3682,11 +3683,11 @@ export function populateRandomBattlemapElements(
     { x: 820, y: 734 },
   ];
   for (const ts of treeSpots) {
-    if (Math.random() < 0.75) {
+    if (azar() < 0.75) {
       items.push({
         id: nextId('rnd_street_tree'),
         label: 'STRASSENBAUM',
-        x: ts.x + Math.floor((Math.random() - 0.5) * 10),
+        x: ts.x + Math.floor((azar() - 0.5) * 10),
         y: ts.y,
         w: 36,
         h: 36,
@@ -3694,7 +3695,7 @@ export function populateRandomBattlemapElements(
         blocksSight: false,
         blocksMovement: true,
         spriteId: 'STREET_TREE',
-        rotation: Math.random() * Math.PI * 2,
+        rotation: azar() * Math.PI * 2,
         zLayer: 'BASE',
         isRandomProp: true,
       });
@@ -3750,15 +3751,15 @@ export function populateRandomBattlemapElements(
     const pool = ROOM_RANDOM_POOLS[room.id];
     if (!pool || pool.length === 0) continue;
 
-    const shuffled = [...pool].sort(() => Math.random() - 0.5);
-    const targetCount = 2 + Math.floor(Math.random() * 2); // 2 to 3 random props per room
+    const shuffled = [...pool].sort(() => azar() - 0.5);
+    const targetCount = 2 + Math.floor(azar() * 2); // 2 to 3 random props per room
     let placedInRoom = 0;
 
     for (const candidate of shuffled) {
       if (placedInRoom >= targetCount) break;
 
       const rot =
-        candidate.rotations[Math.floor(Math.random() * candidate.rotations.length)];
+        candidate.rotations[Math.floor(azar() * candidate.rotations.length)];
       const margin = 12;
 
       for (let attempt = 0; attempt < 24; attempt++) {
@@ -3772,17 +3773,17 @@ export function populateRandomBattlemapElements(
         let py: number;
         const snapEdge = attempt % 4;
         if (snapEdge === 0) {
-          px = minX + Math.floor(Math.random() * (maxX - minX));
+          px = minX + Math.floor(azar() * (maxX - minX));
           py = minY;
         } else if (snapEdge === 1) {
-          px = minX + Math.floor(Math.random() * (maxX - minX));
+          px = minX + Math.floor(azar() * (maxX - minX));
           py = maxY;
         } else if (snapEdge === 2) {
           px = minX;
-          py = minY + Math.floor(Math.random() * (maxY - minY));
+          py = minY + Math.floor(azar() * (maxY - minY));
         } else {
           px = maxX;
-          py = minY + Math.floor(Math.random() * (maxY - minY));
+          py = minY + Math.floor(azar() * (maxY - minY));
         }
 
         if (!overlapsExisting(px, py, candidate.w, candidate.h, 10)) {

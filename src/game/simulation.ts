@@ -335,20 +335,20 @@ function escenarioDeLayout(layout: LayoutReal, inicio: { x: number; y: number })
   };
 }
 
-const REALES: Record<'graz' | 'station', () => Escenario> = {
+const REALES: Record<'graz' | 'station', (azar: () => number) => Escenario> = {
   // Entrada A de cada mapa: el spawn del operador en el motor.
-  graz: () => escenarioDeLayout(createGrazApartmentLayout(), { x: 185, y: 410 }),
-  station: () => escenarioDeLayout(createStationLayout(), { x: 130, y: 115 }),
+  graz: (azar) => escenarioDeLayout(createGrazApartmentLayout(azar), { x: 185, y: 410 }),
+  station: (azar) => escenarioDeLayout(createStationLayout(azar), { x: 130, y: 115 }),
 };
 
 /**
  * Crea una partida sin renderizado y determinista. La semilla fija la orientación inicial
- * (y queda en `azar` para los eventos aleatorios), así que la misma misión con la misma
- * semilla se comporta igual en cada ejecución.
+ * (y queda en `azar` para los eventos aleatorios) y siembra también el mobiliario aleatorio
+ * del mapa, así que la misma misión con la misma semilla se comporta igual en cada ejecución.
  */
 export function crearPartida(mision: MisionSimulada, semilla: number): Partida {
   let escenario: Escenario;
-  if (mision === 'graz' || mision === 'station') escenario = REALES[mision]();
+  if (mision === 'graz' || mision === 'station') escenario = REALES[mision](crearAzar(semilla));
   else if (mision === 'pasillo' || mision === 'almacen') escenario = ESCENARIOS[mision];
   else throw new Error(`misión desconocida: ${mision}`);
 

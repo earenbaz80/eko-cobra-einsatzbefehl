@@ -9,7 +9,7 @@ import {
 } from './types';
 import { populateRandomBattlemapElements } from './battlemapAssets';
 
-export function createStationLayout(): {
+export function createStationLayout(azar: () => number = Math.random): {
   rooms: RoomZone[];
   walls: WallSegment[];
   doors: DoorEntity[];
@@ -652,7 +652,8 @@ export function createStationLayout(): {
     rooms,
     furniture,
     doors,
-    'TRAINING'
+    'TRAINING',
+    azar
   );
 
   return { rooms, walls, doors, furniture: enrichedFurniture, wallSconces };
