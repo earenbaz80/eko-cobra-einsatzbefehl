@@ -286,6 +286,52 @@ export function TacticalHud({
             </div>
           )}
 
+          {/* ==================== OBJETIVO PRIMARIO: DESPEJE POR ESTANCIA ==================== */}
+          <div className="pointer-events-none mb-1.5 flex justify-center px-2">
+            <div
+              data-testid="objetivo-despeje"
+              data-despejadas={hud.despeje.despejadas}
+              data-total={hud.despeje.total}
+              data-siguiente={hud.despeje.siguiente?.nameEs ?? ''}
+              data-siguiente-id={hud.despeje.siguiente?.id ?? ''}
+              data-en-contacto={hud.despeje.contacto?.nameEs ?? ''}
+              className="pixel-frame max-w-[calc(100vw-1rem)] px-2.5 py-1 flex flex-wrap items-center justify-center gap-x-2.5 gap-y-0.5 font-mono-tabular text-[10px] text-[#E2E8F0]"
+            >
+              <span className="flex items-center gap-1.5 font-extrabold text-[#FDE68A]">
+                <Target className="w-3.5 h-3.5 shrink-0 text-[#F59E0B]" />
+                OBJETIVO PRIMARIO · DESPEJE
+              </span>
+              <span className="text-[#334155]">|</span>
+              <span className="font-bold text-white tabular-nums">
+                {hud.despeje.despejadas}/{hud.despeje.total}
+              </span>
+              <div className="h-1.5 w-16 overflow-hidden bg-[#1E293B]" aria-hidden="true">
+                <div
+                  className="pixel-fill h-full text-[#10B981]"
+                  style={{ width: `${hud.despeje.progresoPct}%` }}
+                />
+              </div>
+              <span className="text-[#94A3B8]">
+                NO VISTA {hud.despeje.sinVista} · CONTACTO{' '}
+                <strong className={hud.despeje.enContacto > 0 ? 'text-[#EF4444]' : 'text-[#94A3B8]'}>
+                  {hud.despeje.enContacto}
+                </strong>
+              </span>
+              <span className="text-[#334155]">|</span>
+              {hud.despeje.contacto ? (
+                <span className="font-bold text-[#FCA5A5] animate-pulse">
+                  ● EN CONTACTO: {hud.despeje.contacto.nameEs}
+                </span>
+              ) : hud.despeje.siguiente ? (
+                <span className="text-[#CBD5E1]">
+                  SIGUIENTE: <strong className="text-white">{hud.despeje.siguiente.nameEs}</strong>
+                </span>
+              ) : (
+                <span className="font-bold text-[#6EE7B7]">TODAS LAS ESTANCIAS DESPEJADAS</span>
+              )}
+            </div>
+          </div>
+
           {/* ==================== UNIFIED TACTICAL HUD FOOTER ==================== */}
           <div className="pointer-events-auto pixel-frame px-1.5 sm:px-2 py-0.5 flex flex-row flex-wrap sm:flex-nowrap items-center gap-1 sm:gap-1.5 overflow-visible sm:overflow-x-auto whitespace-nowrap z-20">
             {/* 1. OPERATOR & SQUADMATE TELEMETRY */}

@@ -16,6 +16,7 @@ import { fail, fallos } from '../informe.mjs';
 import { estadisticasCanvas } from '../canvas.mjs';
 import { pulsarConAzarSembrado } from '../navegador.mjs';
 import { comprobarPesoDeArranque } from './entrega.mjs';
+import { comprobarDespeje } from './despeje.mjs';
 import { comprobarOrdenesEscuadron } from './ordenes.mjs';
 import { comprobarTransiciones, esperarEstado } from './transiciones.mjs';
 
@@ -67,9 +68,10 @@ export async function comprobarRapido(page, { url }) {
   await page.waitForTimeout(1000);
 
   if (!(await comprobarCanvasMision1(page))) return;
+  await comprobarDespeje(page, { url });
   await comprobarOrdenesEscuadron(page, { url });
   await comprobarTransiciones(page);
   if (fallos.length === fallosAntes) {
-    console.log('rápido · canvas, Misión 1 y transiciones correctos');
+    console.log('rápido · canvas, Misión 1, despeje y transiciones correctos');
   }
 }

@@ -18,6 +18,7 @@ import {
   ShieldAlert,
   Sparkles,
   Tablet,
+  Target,
   Trash2,
   Unlock,
   UserCheck,
@@ -27,6 +28,25 @@ import {
 import { soundEngine } from '../game/soundEngine';
 import { ART } from '../game/artDirection';
 import { HudSnapshot, SquadCommand, TacticalMarkerType } from '../game/types';
+import { ETIQUETA_DESPEJE, type EstadoDespeje } from '../game/clearance';
+
+/** Clases por estado, literales para que Tailwind las encuentre al compilar. */
+const CLASE_DESPEJE: Record<EstadoDespeje, string> = {
+  SIN_VISTA: 'border-[#475569]/60 bg-[#0F172A]/60 text-[#94A3B8]',
+  EN_CONTACTO: 'border-[#EF4444]/70 bg-[#7F1D1D]/30 text-[#FCA5A5]',
+  DESPEJADA: 'border-[#10B981]/60 bg-[#064E3B]/30 text-[#6EE7B7]',
+};
+
+/**
+ * Pintura del mapa de salas por estado de despeje: el mapa y el tablero tienen
+ * que contar lo mismo. El azul de «aquí está el binomio» ya lo dan los contactos
+ * sobre el mapa, así que la sala se pinta sólo por su estado.
+ */
+const PINTURA_DESPEJE: Record<EstadoDespeje, { fill: string; stroke: string }> = {
+  SIN_VISTA: { fill: 'rgba(15, 23, 42, 0.55)', stroke: '#334155' },
+  EN_CONTACTO: { fill: 'rgba(127, 29, 29, 0.30)', stroke: '#EF4444' },
+  DESPEJADA: { fill: 'rgba(6, 78, 59, 0.24)', stroke: '#10B981' },
+};
 
 interface TacticalPadModalProps {
   isOpen: boolean;
@@ -258,6 +278,8 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
   if (!shouldRender) return null;
 
   const pad = hud.tacticalPad;
+  const despeje = hud.despeje;
+  const estadoPorSala = new Map(despeje.salas.map((sala) => [sala.id, sala.estado]));
   const sq = hud.squadVitals;
   const xp = hud.xpTelemetry;
 
@@ -532,6 +554,49 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
 
         {/* ==================== PAD CONTENT BODY ==================== */}
         <div className="p-4 overflow-y-auto space-y-3.5">
+          {/* 0. OBJETIVO PRIMARIO: DESPEJE POR ESTANCIA */}
+          <section
+            data-testid="pad-despeje"
+            className="border border-[#334155]/60 bg-[#080C11]/55 p-3"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs font-bold text-[#FDE68A]">
+                <Target className="w-4 h-4 shrink-0 text-[#F59E0B]" />
+                <span>OBJETIVO PRIMARIO · DESPEJE DE ESTANCIAS</span>
+                <span className="font-mono-tabular text-[10px] font-normal text-[#94A3B8]">
+                  {despeje.despejadas}/{despeje.total} · {despeje.progresoPct} %
+                </span>
+              </div>
+              <div className="font-mono-tabular text-[10px] font-bold">
+                {despeje.contacto ? (
+                  <span className="text-[#FCA5A5]">● EN CONTACTO: {despeje.contacto.nameEs}</span>
+                ) : despeje.siguiente ? (
+                  <span className="text-[#CBD5E1]">
+                    SIGUIENTE: <span className="text-white">{despeje.siguiente.nameEs}</span>
+                  </span>
+                ) : (
+                  <span className="text-[#6EE7B7]">TODAS LAS ESTANCIAS DESPEJADAS</span>
+                )}
+              </div>
+            </div>
+            <div className="mt-2 h-1.5 w-full overflow-hidden bg-[#1E293B]/80">
+              <div className="h-full bg-[#10B981]" style={{ width: `${despeje.progresoPct}%` }} />
+            </div>
+            <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+              {despeje.salas.map((sala) => (
+                <div
+                  key={sala.id}
+                  data-sala={sala.id}
+                  data-estado={sala.estado}
+                  className={`flex items-center justify-between gap-2 border px-2 py-1 font-mono-tabular text-[10px] ${CLASE_DESPEJE[sala.estado]}`}
+                >
+                  <span className="truncate">{sala.nameEs}</span>
+                  <span className="shrink-0 font-bold">{ETIQUETA_DESPEJE[sala.estado]}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+
           {/* 1. TOP MISSION STATUS KPI STRIP (Translucent boxes) */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
             <div className="bg-[#080C11]/50 border border-[#334155]/50 p-2.5">
@@ -791,24 +856,12 @@ export const TacticalPadModal: React.FC<TacticalPadModalProps> = ({
 
                     {/* Rooms */}
                     {pad.rooms.map((r) => {
-                      const fill =
-                        r.knownHostiles > 0
-                          ? 'rgba(127, 29, 29, 0.30)'
-                          : r.hasPlayer || r.hasSquad
-                            ? 'rgba(12, 74, 110, 0.30)'
-                            : r.cleared
-                              ? 'rgba(6, 78, 59, 0.24)'
-                              : 'rgba(15, 23, 42, 0.55)';
-                      const stroke =
-                        r.knownHostiles > 0
-                          ? '#EF4444'
-                          : r.hasPlayer || r.hasSquad
-                            ? '#38BDF8'
-                            : r.cleared
-                              ? '#10B981'
-                              : '#334155';
+                      // Mismo estado que el tablero de despeje: una sala barrida
+                      // y vacía queda verde aunque el binomio ya no esté dentro.
+                      const estado = estadoPorSala.get(r.id) ?? 'SIN_VISTA';
+                      const { fill, stroke } = PINTURA_DESPEJE[estado];
                       return (
-                        <g key={r.id}>
+                        <g key={r.id} data-mapa-sala={r.id} data-mapa-estado={estado}>
                           <rect
                             x={r.x}
                             y={r.y}

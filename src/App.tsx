@@ -606,6 +606,9 @@ export default function App() {
     // El C4 no vive en la simulación: inventario, cargas armadas y plantado en
     // curso se devuelven aparte, con el escenario ya reconstruido.
     engineRef.current?.restaurarC4(saved.c4);
+    // Las salas ya barridas tampoco: sin esto el objetivo primario volvería a
+    // marcarlas pendientes aunque el jugador las despejó antes de guardar.
+    engineRef.current?.restaurarDespeje(saved.estanciasDespejadas);
     setHasSavedGame(false);
   };
 
@@ -863,6 +866,7 @@ export default function App() {
         tick: eng.ticks,
         simulacion: eng.capturarSimulacion() ?? undefined,
         c4: eng.capturarC4(),
+        estanciasDespejadas: eng.capturarDespeje(),
       });
       if (guardado && !silent) setHasSavedGame(true);
     };

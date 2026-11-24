@@ -36,6 +36,12 @@ export interface SaveState {
   simulacion?: SnapshotSimulacion;
   /** Inventario, cargas armadas y plantado en curso del C4. */
   c4?: C4SaveState;
+  /**
+   * Estancias ya despejadas (ids del layout) para que el objetivo primario no
+   * vuelva a marcarlas pendientes al reanudar. Campo opcional: un guardado
+   * anterior sin él se reanuda igual y reconstruye la memoria con lo que vea.
+   */
+  estanciasDespejadas?: string[];
   /** Cualquier dato adicional de la partida. */
   [key: string]: unknown;
 }

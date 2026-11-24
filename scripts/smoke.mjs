@@ -24,7 +24,8 @@
  *   smoke/checks/ordenes.mjs     ejecución real de brecha, sonda y HOLD de Kobra 2
  *   smoke/checks/rapido.mjs      perfil de PR: peso de arranque, canvas, Misión 1 y transiciones
  *   smoke/checks/transiciones.mjs pausa, reanudación y vuelta al título (rápido y completo)
- *   smoke/checks/persistencia.mjs mover, autoguardar, recargar y reanudar sin reiniciar
+ *   smoke/checks/persistencia.mjs mover, despejar una sala, autoguardar, reanudar y volver a
+ *   contacto al tener dentro un hostil conocido
  *   smoke/checks/rendimiento.mjs p50/p95 de frame time en escritorio y móvil emulado
  *   smoke/checks/movil.mjs       audio al primer toque, joystick y franjas del HUD
  *   smoke/checks/arte.mjs       pase de píxeles por defecto y opt-out clásico (rápido y completo)
@@ -55,6 +56,7 @@ import { arrancarTraza, escribirInforme, guardarDiagnostico, limpiarDiagnostico,
 import { comprobarEntrega } from './smoke/checks/entrega.mjs';
 import { comprobarMisiones } from './smoke/checks/misiones.mjs';
 import { comprobarEscritorio } from './smoke/checks/escritorio.mjs';
+import { comprobarDespeje } from './smoke/checks/despeje.mjs';
 import { comprobarOrdenesEscuadron } from './smoke/checks/ordenes.mjs';
 import { comprobarRapido } from './smoke/checks/rapido.mjs';
 import { comprobarPersistencia } from './smoke/checks/persistencia.mjs';
@@ -115,6 +117,7 @@ try {
     await comprobarEntrega(contexto);
     await comprobarMisiones(page, contexto);
     await comprobarEscritorio(page, contexto);
+    await comprobarDespeje(page, contexto);
     await comprobarOrdenesEscuadron(page, contexto);
     await comprobarRendimiento(page, contexto);
     await comprobarMovil(browser, contexto);
@@ -148,5 +151,5 @@ if (fallos.length) {
 }
 const cobertura = ES_RAPIDO
   ? 'perfil rápido: peso de arranque, canvas, Misión 1, transiciones, pase por pantalla y art proof'
-  : 'cobertura completa: misiones, móvil, persistencia, metadatos, pase por pantalla y rendimiento';
+  : 'cobertura completa: misiones, despeje, móvil, persistencia, metadatos, pase por pantalla y rendimiento';
 console.log(`\n✓ Prueba de humo correcta${ES_REMOTO ? ' (URL publicada)' : ''}: ${cobertura}.`);
