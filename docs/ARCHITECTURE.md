@@ -29,6 +29,7 @@ no importan React salvo los tipos.
 | `suspectAi.ts` | Percepción y estados de sospechosos. |
 | `squadAi.ts` | Comportamiento del binomio (compañero). |
 | `hudMetrics.ts` | Métricas puras del HUD (velocidad, precisión, pulso, visión). |
+| `clearance.ts` | Estado de despeje por estancia (no vista / en contacto / despejada): objetivo primario derivado para el HUD y el EKO-Pad, con memoria de salas barridas. No toca la simulación. |
 | `types.ts` | Tipos compartidos y `computePlayerMissionRank`. |
 | `save.ts` | Serialización, validación por versión de esquema y E/S de la partida en curso. |
 | `keybinds.ts` | Teclas por defecto, validación de la configuración guardada y detección de conflictos. |
@@ -37,6 +38,10 @@ no importan React salvo los tipos.
 | `asphaltTexture.ts` | Texturas procedurales de asfalto. |
 | `battlemapAssets.ts` | Catálogo de assets de escenario. |
 | `artDirection.ts` | Lenguaje visual compartido: tokens RGB semánticos (aliado, amenaza, advertencia) que se componen con `rgba()`/`rgb()` sin duplicar hex. |
+| `pixelArt/palette.ts` | Paleta cerrada con rampas: cada familia es sombra → base → luz → brillo, y el volumen se mueve solo dentro de su rampa. Ningún color se escribe en `tiles.ts` ni en `scene.ts`. |
+| `pixelArt/operador.ts` | Sprites nativos de 48×48 del operador (Kobra-1) y del binomio (Kobra-2): 8 direcciones × 4 fotogramas de paso, con costuras de 1 px y sin reducción ni rotación fraccional. |
+| `pixelArt/tiles.ts` | Catálogo de baldosas 8×8 y las 16 variantes de muro por máscara de vecinos: cap iluminado al norte libre, zócalo en sombra al sur y cantos oscuros en los laterales expuestos. |
+| `pixelArt/muros.ts` | Auto-tiling: celdas ancladas a cada muro, máscara resuelta contra la unión de muros, remates cerrados con contorno y caché por identidad del array de muros. |
 | `artProof.ts` | Render por defecto: el estado del motor a 640×360 con tileset de píxeles y presentación nearest-neighbor a la escala de la ventana. Se carga en su chunk al primer cuadro y `?art=classic` devuelve el render anterior. No toca la simulación. |
 
 ## Mapas
@@ -52,7 +57,10 @@ Cada escenario tiene su layout en un módulo propio: `grazMap.ts`, `stationMap.t
   `App.tsx` la guarda cada 5 s y en `pagehide`, `beforeunload` y `visibilitychange`;
   al reanudar, `App.tsx` restaura marcador, tiempo y tick y `TacticalEngine.restaurarSimulacion()`
   reconstruye la simulación (posición, paredes, puertas y muebles) sobre el escenario;
-  `restaurarC4()` recupera además el inventario, las cargas armadas y el plantado en curso.
+  `restaurarC4()` recupera además el inventario, las cargas armadas y el plantado en curso;
+  `capturarDespeje()`/`restaurarDespeje()` conservan las estancias ya barridas para que el
+  objetivo primario no las vuelva a marcar pendientes; el humo completo recorre ese camino
+  (entrar en una sala, salir, autoguardar y reanudar) y exige verla DESPEJADA en HUD y EKO-Pad.
 - Ajustes (subtítulos, daltonismo, teclas): claves propias de `localStorage`; las teclas
   se leen de `eko_cobra_keybinds` y pasan por `sanitizeKeybinds()`.
 - `save.ts` acepta un `StorageLike` inyectable: los tests usan `createMemoryStorage()`.
@@ -62,7 +70,7 @@ Cada escenario tiene su layout en un módulo propio: `grazMap.ts`, `stationMap.t
 - Modales con `React.lazy` + `Suspense` (chunks separados).
 - Modo de baja calidad automático cuando el frame supera ~33 ms.
 - El canvas mide el coste del render y lo comunica al motor.
-- Presupuestos vigilados por la prueba de humo (tope / medido hoy): JS de entrada 490 / 452 KiB (170 / 132 KiB comprimido), sprite 450 / 396 KiB, tarjeta social 150 / 122 KiB, `dist/` 1725 / 1677 KiB y peso de arranque 900 / 855 KiB —documento, JS y CSS que el navegador baja antes de poder jugar—. El peso de arranque lo vigilan los dos perfiles (rápido y completo); los demás, sólo el completo.
+- Presupuestos vigilados por la prueba de humo (tope / medido hoy): JS de entrada 490 / 452 KiB (170 / 132 KiB comprimido), tarjeta social 150 / 122 KiB, `dist/` 1725 / 1677 KiB y peso de arranque 900 / 855 KiB —documento, JS y CSS que el navegador baja antes de poder jugar—. El peso de arranque lo vigilan los dos perfiles (rápido y completo); los demás, sólo el completo.
 
 ## Accesibilidad y seguridad
 
@@ -80,8 +88,8 @@ Cada escenario tiene su layout en un módulo propio: `grazMap.ts`, `stationMap.t
 | `npm run lint` | Tipos (`tsc --noEmit`). |
 | `npm run test` | Unidad (Vitest). |
 | `npm run build` | Build de producción. |
-| `npm run smoke` | Build servido como en Pages: cobertura completa (misiones, móvil, persistencia, pesos y frame time). |
-| `npm run smoke:quick` | Perfil rápido de PR: canvas, Misión 1, transiciones de estado y peso de arranque. |
+| `npm run smoke` | Build servido como en Pages: cobertura completa (misiones, móvil, persistencia con la memoria de despeje y su pérdida por contacto, pesos y frame time). |
+| `npm run smoke:quick` | Perfil rápido de PR: canvas, Misión 1, objetivo de despeje, transiciones de estado y peso de arranque. |
 | `npm run verify` | Las cuatro anteriores en orden; usa el smoke completo. |
 
 La prueba de humo sale del CI con `VITE_BASE_PATH=/eko-cobra-einsatzbefehl/`; en local
