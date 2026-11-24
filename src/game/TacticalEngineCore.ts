@@ -61,6 +61,7 @@ import {
   type C4SaveState
 } from './c4Charges';
 import { chooseSquadSteeringAngle, computeSquadNavTarget } from './squadAi';
+import { hitoEscuadron } from './squadNav';
 import {
   canSurrender,
   resolveBreachReaction
@@ -116,6 +117,7 @@ import {
   WallSegment,
   computePlayerMissionRank
 } from './types';
+import { calcularDespeje } from './clearance';
 
 type SquadBreachMode = 'SHOOT_LOCK' | 'KICK' | 'RAM' | 'C4';
 type SquadCommandTarget = {
@@ -327,6 +329,16 @@ function getWeaponThreatRange(weaponLabel?: string): number {
 /** Zoom del encuadre táctico: se consume a través de `framing`, nunca suelto. */
 const CAMERA_ZOOM = 1.55;
 
+/**
+ * Margen en que se considera que el binomio está encima de la hoja. La colisión
+ * clava su centro sobre el segmento de la puerta (el humo lo midió a 0,6 px), y ahí
+ * el vector al punto más cercano se anula: su ángulo deja de estar definido y medir
+ * la guarda con él daría un resultado arbitrario. Por debajo de este margen la
+ * puerta está bajo los pies y se abre sin ángulo. Con 1 px se cubre ese redondeo
+ * sin comerse el caso de 1,5 px, que sí tiene un ángulo medible.
+ */
+const PUERTA_BAJO_LOS_PIES_PX = 1;
+
 /** Contrato de introspección de solo lectura para las pruebas E2E. */
 export interface EkoE2ESegment {
   readonly id: string;
@@ -397,6 +409,24 @@ export interface EkoE2ESquad {
   readonly speechBubble: EkoE2ESpeechBubble | null;
 }
 
+/**
+ * Actor no jugable tal como lo ve el E2E: estado de IA, sala, posición real y
+ * quién lo tiene en intel (operador o cámara del binomio), para que el humo
+ * afirme el despeje sin leer píxeles del canvas. No la usa la lógica del juego.
+ */
+export interface EkoE2EActor {
+  readonly role: ActorEntity['role'];
+  readonly state: ActorEntity['state'];
+  readonly x: number;
+  readonly y: number;
+  readonly roomName: string;
+  readonly visibleToPlayer: boolean;
+  /** Intel del binomio: cámara de casco de Kobra-2, aunque el operador no lo vea. */
+  readonly visibleToSquad: boolean;
+  /** Intel del espejo de la sonda óptica, que sobrevive al cuadro en que se marcó. */
+  readonly spottedByMirror: boolean;
+}
+
 export interface EkoE2EState {
   readonly gameState: GameState;
   readonly player: {
@@ -416,6 +446,8 @@ export interface EkoE2EState {
     readonly speechBubble: EkoE2ESpeechBubble | null;
   } | null;
   readonly squad: EkoE2ESquad | null;
+  /** Sospechosos, rehenes y civiles; el operador y Kobra-2 van en sus campos. */
+  readonly actors: readonly EkoE2EActor[];
   /**
    * Estado con el que el overlay de daño decidió en el último cuadro pintado:
    * `grano` es el `isDanger` real del render y los temporizadores son sus
@@ -483,6 +515,12 @@ export class TacticalEngineCore {
   public plan: MissionPlan;
 
   protected rooms: RoomZone[] = [];
+  /**
+   * Estancias ya despejadas en esta misión. Es memoria de presentación para el
+   * objetivo del HUD (una sala barrida no vuelve a «no vista» al salir); no la
+   * lee ninguna regla de simulación y se limpia con cada layout.
+   */
+  protected despejeMemoria = new Set<string>();
   protected walls: WallSegment[] = [];
   protected doors: DoorEntity[] = [];
   protected furniture: FurnitureItem[] = [];
@@ -744,6 +782,7 @@ public nightMode: boolean = false;
                 ? createTrainingFacilityLayout()
                 : createGrazApartmentLayout();
     this.rooms = layout.rooms;
+    this.despejeMemoria.clear();
     this.walls = layout.walls;
     this.doors = layout.doors;
     this.furniture = layout.furniture;
@@ -6938,6 +6977,22 @@ public nightMode: boolean = false;
    * not do it while following or stacking: the stack is deliberate. Locked doors
    * stay closed and are reported once, waiting for a breach order.
    */
+  /**
+   * Órdenes que avanzan a un punto propio y pueden tener que cruzar el piso para
+   * llegar, así que abren las puertas sin llave que encuentran en el camino. La
+   * brecha queda fuera: su flujo gestiona la puerta objetivo y no debe abrirla por
+   * la espalda, y la sonda tampoco abre la suya (es el objeto de la orden).
+   */
+  protected squadAbrePuertasEnRuta(): boolean {
+    return (
+      this.squadCommand === 'RESTRAIN_AND_SECURE' ||
+      this.squadCommand === 'SUPPRESS_TARGET' ||
+      this.squadCommand === 'PIE_DOOR' ||
+      this.squadCommand === 'DEPLOY_CS_GAS' ||
+      Boolean(this.tacticalWaypoint)
+    );
+  }
+
   protected tryOpenSquadDoor(squad: ActorEntity, desiredAngle: number): boolean {
     if (this.squadDoorCooldown > 0) return false;
 
@@ -6946,11 +7001,38 @@ public nightMode: boolean = false;
     const probeY = squad.y + Math.sin(desiredAngle) * probeDistance;
     const door = this.findNearestClosedDoor(probeX, probeY, 46);
     if (!door || door.isBreached) return false;
+    // La puerta de la orden no se abre en ruta: es el objeto de la sonda o de la
+    // brecha, no un paso intermedio hacia el objetivo.
+    if (door.id === this.squadDoorTargetId) return false;
 
-    const doorMidX = (door.x1 + door.x2) * 0.5;
-    const doorMidY = (door.y1 + door.y2) * 0.5;
-    const doorAngle = Math.atan2(doorMidY - squad.y, doorMidX - squad.x);
-    if (Math.abs(this.normalizeAngle(doorAngle - desiredAngle)) > 1.05) return false;
+    // La referencia es el punto más cercano de la hoja, no su punto medio: pegado
+    // al jamb, la recta al medio sale casi perpendicular al rumbo y la puerta que el
+    // binomio tiene delante se descartaba, dejándolo clavado en el vano.
+    // La referencia es el punto más cercano de la hoja, no su punto medio: pegado
+    // al jamb, la recta al medio sale casi perpendicular al rumbo y la puerta que el
+    // binomio tiene delante se descartaba, dejándolo clavado en el vano.
+    // La referencia es el punto más cercano de la hoja, no su punto medio: pegado
+    // al jamb, la recta al medio sale casi perpendicular al rumbo y la puerta que el
+    // binomio tiene delante se descartaba, dejándolo clavado en el vano.
+    // La referencia es el punto más cercano de la hoja, no su punto medio: pegado
+    // al jamb, la recta al medio sale casi perpendicular al rumbo y la puerta que el
+    // binomio tiene delante se descartaba, dejándolo clavado en el vano.
+    const doorDx = door.x2 - door.x1;
+    const doorDy = door.y2 - door.y1;
+    const doorLen2 = doorDx * doorDx + doorDy * doorDy;
+    const proyeccion =
+      doorLen2 > 0
+        ? Math.min(
+            1,
+            Math.max(0, ((squad.x - door.x1) * doorDx + (squad.y - door.y1) * doorDy) / doorLen2)
+          )
+        : 0;
+    const nearestX = door.x1 + doorDx * proyeccion;
+    const nearestY = door.y1 + doorDy * proyeccion;
+    if (Math.hypot(nearestX - squad.x, nearestY - squad.y) > PUERTA_BAJO_LOS_PIES_PX) {
+      const doorAngle = Math.atan2(nearestY - squad.y, nearestX - squad.x);
+      if (Math.abs(this.normalizeAngle(doorAngle - desiredAngle)) > 1.05) return false;
+    }
 
     if (door.isLocked) {
       if (this.squadDoorWarnCooldown <= 0) {
@@ -7047,7 +7129,10 @@ public nightMode: boolean = false;
     }
 
     if (squad.investigateTarget) {
-      navTarget = squad.investigateTarget;
+      // Toda orden que avanza a un punto (sonda, brecha, gas, supresión) usa la ruta
+      // por puertas: el punto puede caer en otra estancia y la recta se clava en la
+      // pared del piso. En la misma estancia la ruta es vacía y manda el punto.
+      navTarget = hitoEscuadron(this.rooms, this.doors, squad, squad.investigateTarget);
       const dist = Math.hypot(squad.investigateTarget.x - squad.x, squad.investigateTarget.y - squad.y);
       if (dist < 6) {
         squad.x = squad.investigateTarget.x;
@@ -7135,7 +7220,7 @@ public nightMode: boolean = false;
         squad.investigateTarget = undefined;
       }
     } else if (this.tacticalWaypoint) {
-      navTarget = { x: this.tacticalWaypoint.x, y: this.tacticalWaypoint.y };
+      navTarget = hitoEscuadron(this.rooms, this.doors, squad, this.tacticalWaypoint);
       const dist = Math.hypot(navTarget.x - squad.x, navTarget.y - squad.y);
       if (dist < 8) {
         squad.x = this.tacticalWaypoint.x;
@@ -7168,7 +7253,7 @@ public nightMode: boolean = false;
         )[0];
 
       if (arrestCandidate) {
-        navTarget = { x: arrestCandidate.x, y: arrestCandidate.y };
+        navTarget = hitoEscuadron(this.rooms, this.doors, squad, arrestCandidate);
         if (Math.hypot(arrestCandidate.x - squad.x, arrestCandidate.y - squad.y) < 42) {
           arrestCandidate.state = 'ARRESTED';
           soundEngine.playArrestCuffs();
@@ -7192,7 +7277,7 @@ public nightMode: boolean = false;
           this.checkMissionCompletion();
         }
       } else if (evCandidate) {
-        navTarget = { x: evCandidate.x, y: evCandidate.y };
+        navTarget = hitoEscuadron(this.rooms, this.doors, squad, evCandidate);
         if (Math.hypot(evCandidate.x - squad.x, evCandidate.y - squad.y) < 38) {
           evCandidate.secured = true;
           soundEngine.playOpticCam();
@@ -7248,7 +7333,9 @@ public nightMode: boolean = false;
         const squadSpeed = (dist > 85 ? 175 : 145) * legMult * dragMult;
         const step = Math.min(dist, squadSpeed * dt);
 
-        if (this.squadCommand === 'RESTRAIN_AND_SECURE') {
+        // Las órdenes que avanzan a un punto abren la puerta que llevan delante:
+        // sin eso la ruta deja al binomio esperando contra una hoja cerrada.
+        if (this.squadAbrePuertasEnRuta()) {
           this.tryOpenSquadDoor(squad, ang);
         }
 
@@ -7627,6 +7714,11 @@ public nightMode: boolean = false;
 
     for (const actor of this.actors) {
       if (actor.role === 'PLAYER' || actor.role === 'SQUAD') continue;
+
+      // La estancia de un actor es la que pisa, no la de su guion: si un hostil
+      // persigue el ruido hasta una sala ya barrida, esa sala vuelve a contacto
+      // y su id sale de la memoria de despeje.
+      actor.roomName = this.getRoomAt(actor.x, actor.y);
 
       const hasLOS = !this.raycastWallsAndDoors(player.x, player.y, actor.x, actor.y);
       const distToPlayer = Math.hypot(actor.x - player.x, actor.y - player.y);
@@ -8901,6 +8993,24 @@ public nightMode: boolean = false;
       coveragePolygon,
     };
 
+    // Objetivo primario: despeje por estancia. Dato derivado para el HUD y el
+    // EKO-Pad; sale de lo que el motor ya calculó (ocupación, intel y estancias
+    // aseguradas por el mapa) y de la memoria de salas barridas.
+    const despeje = calcularDespeje(
+      this.rooms.map((room) => {
+        const salaPad = tacticalPad.rooms.find((item) => item.id === room.id);
+        return {
+          id: room.id,
+          nameDe: room.nameDe,
+          nameEs: room.nameEs,
+          asegurada: room.cleared,
+          ocupada: !!salaPad && (salaPad.hasPlayer || salaPad.hasSquad),
+          hostilesConocidos: salaPad?.knownHostiles ?? 0,
+        };
+      }),
+      this.despejeMemoria
+    );
+
     const playerMissionRank = computePlayerMissionRank(this.score);
     if (this.lastRankTitle && this.lastRankTitle !== playerMissionRank.titleDe) {
       const prevStars = this.lastRankStars ?? 1;
@@ -8991,6 +9101,7 @@ public nightMode: boolean = false;
         progressPct: xpProgressPct,
       },
       tacticalPad,
+      despeje,
       activeTool: this.activeTool,
       grenadeAimingActive: this.grenadeAimingActive,
       primaryName: spec.name,
@@ -9278,6 +9389,22 @@ public nightMode: boolean = false;
               : null,
           })
         : null,
+      actors: Object.freeze(
+        this.actors
+          .filter((actor) => actor.role !== 'PLAYER' && actor.role !== 'SQUAD')
+          .map((actor) =>
+            Object.freeze({
+              role: actor.role,
+              state: actor.state,
+              x: actor.x,
+              y: actor.y,
+              roomName: actor.roomName ?? '',
+              visibleToPlayer: actor.visibleToPlayer,
+              visibleToSquad: Boolean(actor.visibleToSquad),
+              spottedByMirror: Boolean(actor.spottedByMirror),
+            })
+          )
+      ),
       tick: this.ticks,
       pantalla: Object.freeze({
         grano: this.ultimoGrano,
@@ -9316,6 +9443,27 @@ public nightMode: boolean = false;
         muebles: this.furniture.map((mueble) => ({ ...mueble })),
       },
     };
+  }
+
+  /** Estancias ya despejadas, en orden estable, para el guardado. */
+  public capturarDespeje(): string[] {
+    return [...this.despejeMemoria].sort();
+  }
+
+  /**
+   * Devuelve la memoria de despeje al motor después de reconstruir el escenario.
+   * Sólo acepta ids del layout en curso: un guardado de otra misión no inventa
+   * salas. Vuelve a publicar el HUD para que el objetivo primario salga al día.
+   */
+  public restaurarDespeje(despejadas: readonly string[] | undefined) {
+    this.despejeMemoria.clear();
+    if (despejadas?.length) {
+      const idsDelLayout = new Set(this.rooms.map((room) => room.id));
+      for (const id of despejadas) {
+        if (typeof id === 'string' && idsDelLayout.has(id)) this.despejeMemoria.add(id);
+      }
+    }
+    this.emitHudSnapshot();
   }
 
   /** Inventario, cargas armadas y plantado en curso para el guardado. */

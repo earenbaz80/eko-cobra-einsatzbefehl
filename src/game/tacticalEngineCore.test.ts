@@ -3,7 +3,14 @@ import { TacticalEngineCore } from './TacticalEngineCore';
 import { C4ChargeSystem } from './c4Charges';
 import { createGrazApartmentLayout } from './grazMap';
 import { soundEngine } from './soundEngine';
-import type { ActorEntity, DoorEntity, LightSwitchEntity, WallSconceLight } from './types';
+import type {
+  ActorEntity,
+  DoorEntity,
+  HudSnapshot,
+  LightSwitchEntity,
+  MissionPlan,
+  WallSconceLight,
+} from './types';
 
 /**
  * El motor real necesita un canvas para construirse. Para probar su lógica
@@ -26,6 +33,7 @@ function createEngine(overrides: Record<string, unknown> = {}): any {
     particles: [],
     actors: [],
     evidenceList: [],
+    rooms: [],
     doors: [],
     walls: [],
     furniture: [],
@@ -361,6 +369,253 @@ describe('órdenes de Kobra 2', () => {
 
     expect(squad.investigateTarget).toEqual({ x: 345, y: 410 });
   });
+
+  it('SUPPRESS_TARGET desde otra estancia rodea el piso en vez de clavarse en el muro', () => {
+    const { rooms, doors } = createGrazApartmentLayout();
+    const enEscalera = {
+      ...squad,
+      x: 233,
+      y: 262,
+      investigateTarget: { x: 310, y: 205 },
+    } as unknown as ActorEntity;
+    const engine = createEngine({
+      squadCommand: 'SUPPRESS_TARGET',
+      getPlayer: vi.fn(() => player),
+      getSquadmate: vi.fn(() => enEscalera),
+      rooms,
+      doors,
+      collidesAt: vi.fn(() => false),
+      moveActorWithCollision: vi.fn(),
+    });
+
+    engine.updateSquadmateAI(0.05, player);
+
+    const [, destinoX, destinoY] = engine.moveActorWithCollision.mock.calls[0];
+    // La cocina queda al noreste; el primer paso baja hacia la puerta de entrada.
+    expect(destinoY).toBeGreaterThan(266);
+    expect(destinoX).toBeLessThan(250);
+  });
+
+  it('SUPPRESS_TARGET dentro de la misma estancia va derecho al objetivo', () => {
+    const { rooms, doors } = createGrazApartmentLayout();
+    const enCocina = {
+      ...squad,
+      x: 300,
+      y: 250,
+      investigateTarget: { x: 420, y: 150 },
+    } as unknown as ActorEntity;
+    const engine = createEngine({
+      squadCommand: 'SUPPRESS_TARGET',
+      getPlayer: vi.fn(() => player),
+      getSquadmate: vi.fn(() => enCocina),
+      rooms,
+      doors,
+      collidesAt: vi.fn(() => false),
+      moveActorWithCollision: vi.fn(),
+    });
+
+    engine.updateSquadmateAI(0.05, player);
+
+    const [, destinoX, destinoY] = engine.moveActorWithCollision.mock.calls[0];
+    expect(destinoX).toBeGreaterThan(300);
+    expect(destinoY).toBeLessThan(250);
+  });
+
+  it('la sonda óptica desde otra estancia también rodea el piso hasta el vano', () => {
+    const { rooms, doors } = createGrazApartmentLayout();
+    const enEscalera = {
+      ...squad,
+      x: 233,
+      y: 262,
+      investigateTarget: { x: 327, y: 318 },
+    } as unknown as ActorEntity;
+    const engine = createEngine({
+      squadCommand: 'PIE_DOOR',
+      getPlayer: vi.fn(() => player),
+      getSquadmate: vi.fn(() => enEscalera),
+      rooms,
+      doors,
+      collidesAt: vi.fn(() => false),
+      moveActorWithCollision: vi.fn(),
+    });
+
+    engine.updateSquadmateAI(0.05, player);
+
+    const [, destinoX, destinoY] = engine.moveActorWithCollision.mock.calls[0];
+    // El vano queda al sur del recibidor; el primer paso baja hacia la puerta de entrada.
+    expect(destinoY).toBeGreaterThan(266);
+    expect(destinoX).toBeLessThan(250);
+  });
+
+  it('la sonda no abre en ruta la puerta que va a sondar', () => {
+    const { rooms, doors } = createGrazApartmentLayout();
+    const puerta = doors.find((door) => door.id === 'DOOR_MAIN_A') as DoorEntity;
+    puerta.isLocked = false;
+    const enEscalera = {
+      ...squad,
+      x: 225,
+      y: 410,
+      investigateTarget: { x: 280, y: 410 },
+    } as unknown as ActorEntity;
+    const engine = createEngine({
+      squadCommand: 'PIE_DOOR',
+      squadDoorTargetId: 'DOOR_MAIN_A',
+      getPlayer: vi.fn(() => player),
+      getSquadmate: vi.fn(() => enEscalera),
+      rooms,
+      doors,
+      collidesAt: vi.fn(() => false),
+      moveActorWithCollision: vi.fn(),
+    });
+
+    engine.updateSquadmateAI(0.05, player);
+
+    expect(puerta.isOpen).toBe(false);
+  });
+
+  it('el punto marcado en el EKO-Pad rodea el piso y abre la puerta que lleva delante', () => {
+    const { rooms, doors } = createGrazApartmentLayout();
+    const puerta = doors.find((door) => door.id === 'DOOR_MAIN_A') as DoorEntity;
+    puerta.isLocked = false;
+    const enEscalera = { ...squad, x: 225, y: 410 } as unknown as ActorEntity;
+    const engine = createEngine({
+      tacticalWaypoint: { x: 310, y: 205 },
+      getPlayer: vi.fn(() => player),
+      getSquadmate: vi.fn(() => enEscalera),
+      rooms,
+      doors,
+      collidesAt: vi.fn(() => false),
+      moveActorWithCollision: vi.fn(),
+    });
+    vi.spyOn(soundEngine, 'playDoorAction').mockImplementation(() => {});
+
+    engine.updateSquadmateAI(0.05, player);
+
+    expect(puerta.isOpen).toBe(true);
+    const [, destinoX] = engine.moveActorWithCollision.mock.calls[0];
+    expect(destinoX).toBeGreaterThan(225);
+  });
+
+  it('pegado al jamb abre igual la puerta que tiene delante en vez de clavarse', () => {
+    const { doors } = createGrazApartmentLayout();
+    const puerta = doors.find((door) => door.id === 'DOOR_MAIN_A') as DoorEntity;
+    puerta.isLocked = false;
+    // Rumbo al este con el binomio sobre el borde norte del vano: el punto medio de
+    // la hoja queda a 88°, así que la guarda de ángulo descartaba la puerta y el
+    // binomio se quedaba empujando el jamb sin abrirla.
+    const enElJamb = { ...squad, x: 249.4, y: 394.7 } as unknown as ActorEntity;
+    const engine = createEngine({
+      doors,
+      getPlayer: vi.fn(() => player),
+      getSquadmate: vi.fn(() => enElJamb),
+    });
+    vi.spyOn(soundEngine, 'playDoorAction').mockImplementation(() => {});
+
+    expect(engine.tryOpenSquadDoor(enElJamb, 0)).toBe(true);
+    expect(puerta.isOpen).toBe(true);
+  });
+
+  /**
+   * Deja al binomio pegado al jamb norte del vano con una orden ya enrutada y la
+   * puerta de entrada sin llave. `[6]` cambia de candidato: esposa al rendido de
+   * la cocina en vez de llevar un punto propio en `investigateTarget`.
+   */
+  function binomioEnElJamb(orden: string, puertaObjetivo?: string) {
+    const { rooms, doors } = createGrazApartmentLayout();
+    const puerta = doors.find((door) => door.id === 'DOOR_MAIN_A') as DoorEntity;
+    puerta.isLocked = false;
+    const enElJamb = {
+      ...squad,
+      x: 249.4,
+      y: 394.7,
+      investigateTarget:
+        orden === 'RESTRAIN_AND_SECURE' ? undefined : { x: 320, y: 400 },
+    } as unknown as ActorEntity;
+    const engine = createEngine({
+      squadCommand: orden,
+      squadDoorTargetId: puertaObjetivo,
+      rooms,
+      doors,
+      actors:
+        orden === 'RESTRAIN_AND_SECURE'
+          ? [
+              {
+                id: 'SUSPECT_RENDIDO',
+                name: 'Rendido',
+                role: 'SUSPECT',
+                x: 330,
+                y: 205,
+                radius: 14,
+                state: 'SURRENDERED',
+                roomName: 'WOHNKUECHE',
+              },
+            ]
+          : [],
+      evidenceList: [],
+      getPlayer: vi.fn(() => player),
+      getSquadmate: vi.fn(() => enElJamb),
+      collidesAt: vi.fn(() => false),
+      moveActorWithCollision: vi.fn(),
+    });
+    vi.spyOn(soundEngine, 'playDoorAction').mockImplementation(() => {});
+    return { engine, puerta, enElJamb };
+  }
+
+  it.each(['PIE_DOOR', 'DEPLOY_CS_GAS', 'RESTRAIN_AND_SECURE'])(
+    '%s desde el jamb abre en ruta la puerta que lleva delante',
+    (orden) => {
+      const { engine, puerta, enElJamb } = binomioEnElJamb(orden);
+
+      engine.updateSquadmateAI(0.05, player);
+
+      expect(puerta.isOpen).toBe(true);
+      const [, destinoX] = engine.moveActorWithCollision.mock.calls[0];
+      expect(destinoX).toBeGreaterThan(enElJamb.x);
+    }
+  );
+
+  it('a 1,5 px de la hoja manda el punto más cercano, no el punto medio', () => {
+    const { doors } = createGrazApartmentLayout();
+    const puerta = doors.find((door) => door.id === 'DOOR_LIVING') as DoorEntity;
+    // Prueba la guarda sola, con rumbo explícito: la hoja queda a 1,5 px (fuera del
+    // atajo de ≤1 px) y su punto medio, 10 px al norte, cae a 81° del rumbo. Con el
+    // ángulo al medio la guarda descartaba la hoja que el binomio tiene delante; con
+    // el punto más cercano queda de frente. No depende del hito de squadNav.
+    const enElVano = { ...squad, x: 518.5, y: 440 } as unknown as ActorEntity;
+    const engine = createEngine({
+      doors,
+      squadDoorTargetId: 'DOOR_KITCHEN',
+    });
+    vi.spyOn(soundEngine, 'playDoorAction').mockImplementation(() => {});
+
+    expect(engine.tryOpenSquadDoor(enElVano, 0)).toBe(true);
+    expect(puerta.isOpen).toBe(true);
+  });
+
+  it('encima de la hoja se abre sin medir ángulo: el vector al punto más cercano es nulo', () => {
+    const { doors } = createGrazApartmentLayout();
+    const puerta = doors.find((door) => door.id === 'DOOR_LIVING') as DoorEntity;
+    // A 0,4 px de la hoja la proyección es degenerada y el ángulo no está definido:
+    // la puerta está bajo los pies y se abre con cualquier rumbo, incluso con uno
+    // que la guarda rechazaría si midiera el vector al punto más cercano.
+    const sobreLaHoja = { ...squad, x: 519.6, y: 440 } as unknown as ActorEntity;
+    const engine = createEngine({ doors, squadDoorTargetId: 'DOOR_KITCHEN' });
+    vi.spyOn(soundEngine, 'playDoorAction').mockImplementation(() => {});
+
+    expect(engine.tryOpenSquadDoor(sobreLaHoja, Math.PI / 2)).toBe(true);
+    expect(puerta.isOpen).toBe(true);
+  });
+
+  it.each(['PIE_DOOR', 'DEPLOY_CS_GAS', 'RESTRAIN_AND_SECURE'])(
+    '%s no abre en ruta la puerta que es su propio objetivo',
+    (orden) => {
+      const { engine, puerta } = binomioEnElJamb(orden, 'DOOR_MAIN_A');
+
+      engine.updateSquadmateAI(0.05, player);
+
+      expect(puerta.isOpen).toBe(false);
+    }
+  );
 
   it('la acumulación vertical se coloca 38 px al costado y fuera del jamb', () => {
     const engine = createEngine({ collidesAt: vi.fn(() => false) });
@@ -1054,5 +1309,201 @@ describe('secuencia de plantado y despeje de C4', () => {
     expect(reanudado.c4.count).toBe(1);
     expect(reanudado.c4.charges).toHaveLength(1);
     expect(reanudado.c4.charges[0]).toMatchObject({ phase: 'ARMED', targetName: mainDoor.name });
+  });
+});
+
+describe('despeje en el snapshot del HUD', () => {
+  const plan: MissionPlan = {
+    profile: 'AUFKLAERER',
+    entryPoint: 'HAUPTEINGANG_A',
+    doctrine: 'STEALTH',
+    primaryWeapon: 'AUG_PARA',
+    inspectionDevice: 'THERMAL_CAM',
+    gadget: 'CS_GAS',
+    squadGear: 'SHIELD',
+    squadOrderInitial: 'FOLLOW',
+    operationId: 'APARTMENT',
+  };
+
+  /**
+   * Motor sobre el prototipo real para ejercitar `emitHudSnapshot` de verdad: el
+   * snapshot tiene que salir con las estancias del layout de Graz y el estado que
+   * ve el jugador, no con datos inventados por el HUD.
+   */
+  const motorConMision = (opciones: { despejeMemoria?: Set<string> } = {}) => {
+    const layout = createGrazApartmentLayout();
+    const enEscalera = { ...player, roomName: 'STIEGENHAUS' } as ActorEntity;
+    const binomio = { ...squad, roomName: 'STIEGENHAUS' } as ActorEntity;
+    const hostil = {
+      id: 'SUSPECT_1',
+      name: 'Sospechoso Armado',
+      role: 'SUSPECT',
+      x: 380,
+      y: 420,
+      angle: 0,
+      roomName: 'VORRAUM',
+      state: 'ALERTED',
+      hp: 100,
+      maxHp: 100,
+      alertLevel: 'COMBAT',
+      isArmed: true,
+      weaponLabel: 'Glock 17',
+      visibleToPlayer: true,
+      visibleToSquad: false,
+      spottedByMirror: false,
+      identifiedByRadio: false,
+    } as unknown as ActorEntity;
+
+    const onHudUpdate = vi.fn();
+    const engine = createEngine({
+      plan,
+      rooms: layout.rooms,
+      doors: layout.doors,
+      walls: layout.walls,
+      furniture: layout.furniture,
+      actors: [enEscalera, binomio, hostil],
+      getPlayer: () => enEscalera,
+      getSquadmate: () => binomio,
+      onHudUpdate,
+      radio: { txTimer: 0, staticTimer: 0, items: [] },
+      exteriorWindows: [],
+      despejeMemoria: opciones.despejeMemoria ?? new Set<string>(),
+      heldKeys: new Set<string>(),
+      sprintModeToggled: false,
+      emitHudSnapshot: TacticalEngineCore.prototype.emitHudSnapshot,
+      computeVisibilityPolygon: () => [],
+      getWeatherVisibilityMultiplier: () => 1,
+      isFocusedAiming: () => false,
+      getActiveBiometricHudTarget: () => null,
+      computeContextPrompt: () => null,
+      getStationAlertLevel: () => 'CALM',
+      elapsedSeconds: 12,
+      score: 0,
+      baseCareerXp: 0,
+      sessionXp: 0,
+      armor: 90,
+      ifakCount: 2,
+      playerFatigue: 10,
+      squadFatigue: 10,
+      ammoInMag: 25,
+      magCount: 4,
+      taserCharges: 2,
+      gadgetCount: 2,
+      flashlightOn: true,
+      nvgActive: false,
+      nvgKeyCode: 'KeyN',
+      playerStance: 'PARADO',
+      currentMovementGait: 'RESTING',
+      activeTool: 'PRIMARY',
+      aimZoneMode: 'TORSO',
+      thermalActive: false,
+      mirrorDoorId: null,
+    });
+
+    return { engine, onHudUpdate, layout };
+  };
+
+  it('publica las estancias reales de Misión 1 con aseguradas, ocupada y contacto', () => {
+    const { engine, onHudUpdate, layout } = motorConMision();
+
+    engine.emitHudSnapshot();
+
+    expect(onHudUpdate).toHaveBeenCalledTimes(1);
+    const hud = onHudUpdate.mock.calls[0][0] as HudSnapshot;
+    const estado = new Map(hud.despeje.salas.map((sala) => [sala.id, sala.estado]));
+
+    // Las salas son las del layout, en su orden, no una lista de la UI.
+    expect(hud.despeje.salas.map((sala) => sala.id)).toEqual(layout.rooms.map((room) => room.id));
+    expect(hud.tacticalPad.rooms).toHaveLength(layout.rooms.length);
+
+    // Ocupada por el binomio, asegurada sin nadie dentro y con hostil visible.
+    expect(estado.get('STIEGENHAUS')).toBe('DESPEJADA');
+    expect(estado.get('LOGGIA')).toBe('DESPEJADA');
+    expect(estado.get('VORRAUM')).toBe('EN_CONTACTO');
+    expect(estado.get('WOHNZIMMER')).toBe('SIN_VISTA');
+
+    expect(hud.despeje).toMatchObject({
+      total: 7,
+      despejadas: 2,
+      enContacto: 1,
+      sinVista: 4,
+      progresoPct: 29,
+    });
+    expect(hud.despeje.siguiente?.id).toBe('VORRAUM');
+    expect(hud.despeje.contacto?.id).toBe('VORRAUM');
+
+    // La memoria del motor recibe sólo las salas barridas o aseguradas.
+    expect([...engine.despejeMemoria].sort()).toEqual(['LOGGIA', 'STIEGENHAUS']);
+  });
+
+  it('atribuye el hostil a la estancia que pisa aunque su guion diga otra', () => {
+    const layout = createGrazApartmentLayout();
+    const sospechoso = {
+      id: 'SUSPECT_FLUR',
+      name: 'Lukas',
+      role: 'SUSPECT',
+      state: 'UNAWARE',
+      x: 400,
+      y: 420,
+      angle: 0,
+      radius: 14,
+      hp: 75,
+      maxHp: 75,
+      morale: 80,
+      stress: 40,
+      stunTimer: 0,
+      isArmed: true,
+      patrolRoute: [],
+      suspicionMeter: 0,
+      roomName: 'WOHNKUECHE',
+    } as unknown as ActorEntity;
+    const operadorLejos = { ...player, x: 1150, y: 780 } as ActorEntity;
+    const engine = createEngine({
+      plan: { inspectionDevice: 'MICRO_CAM', profile: 'ZUGRIFF' },
+      rooms: layout.rooms,
+      walls: layout.walls,
+      doors: layout.doors,
+      furniture: layout.furniture,
+      actors: [sospechoso],
+      getPlayer: vi.fn(() => operadorLejos),
+      getSquadmate: vi.fn(() => null),
+      raycastWallsAndDoors: vi.fn(() => true),
+      getWeatherVisibilityMultiplier: vi.fn(() => 1),
+      makeSuspectSurrender: vi.fn(),
+    });
+
+    engine.updateSuspectsAI(0.05, operadorLejos);
+
+    expect(sospechoso.roomName).toBe('VORRAUM');
+  });
+
+  it('saca del guardado la estancia barrida que vuelve a contacto', () => {
+    // VORRAUM estaba en la memoria de una partida anterior; el hostil del
+    // escenario está dentro, así que el snapshot la pasa a contacto y la borra.
+    const { engine } = motorConMision({ despejeMemoria: new Set(['VORRAUM', 'WOHNZIMMER']) });
+
+    engine.emitHudSnapshot();
+
+    expect([...engine.despejeMemoria].sort()).toEqual(['LOGGIA', 'STIEGENHAUS', 'WOHNZIMMER']);
+    expect(engine.capturarDespeje()).toEqual(['LOGGIA', 'STIEGENHAUS', 'WOHNZIMMER']);
+  });
+
+  it('conserva las estancias despejadas al guardar y reanudar la partida', () => {
+    const { engine } = motorConMision();
+    engine.emitHudSnapshot();
+    // Sala barrida después de la inserción: el binomio ya no está dentro.
+    engine.despejeMemoria.add('WOHNZIMMER');
+    const guardado = engine.capturarDespeje();
+    expect(guardado).toEqual(['LOGGIA', 'STIEGENHAUS', 'WOHNZIMMER']);
+
+    const { engine: reanudado, onHudUpdate } = motorConMision();
+    // Un guardado de otra misión no puede inventar estancias en este layout.
+    reanudado.restaurarDespeje([...guardado, 'SALA_FANTASMA']);
+
+    expect([...reanudado.despejeMemoria].sort()).toEqual(['LOGGIA', 'STIEGENHAUS', 'WOHNZIMMER']);
+    const hud = onHudUpdate.mock.calls[onHudUpdate.mock.calls.length - 1]?.[0] as HudSnapshot;
+    expect(hud.despeje.salas.find((sala) => sala.id === 'WOHNZIMMER')?.estado).toBe('DESPEJADA');
+    expect(hud.despeje.salas.some((sala) => sala.id === 'SALA_FANTASMA')).toBe(false);
+    expect(hud.despeje.despejadas).toBe(3);
   });
 });

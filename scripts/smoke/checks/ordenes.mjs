@@ -3,7 +3,9 @@
  * Estas comprobaciones esperan el efecto observable en el mundo real:
  *   [3] brecha y abre la puerta (patada, ariete o C4 según el estado),
  *   [4] ejecuta la sonda óptica,
- *   [2] HOLD cancela el avance pendiente antes de que se produzca la brecha.
+ *   [2] HOLD cancela el avance pendiente antes de que se produzca la brecha,
+ *   un PUNTO DE AVANCE del EKO-Pad hace rodear el piso abriendo las puertas,
+ *   [7] contra un objetivo de otra estancia también rodea el piso desde el rellano.
  *
  * Se ejecutan sobre una misión real de Graz y usan `window.__eko` para leer el
  * estado del motor, no el texto de la interfaz.
@@ -17,13 +19,25 @@ const PUERTA = 'DOOR_MAIN_A';
 const PUERTA_CONTEXTUAL = 'DOOR_LIVING';
 const PUERTA_RAM = 'DOOR_MAIN_A';
 const PUERTA_C4 = 'DOOR_LINZ_DOCK_B';
+/** Punto del salón marcado en el pad: a 309 px de Milán, fuera del aborto en tránsito (260 px). */
+const PUNTO_PAD = { x: 570, y: 355 };
+/** `handleSvgMapClick` proyecta worldX = 80 + relX * 1060, worldY = 60 + relY * 700. */
+const MAPA_PAD = { x: 80, y: 60, w: 1060, h: 700 };
 
 const leerEstado = (page) => page.evaluate(() => window.__eko?.snapshot() ?? null);
 
-const leerPuerta = async (page) => {
-  const estado = await leerEstado(page);
-  return estado?.world.doors.find((puerta) => puerta.id === PUERTA) ?? null;
-};
+/** Binomio del último cuadro, sin arrastrar el resto de la instantánea. */
+const leerBinomio = (page) => page.evaluate(() => window.__eko?.snapshot()?.squad ?? null);
+
+/** Puertas del mundo, sin arrastrar el resto de la instantánea. */
+const leerPuertas = (page) => page.evaluate(() => window.__eko?.snapshot()?.world.doors ?? []);
+
+/** Una puerta por id (la de entrada por defecto), sin el resto de la instantánea. */
+const leerPuerta = (page, puertaId = PUERTA) =>
+  page.evaluate(
+    (id) => window.__eko?.snapshot()?.world.doors.find((puerta) => puerta.id === id) ?? null,
+    puertaId
+  );
 
 async function iniciar(page, url, { asentarMs = 300 } = {}) {
   await arrancarMision(page, url, MISION, { asentarMs });
@@ -146,8 +160,7 @@ async function comprobarContextMenuPuerta(page, url) {
       { timeout: 3000 }
     );
 
-    const orden = await leerEstado(page);
-    const objetivo = orden?.squad?.target;
+    const objetivo = (await leerBinomio(page))?.target;
     if (!objetivo) {
       fail('órdenes · contexto: la orden no fijó una posición de pila');
       return;
@@ -237,13 +250,13 @@ async function comprobarContextMenuPuerta(page, url) {
       return;
     }
 
-    const final = await leerEstado(page);
-    const puertaFinal = final?.world.doors.find((puerta) => puerta.id === PUERTA_CONTEXTUAL);
+    const puertasFinales = await leerPuertas(page);
+    const puertaFinal = puertasFinales.find((puerta) => puerta.id === PUERTA_CONTEXTUAL);
     if (!puertaFinal?.isOpen) {
       fail(`órdenes · contexto: ${puertaObjetivo.name} no quedó abierta`);
       return;
     }
-    const otraFinal = final?.world.doors.find(
+    const otraFinal = puertasFinales.find(
       (puerta) =>
         puerta.id !== PUERTA_CONTEXTUAL &&
         !puertasAbiertasAntes.has(puerta.id) &&
@@ -324,8 +337,7 @@ async function acercarJugadorDerecha(page, xObjetivo) {
 
 /** Pulsa con el botón derecho la puerta indicada y elige la orden de brecha. */
 async function apuntarPuertaYBrechar(page, puertaId) {
-  const estado = await leerEstado(page);
-  const puerta = estado?.world.doors.find((item) => item.id === puertaId);
+  const puerta = await leerPuerta(page, puertaId);
   if (!puerta) throw new Error(`no existe la puerta ${puertaId}`);
   if (puerta.isOpen || puerta.isBreached) throw new Error(`${puerta.name} ya estaba abierta`);
 
@@ -694,11 +706,416 @@ async function comprobarHoldCancelaBrecha(page, url) {
   }
 }
 
+/** Pulsa [E] hasta dejar la puerta franca; false si no lo logra. */
+async function abrirPuertaPorCompleto(page, puertaId) {
+  const leer = () =>
+    page.evaluate(
+      (id) => window.__eko?.snapshot()?.world.doors.find((puerta) => puerta.id === id) ?? null,
+      puertaId
+    );
+  for (let paso = 0; paso < 8; paso += 1) {
+    const puerta = await leer();
+    if (puerta?.isFullyOpen === true) return true;
+    await page.keyboard.press('KeyE');
+    await page.waitForTimeout(160);
+  }
+  return (await leer())?.isFullyOpen === true;
+}
+
+/** Camina en vertical hasta cruzar `objetivo` en y. */
+async function caminarHastaY(page, tecla, objetivo) {
+  await page.keyboard.down(tecla);
+  try {
+    await page.waitForFunction(
+      ({ tecla, objetivo }) => {
+        const jugador = window.__eko?.snapshot()?.player;
+        if (!jugador) return false;
+        return tecla === 'KeyW' ? jugador.y <= objetivo : jugador.y >= objetivo;
+      },
+      { tecla, objetivo },
+      { timeout: 6000 }
+    );
+  } finally {
+    await page.keyboard.up(tecla);
+  }
+  await page.waitForTimeout(150);
+}
+
+/** Grita hasta que el sospechoso suelte el arma. */
+async function rendirSospechoso(page, nombre) {
+  for (let grito = 0; grito < 8; grito += 1) {
+    await page.keyboard.press('Space');
+    await page.waitForTimeout(450);
+    const rendido = await page.evaluate(
+      (quien) =>
+        (window.__eko?.snapshot()?.radioFeed ?? []).some(
+          (linea) => linea.text.includes(quien) && /Waffe fallengelassen/.test(linea.text)
+        ),
+      nombre
+    );
+    if (rendido) return true;
+  }
+  return false;
+}
+
+/**
+ * Ruta por puertas de SUPRESIÓN desde el rellano.
+ *
+ * Con Kobra-2 en la escalera y la entrada cerrada, [7] fija como objetivo al
+ * sospechoso que el operador ve en la cocina (otra estancia). La recta desde el
+ * rellano se clavaba en la pared; ahora el binomio abre la entrada, cruza el
+ * recibidor y entra a la cocina para ejecutar la supresión.
+ *
+ * El grito previo con la puerta cerrada rinde al sospechoso: un rendido deja de
+ * abortar la marcha por «hostil en tránsito» a 260 px, así que la llegada no
+ * depende de su puntería. Se grita con la hoja puesta por la misma razón: el
+ * muro amortigua la moral y no hay fuego cruzado.
+ */
+async function comprobarSupresionDesdeRellano(page, url) {
+  try {
+    await iniciar(page, url, { asentarMs: 400 });
+    // HOLD antes de moverse: en FOLLOW el binomio sigue al operador y puede cruzar el
+    // vano durante la preparación, con lo que dejaría de estar en el rellano.
+    await page.keyboard.press('Digit2');
+    await page.waitForFunction(() => window.__eko?.snapshot()?.squad?.command === 'HOLD', undefined, {
+      timeout: 5000,
+    });
+    await abrirPuertaDeEntrada(page);
+    await acercarJugadorDerecha(page, 300);
+    if (!(await cerrarPuertaDeEntrada(page))) {
+      fail(`órdenes · supresión: ${PUERTA} no queda cerrada antes de la orden`);
+      return;
+    }
+    await acercarJugadorDerecha(page, 390);
+    await caminarHastaY(page, 'KeyW', 330);
+
+    if (!(await rendirSospechoso(page, 'Lukas'))) {
+      fail('órdenes · supresión: Lukas no se rindió con el grito antes de [7]');
+      return;
+    }
+    if (!(await abrirPuertaPorCompleto(page, 'DOOR_KITCHEN'))) {
+      fail('órdenes · supresión: la puerta de la cocina no queda franca para [7]');
+      return;
+    }
+
+    const antes = await leerEstado(page);
+    const puertaEntrada = antes?.world.doors.find((puerta) => puerta.id === PUERTA);
+    const puertaCocina = antes?.world.doors.find((puerta) => puerta.id === 'DOOR_KITCHEN');
+    const puertaSalon = antes?.world.doors.find((puerta) => puerta.id === PUERTA_CONTEXTUAL);
+    const puertaBano = antes?.world.doors.find((puerta) => puerta.id === 'DOOR_BATH');
+    if (!antes?.player || !antes.squad || !puertaEntrada || !puertaCocina || !puertaSalon) {
+      fail('órdenes · supresión: falta el jugador, Kobra-2 o alguna puerta de la ruta');
+      return;
+    }
+    if (puertaEntrada.isOpen) {
+      fail(`órdenes · supresión: ${PUERTA} ya estaba abierta antes de la orden`);
+      return;
+    }
+    if (antes.squad.x >= puertaEntrada.x2) {
+      fail(`órdenes · supresión: Kobra-2 no espera en el rellano (x ${antes.squad.x.toFixed(1)})`);
+      return;
+    }
+    const jugadorAntes = { x: antes.player.x, y: antes.player.y };
+
+    await page.keyboard.press('Digit7');
+    let objetivo = null;
+    try {
+      await page.waitForFunction(
+        () => {
+          const estado = window.__eko?.snapshot();
+          return (
+            estado?.squad?.command === 'SUPPRESS_TARGET' &&
+            estado.squad.target !== null &&
+            (estado.radioFeed ?? []).some((linea) => /\[7\]/.test(linea.text))
+          );
+        },
+        undefined,
+        { timeout: 5000 }
+      );
+      objetivo = (await leerBinomio(page))?.target ?? null;
+    } catch {
+      fail('órdenes · supresión: [7] no fijó objetivo ni anunció la orden');
+      return;
+    }
+    if (!objetivo || !(objetivo.y < puertaCocina.y1)) {
+      fail(
+        'órdenes · supresión: el objetivo de [7] no cae en otra estancia ' +
+          `(${objetivo ? `${objetivo.x.toFixed(1)}, ${objetivo.y.toFixed(1)}` : 'sin objetivo'})`
+      );
+      return;
+    }
+
+    // Recibidor deducido de las puertas que lo rodean, para ver que la ruta lo cruza.
+    const recibidor = {
+      x1: puertaEntrada.x2,
+      x2: puertaSalon.x1,
+      y1: puertaCocina.y1,
+      y2: puertaBano?.y1 ?? 540,
+    };
+    let pasoRecibidor = false;
+    let llegada = null;
+    const limite = Date.now() + 30000;
+    while (Date.now() < limite) {
+      const estado = await page.evaluate(() => window.__eko?.snapshot() ?? null);
+      const escuadra = estado?.squad ?? null;
+      if (!escuadra) break;
+      if (
+        escuadra.x > recibidor.x1 &&
+        escuadra.x < recibidor.x2 &&
+        escuadra.y > recibidor.y1 &&
+        escuadra.y < recibidor.y2
+      ) {
+        pasoRecibidor = true;
+      }
+      if ((estado.radioFeed ?? []).some((linea) => /Fuego de supresión/.test(linea.text))) {
+        llegada = escuadra;
+        break;
+      }
+      await page.waitForTimeout(120);
+    }
+    if (!llegada) {
+      const escuadra = await leerBinomio(page);
+      const puerta = await leerPuerta(page);
+      fail(
+        'órdenes · supresión: Kobra-2 no llegó a suprimir al objetivo de la cocina ' +
+          `(${escuadra ? `${escuadra.x.toFixed(1)}, ${escuadra.y.toFixed(1)}` : 'sin escuadra'}; ` +
+          `recibidor ${pasoRecibidor ? 'sí' : 'no'}; ${PUERTA} ` +
+          `${puerta ? `${puerta.isOpen ? 'abierta' : 'cerrada'}/` : '?'}` +
+          `${puerta?.isLocked ? 'con llave' : 'sin llave'})`
+      );
+      return;
+    }
+    if (Math.hypot(llegada.x - objetivo.x, llegada.y - objetivo.y) > 45) {
+      fail(
+        'órdenes · supresión: la orden se cumplió lejos del objetivo ' +
+          `(${Math.hypot(llegada.x - objetivo.x, llegada.y - objetivo.y).toFixed(1)} px)`
+      );
+      return;
+    }
+    await page.waitForFunction(
+      () => {
+        const estado = window.__eko?.snapshot();
+        return estado?.squad?.command === 'HOLD' && estado.squad.target === null;
+      },
+      undefined,
+      { timeout: 5000 }
+    );
+
+    const despues = await leerEstado(page);
+    const entradaDespues = despues?.world.doors.find((puerta) => puerta.id === PUERTA);
+    if (!entradaDespues?.isFullyOpen) {
+      fail(`órdenes · supresión: Kobra-2 no abrió ${PUERTA} para cruzar el piso`);
+      return;
+    }
+    if (!pasoRecibidor) {
+      fail('órdenes · supresión: la ruta no pasó por el recibidor entre el rellano y la cocina');
+      return;
+    }
+    // El operador no se movió: la puerta la abrió Kobra-2.
+    if (
+      Math.abs((despues?.player?.x ?? 0) - jugadorAntes.x) > 1.5 ||
+      Math.abs((despues?.player?.y ?? 0) - jugadorAntes.y) > 1.5
+    ) {
+      fail('órdenes · supresión: el operador se movió y pudo haber abierto la puerta él mismo');
+      return;
+    }
+    console.log(
+      'órdenes · supresión: con Kobra 2 en el rellano, [7] abrió la entrada, cruzó el ' +
+        'recibidor y llegó al objetivo de la cocina en vez de clavarse en la pared'
+    );
+  } catch (error) {
+    fail(`órdenes · supresión: ${error.message.split('\n')[0]}`);
+  }
+}
+
+/** Cierra la puerta de entrada con el jugador al lado; false si no lo logra. */
+async function cerrarPuertaDeEntrada(page) {
+  for (let paso = 0; paso < 8; paso += 1) {
+    const puerta = await leerPuerta(page);
+    if (puerta && puerta.isOpen === false) return true;
+    await page.keyboard.press('KeyE');
+    await page.waitForTimeout(160);
+  }
+  return (await leerPuerta(page))?.isOpen === false;
+}
+
+/**
+ * Ruta por puertas de un punto marcado en el EKO-Pad.
+ *
+ * El operador marca desde el recibidor un PUNTO DE AVANCE en el salón y Kobra-2
+ * espera en la escalera con la puerta de entrada cerrada. Para llegar tiene que
+ * abrir esa puerta, cruzar el recibidor y abrir también la del salón: la recta
+ * se clava en la pared del piso. El humo no ejercía ni [7] ni waypoints, así que
+ * esta ruta sólo estaba cubierta por los tests de motor.
+ */
+async function comprobarPuntoEnPad(page, url) {
+  try {
+    await iniciar(page, url, { asentarMs: 400 });
+    // HOLD antes de moverse: en FOLLOW el binomio sigue al operador y puede quedar ya
+    // dentro del recibidor cuando llega la orden, así que no sirve como punto de
+    // partida en la escalera.
+    await page.keyboard.press('Digit2');
+    await page.waitForFunction(() => window.__eko?.snapshot()?.squad?.command === 'HOLD', undefined, {
+      timeout: 5000,
+    });
+    await abrirPuertaDeEntrada(page);
+    await acercarJugadorDerecha(page, 300);
+    if (!(await cerrarPuertaDeEntrada(page))) {
+      fail(`órdenes · punto: ${PUERTA} no queda cerrada antes de marcar el punto`);
+      return;
+    }
+    await acercarJugadorDerecha(page, 390);
+
+    const antes = await leerEstado(page);
+    const puertaEntrada = antes?.world.doors.find((puerta) => puerta.id === PUERTA);
+    const puertaSalon = antes?.world.doors.find((puerta) => puerta.id === PUERTA_CONTEXTUAL);
+    const puertaCocina = antes?.world.doors.find((puerta) => puerta.id === 'DOOR_KITCHEN');
+    const puertaBano = antes?.world.doors.find((puerta) => puerta.id === 'DOOR_BATH');
+    if (!antes?.player || !antes.squad || !puertaEntrada || !puertaSalon) {
+      fail('órdenes · punto: falta el jugador, Kobra-2 o alguna puerta de la ruta');
+      return;
+    }
+    if (puertaEntrada.isOpen || puertaSalon.isOpen) {
+      fail('órdenes · punto: una puerta de la ruta ya estaba abierta antes de la orden');
+      return;
+    }
+    if (antes.squad.x >= puertaEntrada.x2) {
+      fail(`órdenes · punto: Kobra-2 no espera en la escalera (x ${antes.squad.x.toFixed(1)})`);
+      return;
+    }
+    const jugadorAntes = { x: antes.player.x, y: antes.player.y };
+
+    // El punto sale del EKO-Pad, no de una tecla: PUNTO DE AVANCE sobre el mapa.
+    await page.keyboard.press('KeyM');
+    const mapa = page.locator('[role="dialog"] svg.cursor-crosshair');
+    await mapa.waitFor({ state: 'visible', timeout: 8000 });
+    await page.getByRole('button', { name: /Avance GPS/ }).click();
+    await page.evaluate(() => {
+      document.querySelector('[role="dialog"] svg.cursor-crosshair')?.scrollIntoView({ block: 'center' });
+    });
+    await page.waitForTimeout(200);
+
+    // Misma proyección que el manejador del pad, así el punto cae donde se pulsa.
+    const enPantalla = await page.evaluate(({ mapaPad, punto }) => {
+      const svg = document.querySelector('[role="dialog"] svg.cursor-crosshair');
+      if (!svg) return null;
+      const caja = svg.getBoundingClientRect();
+      if (caja.width <= 0 || caja.height <= 0) return null;
+      const x = caja.left + ((punto.x - mapaPad.x) / mapaPad.w) * caja.width;
+      const y = caja.top + ((punto.y - mapaPad.y) / mapaPad.h) * caja.height;
+      return {
+        x,
+        y,
+        dentro: x > 0 && y > 0 && x < window.innerWidth && y < window.innerHeight,
+      };
+    }, { mapaPad: MAPA_PAD, punto: PUNTO_PAD });
+    if (!enPantalla?.dentro) {
+      fail('órdenes · punto: el punto del salón no cae dentro del mapa visible del pad');
+      return;
+    }
+    await page.mouse.click(enPantalla.x, enPantalla.y);
+    try {
+      await page.waitForFunction(
+        () =>
+          (window.__eko?.snapshot()?.radioFeed ?? []).some(
+            (linea) =>
+              /EKO-PAD C4I/.test(linea.speaker) &&
+              /PUNTO DE AVANCE/.test(linea.text) &&
+              /WOHNZIMMER/.test(linea.text)
+          ),
+        undefined,
+        { timeout: 4000 }
+      );
+    } catch {
+      fail('órdenes · punto: el EKO-Pad no fijó el PUNTO DE AVANCE del salón al pulsar el mapa');
+      return;
+    }
+    await page.keyboard.press('Escape');
+
+    // Recibidor deducido de las puertas que lo rodean: entre la de entrada y la
+    // del salón, de la cocina al baño. Sirve para ver que la ruta lo atraviesa.
+    const recibidor = {
+      x1: puertaEntrada.x2,
+      x2: puertaSalon.x1,
+      y1: puertaCocina?.y1 ?? 280,
+      y2: puertaBano?.y1 ?? 540,
+    };
+    let pasoRecibidor = false;
+    let llegada = null;
+    const limite = Date.now() + 30000;
+    while (Date.now() < limite) {
+      const escuadra = await page.evaluate(() => window.__eko?.snapshot()?.squad ?? null);
+      if (!escuadra) break;
+      if (
+        escuadra.x > recibidor.x1 &&
+        escuadra.x < recibidor.x2 &&
+        escuadra.y > recibidor.y1 &&
+        escuadra.y < recibidor.y2
+      ) {
+        pasoRecibidor = true;
+      }
+      if (Math.hypot(escuadra.x - PUNTO_PAD.x, escuadra.y - PUNTO_PAD.y) < 20) {
+        llegada = escuadra;
+        break;
+      }
+      await page.waitForTimeout(120);
+    }
+    if (!llegada) {
+      const escuadra = await page.evaluate(() => window.__eko?.snapshot()?.squad ?? null);
+      fail(
+        'órdenes · punto: Kobra-2 no llegó al punto del salón ' +
+          `(${escuadra ? `${escuadra.x.toFixed(1)}, ${escuadra.y.toFixed(1)}` : 'sin escuadra'}; ` +
+          `recibidor ${pasoRecibidor ? 'sí' : 'no'})`
+      );
+      return;
+    }
+
+    const despues = await leerEstado(page);
+    const entradaDespues = despues?.world.doors.find((puerta) => puerta.id === PUERTA);
+    const salonDespues = despues?.world.doors.find((puerta) => puerta.id === PUERTA_CONTEXTUAL);
+    if (!entradaDespues?.isFullyOpen || !salonDespues?.isFullyOpen) {
+      fail(
+        `órdenes · punto: el binomio no dejó franca la ruta ` +
+          `(${PUERTA} ${entradaDespues?.isFullyOpen === true}, ` +
+          `${PUERTA_CONTEXTUAL} ${salonDespues?.isFullyOpen === true})`
+      );
+      return;
+    }
+    if (!pasoRecibidor) {
+      fail('órdenes · punto: la ruta no pasó por el recibidor entre la escalera y el salón');
+      return;
+    }
+    // El operador no se movió del recibidor: las puertas las abrió Kobra-2.
+    if (
+      Math.abs((despues?.player?.x ?? 0) - jugadorAntes.x) > 1.5 ||
+      Math.abs((despues?.player?.y ?? 0) - jugadorAntes.y) > 1.5
+    ) {
+      fail('órdenes · punto: el operador se movió y pudo haber abierto las puertas él mismo');
+      return;
+    }
+    if (despues?.squad?.command !== 'HOLD' || despues.squad.target !== null) {
+      fail(
+        `órdenes · punto: la orden no terminó en HOLD sin objetivo ` +
+          `(${JSON.stringify(despues?.squad)})`
+      );
+      return;
+    }
+    console.log(
+      'órdenes · punto del pad: Kobra 2 rodeó el piso por el recibidor, abrió las dos ' +
+        'puertas y llegó al punto del salón que marcó el operador'
+    );
+  } catch (error) {
+    fail(`órdenes · punto: ${error.message.split('\n')[0]}`);
+  }
+}
+
 /** Comprueba las tres órdenes en misiones limpias. */
 export async function comprobarOrdenesEscuadron(page, { url }) {
   const fallosAntes = fallos.length;
   await comprobarBrecha(page, url);
   await comprobarSonda(page, url);
+  await comprobarPuntoEnPad(page, url);
+  await comprobarSupresionDesdeRellano(page, url);
   await comprobarHoldCancelaBrecha(page, url);
   await comprobarContextMenuPuerta(page, url);
   await comprobarArieteKobra2(page, url);
@@ -706,7 +1123,8 @@ export async function comprobarOrdenesEscuadron(page, { url }) {
   await comprobarBurbujasBinomio(page, url);
   if (fallos.length === fallosAntes) {
     console.log(
-      'órdenes · brecha, sonda, HOLD, menú contextual, ariete, C4 y burbujas del binomio verificadas'
+      'órdenes · brecha, sonda, punto del pad, supresión desde el rellano, HOLD, menú ' +
+        'contextual, ariete, C4 y burbujas del binomio verificadas'
     );
   }
 }

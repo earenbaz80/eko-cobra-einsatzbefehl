@@ -1,3 +1,5 @@
+import type { DespejeOperacion } from './clearance';
+
 export type GameState = 'TITLE' | 'PLAYING' | 'PAUSED' | 'VICTORY' | 'DEFEAT';
 
 export type EntryPointId = 'HAUPTEINGANG_A' | 'BALKON_B';
@@ -731,6 +733,8 @@ export interface HudSnapshot {
   squadVitals: SquadVitalsTelemetry;
   xpTelemetry: OperatorXpTelemetry;
   tacticalPad: TacticalPadData;
+  /** Estado de despeje por estancia, derivado para el objetivo primario. */
+  despeje: DespejeOperacion;
   activeTool: 'PRIMARY' | 'TASER' | 'GADGET';
   grenadeAimingActive?: boolean;
   primaryName: string;
