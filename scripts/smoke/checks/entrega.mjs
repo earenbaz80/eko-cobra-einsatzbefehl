@@ -58,7 +58,6 @@ async function comprobarPublicado(url) {
   }
 
   for (const [etiqueta, relativa, tipo, tope] of [
-    ['sprite', 'assets/aistudio/operador-8dir.webp', 'image/webp', PRESUPUESTO.sprite],
     ['tarjeta social', 'social-card.jpg', 'image/jpeg', PRESUPUESTO.tarjetaSocial],
   ]) {
     const respuesta = await pedir(new URL(relativa, url).href, etiqueta);
@@ -187,15 +186,6 @@ function comprobarBuildLocal() {
       if (gzip > PRESUPUESTO.entradaJsGzip) fail(`pesos: el JS de entrada pesa ${kb(gzip)} comprimido (tope ${kb(PRESUPUESTO.entradaJsGzip)})`);
       console.log(`JS de entrada: ${kb(crudo)} (${kb(gzip)} gzip)`);
     }
-  }
-
-  const sprite = join(DIST, 'assets', 'aistudio', 'operador-8dir.webp');
-  if (!existsSync(sprite)) {
-    fail('pesos: falta el sprite del operador (operador-8dir.webp)');
-  } else {
-    const peso = statSync(sprite).size;
-    if (peso > PRESUPUESTO.sprite) fail(`pesos: el sprite ocupa ${kb(peso)} (tope ${kb(PRESUPUESTO.sprite)})`);
-    else console.log(`sprite: ${kb(peso)}`);
   }
 
   const tarjeta = join(DIST, 'social-card.jpg');

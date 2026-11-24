@@ -36,8 +36,10 @@ import type { ExteriorWindowSection, FloorDecal, SnowFootprint } from '../Tactic
 import { drawPixelArtActor } from '../pixelSprites';
 import type { C4PlantingState } from '../c4Charges';
 import { createCanvas, hash2 } from './bitmap';
+import { boundsMuro, celdasMuro, lienzoMuro, rematesMuro } from './muros';
+import { ACENTOS, CONTORNO, PINCELES_ESCENA as P, TINTES as T } from './palette';
 import { BUFFER_H, BUFFER_W } from './present';
-import { TILE, fillTiles, getTile } from './tiles';
+import { LADOS_MURO, fillTiles, getTile } from './tiles';
 
 /** Lo que el renderer necesita del motor para pintar un cuadro. */
 export interface PixelScene {
@@ -115,19 +117,19 @@ function floorTileFor(room: RoomZone, missionMode: string): string {
 }
 
 const FLOOR_BASE_COLOR: Record<string, string> = {
-  snow: '#A9B8C8',
-  wood: '#4E3826',
-  stone: '#2A3441',
-  asphalt: '#181E25',
-  concrete: '#2F3741',
-  tile: '#3C4652',
+  snow: T.sueloNieve,
+  wood: P.madera.base,
+  stone: P.piedra.base,
+  asphalt: P.asfalto.base,
+  concrete: P.hormigon.base,
+  tile: P.baldosa.base,
 };
 
 function drawFloors(ctx: CanvasRenderingContext2D, scene: PixelScene, view: { x0: number; y0: number; x1: number; y1: number }) {
   for (const room of scene.rooms) {
     const tile = floorTileFor(room, scene.missionMode);
     // Base opaca: evita que las esquinas transparentes del patrón dejen huecos
-    ctx.fillStyle = FLOOR_BASE_COLOR[tile] ?? '#1B2430';
+    ctx.fillStyle = FLOOR_BASE_COLOR[tile] ?? T.sueloVacio;
     ctx.fillRect(room.x, room.y, room.w, room.h);
     // Nieve y madera alternan dos patrones; el resto repite el único que tiene.
     const variants = tile === 'snow' || tile === 'wood' ? 2 : 1;
@@ -172,13 +174,13 @@ function drawScorch(ctx: CanvasRenderingContext2D, decal: FloorDecal) {
     ctx.fill();
   }
   // Carbón: un núcleo más opaco y sin brillo, para que lea quemado y no sucio.
-  ctx.fillStyle = '#0B1220';
+  ctx.fillStyle = T.c4Cuerpo;
   ctx.globalAlpha = decal.alpha * 0.55;
   ctx.beginPath();
   ctx.ellipse(0, 0, rx * 0.55, ry * 0.55, 0, 0, Math.PI * 2);
   ctx.fill();
   // Brasas apagadas: dos píxeles cálidos en el borde, nunca un anillo.
-  ctx.fillStyle = '#92400E';
+  ctx.fillStyle = T.brasa;
   ctx.globalAlpha = decal.alpha * 0.7;
   for (let i = 0; i < 2; i++) {
     const seed = hash2(decal.y + i * 2.9, decal.x - i * 6.1);
@@ -307,12 +309,12 @@ function drawFootprints(
 
 function drawRug(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
   ctx.save();
-  ctx.fillStyle = '#3B0E19';
+  ctx.fillStyle = P.alfombra.sombra;
   ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = '#6A1F2E';
+  ctx.strokeStyle = P.alfombra.luz;
   ctx.lineWidth = 2;
   ctx.strokeRect(x + 4, y + 4, w - 8, h - 8);
-  ctx.strokeStyle = '#52182A';
+  ctx.strokeStyle = P.alfombra.base;
   ctx.lineWidth = 1;
   ctx.strokeRect(x + 9, y + 9, w - 18, h - 18);
   // Motivo de rombos
@@ -363,16 +365,16 @@ function bevelBox(
 function drawFireplace(ctx: CanvasRenderingContext2D, item: FurnitureItem, time: number) {
   const { x, y, w, h } = item;
   fillTiles(ctx, 'wall', x, y, w, h);
-  bevelBox(ctx, x, y, w, h, '#4B5865', '#0E141B');
+  bevelBox(ctx, x, y, w, h, P.muroCanto.base, P.muroCanto.sombra);
 
   // Hornacina
   const mouthW = Math.round(w * 0.5);
   const mouthH = Math.round(h * 0.48);
   const mx = x + (w - mouthW) / 2;
   const my = y + h - mouthH - 4;
-  ctx.fillStyle = '#0A0806';
+  ctx.fillStyle = P.horno.sombra;
   ctx.fillRect(mx, my, mouthW, mouthH);
-  ctx.strokeStyle = '#2A2320';
+  ctx.strokeStyle = P.horno.luz;
   ctx.strokeRect(mx - 0.5, my - 0.5, mouthW + 1, mouthH + 1);
 
   const fire = getTile('fire', Math.floor(time * 6) % 2);
@@ -386,7 +388,7 @@ function drawFireplace(ctx: CanvasRenderingContext2D, item: FurnitureItem, time:
   ctx.restore();
 
   // Repisa y hogar delantero
-  ctx.fillStyle = '#1A1512';
+  ctx.fillStyle = P.horno.base;
   ctx.fillRect(x - 4, y + h - 2, w + 8, 6);
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
   ctx.strokeRect(x - 3.5, y + h - 1.5, w + 7, 5);
@@ -396,7 +398,7 @@ function drawSofa(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
   const { x, y, w, h } = item;
   fillTiles(ctx, 'leather', x, y, w, h);
   // Respaldo con brillo de cuero
-  ctx.fillStyle = '#4A1A14';
+  ctx.fillStyle = T.cueroRespaldo;
   ctx.fillRect(x + 3, y + 2, w - 6, Math.max(6, h * 0.2));
   ctx.fillStyle = 'rgba(160, 82, 62, 0.35)';
   ctx.fillRect(x + 4, y + 2, w - 8, 2);
@@ -411,7 +413,7 @@ function drawSofa(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
   ctx.fillRect(x + 6, y + h * 0.3, w / 2 - 10, 2);
   ctx.fillRect(x + w / 2 + 4, y + h * 0.3, w / 2 - 10, 2);
   // Reposabrazos
-  ctx.fillStyle = '#4A1A14';
+  ctx.fillStyle = T.cueroRespaldo;
   ctx.fillRect(x, y, 5, h);
   ctx.fillRect(x + w - 5, y, 5, h);
   ctx.fillStyle = 'rgba(170, 90, 66, 0.3)';
@@ -422,15 +424,15 @@ function drawSofa(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
 function drawSafe(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
   const { x, y, w, h } = item;
   fillTiles(ctx, 'metal', x, y, w, h);
-  ctx.strokeStyle = '#0F151B';
+  ctx.strokeStyle = T.metalContorno;
   ctx.lineWidth = 2;
   ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
   // Rueda de combinación
-  ctx.fillStyle = '#94A3B8';
+  ctx.fillStyle = T.acero;
   ctx.beginPath();
   ctx.arc(x + w * 0.5, y + h * 0.5, Math.min(w, h) * 0.14, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = '#1E293B';
+  ctx.fillStyle = T.pizarra;
   ctx.beginPath();
   ctx.arc(x + w * 0.5, y + h * 0.5, Math.min(w, h) * 0.06, 0, Math.PI * 2);
   ctx.fill();
@@ -440,13 +442,13 @@ function drawSafe(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
 function drawBed(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
   const { x, y, w, h } = item;
   // Marco de madera
-  ctx.fillStyle = '#2A1B11';
+  ctx.fillStyle = T.camaMarco;
   ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
   fillTiles(ctx, 'bed', x, y, w, h);
   // Almohadas
-  ctx.fillStyle = '#F1F5F9';
+  ctx.fillStyle = P.papel.luz;
   ctx.fillRect(x + 6, y + 5, w * 0.34, Math.max(7, h * 0.14));
-  ctx.fillStyle = '#E2E8F0';
+  ctx.fillStyle = P.papel.base;
   ctx.fillRect(x + w * 0.52, y + 5, w * 0.34, Math.max(7, h * 0.14));
   // Manta
   ctx.fillStyle = 'rgba(120, 20, 40, 0.75)';
@@ -493,7 +495,7 @@ function drawShelf(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
     const items = Math.max(1, Math.floor(w / 26));
     for (let k = 0; k < items; k++) {
       const bx = x + 5 + k * ((w - 10) / items);
-      ctx.fillStyle = k % 2 === 0 ? '#5B4A38' : '#37505E';
+      ctx.fillStyle = k % 2 === 0 ? T.cajaA : T.cajaB;
       ctx.fillRect(bx, sy - 7, Math.min(12, (w - 10) / items - 3), 6);
       ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
       ctx.fillRect(bx, sy - 7, Math.min(12, (w - 10) / items - 3), 1);
@@ -524,12 +526,12 @@ function drawAppliance(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
   // Puerta circular tipo lavadora
   ctx.beginPath();
   ctx.arc(x + w * 0.5, y + h * 0.6, Math.min(w, h) * 0.2, 0, Math.PI * 2);
-  ctx.fillStyle = '#14181D';
+  ctx.fillStyle = T.electrodomestico;
   ctx.fill();
   ctx.strokeStyle = 'rgba(140, 160, 180, 0.45)';
   ctx.stroke();
   // Piloto
-  ctx.fillStyle = '#4ADE80';
+  ctx.fillStyle = T.ledVerde;
   ctx.fillRect(x + w - 7, y + 4, 2, 2);
   bevelBox(ctx, x, y, w, h, 'rgba(160, 180, 200, 0.45)', 'rgba(0, 0, 0, 0.65)');
 }
@@ -540,7 +542,7 @@ function drawTank(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
   const cy = y + h / 2;
   const r = Math.min(w, h) / 2;
   ctx.save();
-  ctx.fillStyle = '#8A3B1F';
+  ctx.fillStyle = P.tanque.base;
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.fill();
@@ -548,12 +550,12 @@ function drawTank(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
   ctx.beginPath();
   ctx.arc(cx - r * 0.25, cy - r * 0.25, r * 0.55, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = '#2A1208';
+  ctx.strokeStyle = P.tanque.sombra;
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.arc(cx, cy, r - 1, 0, Math.PI * 2);
   ctx.stroke();
-  ctx.fillStyle = '#C7D2DE';
+  ctx.fillStyle = T.aceroClaro;
   ctx.fillRect(cx - 3, cy - r - 3, 6, 6);
   ctx.restore();
 }
@@ -563,11 +565,11 @@ function drawPlant(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
   const cx = x + w / 2;
   const cy = y + h / 2;
   ctx.save();
-  ctx.fillStyle = '#2F3A2A';
+  ctx.fillStyle = P.planta.base;
   ctx.beginPath();
   ctx.arc(cx, cy, Math.min(w, h) * 0.42, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = '#3E5140';
+  ctx.fillStyle = P.planta.luz;
   for (let i = 0; i < 5; i++) {
     const angle = (i / 5) * Math.PI * 2;
     ctx.beginPath();
@@ -582,7 +584,7 @@ function drawPlant(ctx: CanvasRenderingContext2D, item: FurnitureItem) {
     );
     ctx.fill();
   }
-  ctx.fillStyle = '#6B4A2E';
+  ctx.fillStyle = T.maceta;
   ctx.beginPath();
   ctx.arc(cx, cy, Math.min(w, h) * 0.16, 0, Math.PI * 2);
   ctx.fill();
@@ -678,21 +680,10 @@ interface SolidRect {
   y1: number;
 }
 
-function wallBounds(wall: WallSegment): { x: number; y: number; w: number; h: number } {
-  const thickness = wall.thickness ?? TILE;
-  const horizontal = Math.abs(wall.y2 - wall.y1) < Math.abs(wall.x2 - wall.x1);
-  return {
-    x: horizontal ? Math.min(wall.x1, wall.x2) : Math.min(wall.x1, wall.x2) - thickness / 2,
-    y: horizontal ? Math.min(wall.y1, wall.y2) - thickness / 2 : Math.min(wall.y1, wall.y2),
-    w: horizontal ? Math.abs(wall.x2 - wall.x1) : thickness,
-    h: horizontal ? thickness : Math.abs(wall.y2 - wall.y1),
-  };
-}
-
 function decalSolids(scene: PixelScene): SolidRect[] {
   const solids: SolidRect[] = [];
   for (const wall of scene.walls) {
-    const { x, y, w, h } = wallBounds(wall);
+    const { x, y, w, h } = boundsMuro(wall);
     solids.push({ x0: x, y0: y, x1: x + w, y1: y + h });
   }
   for (const item of scene.furniture) {
@@ -747,7 +738,7 @@ function drawWindow(
   ctx.rotate(angle);
 
   // Vano
-  ctx.fillStyle = '#0A1018';
+  ctx.fillStyle = P.cristal.sombra;
   ctx.fillRect(0, -3.5, length, 7);
 
   if (win.isBreached) {
@@ -772,7 +763,7 @@ function drawWindow(
     ctx.fillRect(1.5, -2.5, length - 3, 5);
     ctx.fillStyle = 'rgba(226, 240, 255, 0.35)';
     ctx.fillRect(1.5, -2.5, Math.max(3, length * 0.22), 1);
-    ctx.fillStyle = '#8194A8';
+    ctx.fillStyle = P.cristal.base;
     ctx.fillRect(0.5, -3.5, 1.6, 7);
     ctx.fillRect(length - 2.1, -3.5, 1.6, 7);
     ctx.fillRect(length * 0.5 - 0.6, -3.5, 1.2, 7);
@@ -820,7 +811,7 @@ function drawDoor(ctx: CanvasRenderingContext2D, door: DoorEntity) {
   ctx.moveTo(0, 5);
   ctx.lineTo(length, 5);
   ctx.stroke();
-  ctx.fillStyle = '#3B2418';
+  ctx.fillStyle = P.puerta.base;
   ctx.fillRect(-1.5, -3, 3, 6);
   ctx.restore();
 
@@ -840,7 +831,7 @@ function drawDoor(ctx: CanvasRenderingContext2D, door: DoorEntity) {
   }
 
   // Marco
-  ctx.fillStyle = '#3B2418';
+  ctx.fillStyle = P.puerta.base;
   ctx.fillRect(door.x1 - 2, door.y1 - 3, 4, 6);
   ctx.fillRect(door.x2 - 2, door.y2 - 3, 4, 6);
 
@@ -861,17 +852,17 @@ function drawDoor(ctx: CanvasRenderingContext2D, door: DoorEntity) {
   ctx.rotate(angle);
   ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
   ctx.fillRect(0, 1, leafLength, 5);
-  ctx.fillStyle = breached ? '#4A2E1C' : '#5A3A24';
+  ctx.fillStyle = breached ? T.puertaBrecha : P.puerta.luz;
   ctx.fillRect(0, -3, leafLength, 6);
-  ctx.fillStyle = breached ? '#7A522E' : '#8B5A34';
+  ctx.fillStyle = breached ? T.puertaAstilla : P.puerta.brillo;
   ctx.fillRect(1, -2, Math.max(1, leafLength - 3), 1);
-  ctx.fillStyle = '#2A1810';
+  ctx.fillStyle = P.puerta.sombra;
   ctx.fillRect(0, 2, leafLength, 1);
 
   // Pomo y cerradura: marcas de canto, no objetos de una cara vertical. El
   // acero separa el pomo del amarillo del C4, que se planta en la misma hoja;
   // el candado ya lo dice la pestaña ámbar, sin un segundo marrón casi igual.
-  ctx.fillStyle = '#94A3B8';
+  ctx.fillStyle = T.acero;
   ctx.fillRect(Math.max(1, leafLength - 4), -1, 2, 2);
   if (door.isLocked) {
     ctx.fillStyle = 'rgba(217, 119, 6, 0.85)';
@@ -1064,15 +1055,15 @@ function drawPlantProgress(
   ctx.fillRect(x + width - 1, y, 1, height);
 
   const barW = width - 4;
-  ctx.fillStyle = '#1E293B';
+  ctx.fillStyle = T.pizarra;
   ctx.fillRect(x + 2, y + 2, barW, 3);
-  ctx.fillStyle = '#EF4444';
+  ctx.fillStyle = ACENTOS.amenaza;
   ctx.fillRect(x + 2, y + 2, Math.round(barW * ratio), 3);
   // Ticks: el relleno se lee como gauge aunque la luz apague el color.
   ctx.fillStyle = 'rgba(8, 12, 17, 0.55)';
   for (let tick = 4; tick < barW; tick += 4) ctx.fillRect(x + 2 + tick, y + 2, 1, 3);
 
-  drawPixelText(ctx, label, x + (width - pixelTextWidth(label)) / 2, y + 6, '#FCA5A5');
+  drawPixelText(ctx, label, x + (width - pixelTextWidth(label)) / 2, y + 6, P.c4.brillo);
 }
 
 /** La carga en las manos, unas décimas antes de quedar apoyada. */
@@ -1088,17 +1079,17 @@ function drawHeldCharge(
   ctx.rotate(angle);
   ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
   ctx.fillRect(-4.2, -3.4, 9.2, 8.6);
-  ctx.fillStyle = '#0B1220';
+  ctx.fillStyle = T.c4Cuerpo;
   ctx.fillRect(-4.6, -4.6, 9.2, 8.6);
-  ctx.fillStyle = '#D9A21B';
+  ctx.fillStyle = P.c4.base;
   ctx.fillRect(-3.8, -3.8, 2.9, 6);
   ctx.fillRect(0.9, -3.8, 2.9, 6);
-  ctx.fillStyle = '#F2C14E';
+  ctx.fillStyle = P.c4.luz;
   ctx.fillRect(-3.8, -3.8, 2.9, 1.1);
   ctx.fillRect(0.9, -3.8, 2.9, 1.1);
   ctx.fillStyle = 'rgba(148, 163, 184, 0.8)';
   ctx.fillRect(-0.9, -4.6, 1.8, 8.6);
-  ctx.fillStyle = Math.floor(time * 6) % 2 === 0 ? '#EF4444' : '#7F1D1D';
+  ctx.fillStyle = Math.floor(time * 6) % 2 === 0 ? ACENTOS.amenaza : P.c4.sombra;
   ctx.fillRect(-1.9, -5.4, 1.6, 1);
   ctx.restore();
 }
@@ -1177,15 +1168,15 @@ function drawCharge(
 
   // Cuerpo sobre la cara del listón: el anclaje está en su canto y el estuche
   // se mete 1.4 px en la hoja, así se apoya en la puerta y no flota al lado.
-  ctx.fillStyle = '#0B1220';
+  ctx.fillStyle = T.c4Cuerpo;
   ctx.fillRect(CHARGE_BOX.x, CHARGE_BOX.y, CHARGE_BOX.w, CHARGE_BOX.h);
-  ctx.fillStyle = '#1E293B';
+  ctx.fillStyle = T.pizarra;
   ctx.fillRect(-3.9, -6.5, 7.8, 7.4);
   // Dos bloques de explosivo con un hueco en medio: lectura de carga, no caja.
-  ctx.fillStyle = '#D9A21B';
+  ctx.fillStyle = P.c4.base;
   ctx.fillRect(-3.4, -6, 2.9, 6);
   ctx.fillRect(0.5, -6, 2.9, 6);
-  ctx.fillStyle = '#F2C14E';
+  ctx.fillStyle = P.c4.luz;
   ctx.fillRect(-3.4, -6, 2.9, 1.1);
   ctx.fillRect(0.5, -6, 2.9, 1.1);
 
@@ -1195,15 +1186,15 @@ function drawCharge(
   ctx.fillRect(-0.8, -7.2, 1.6, 14);
   ctx.fillStyle = 'rgba(226, 232, 240, 0.4)';
   ctx.fillRect(-0.8, -7.2, 1.6, 1);
-  ctx.fillStyle = '#0B1220';
+  ctx.fillStyle = T.c4Cuerpo;
   ctx.fillRect(-1.4, -1.6, 2.8, 2.4);
-  ctx.fillStyle = '#64748B';
+  ctx.fillStyle = T.gris;
   ctx.fillRect(-1.2, -1.4, 2.4, 2);
 
   // Detonador en el canto exterior, de cara al operador, con su LED.
-  ctx.fillStyle = '#0B1220';
+  ctx.fillStyle = T.c4Cuerpo;
   ctx.fillRect(-1.9, -8.4, 3.8, 1.4);
-  ctx.fillStyle = '#334155';
+  ctx.fillStyle = T.pizarraAlta;
   ctx.fillRect(-1.5, -8.2, 3, 1);
 
   const ledOn = Math.floor(time * 3) % 2 === 0;
@@ -1213,7 +1204,7 @@ function drawCharge(
     ctx.arc(0, -7.6, 2.2, 0, Math.PI * 2);
     ctx.fill();
   }
-  ctx.fillStyle = ledOn ? '#EF4444' : '#7F1D1D';
+  ctx.fillStyle = ledOn ? ACENTOS.amenaza : P.c4.sombra;
   ctx.beginPath();
   ctx.arc(0, -7.6, 1.1, 0, Math.PI * 2);
   ctx.fill();
@@ -1222,45 +1213,37 @@ function drawCharge(
 }
 
 function drawWalls(ctx: CanvasRenderingContext2D, scene: PixelScene, view: { x0: number; y0: number; x1: number; y1: number }) {
-  const snowCap = scene.missionMode === 'TIROL';
+  const nieve = scene.missionMode === 'TIROL';
+  const celdas = celdasMuro(scene.walls);
 
   for (const wall of scene.walls) {
-    const { x, y, w, h } = wallBounds(wall);
+    const b = boundsMuro(wall);
 
-    if (x + w < view.x0 || x > view.x1 || y + h < view.y0 || y > view.y1) continue;
+    if (b.x + b.w < view.x0 || b.x > view.x1 || b.y + b.h < view.y0 || b.y > view.y1) continue;
 
-    // Sombra proyectada del muro (hacia abajo-derecha, luz superior izquierda)
+    // Sombra proyectada del muro (hacia abajo-derecha, luz superior izquierda).
+    // Las celdas se pintan encima, así que solo asoma la franja de fuera.
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.fillRect(x + 5, y + 7, w, h);
+    ctx.fillRect(b.x + 5, b.y + 7, b.w, b.h);
 
-    fillTiles(ctx, 'wall', x, y, w, h);
-
-    // Canto superior iluminado + nieve acumulada
-    ctx.fillStyle = '#5A6878';
-    ctx.fillRect(x, y, w, 2);
-    if (snowCap) {
-      ctx.fillStyle = '#DCE7F2';
-      ctx.fillRect(x, y - 1, w, 2);
-      ctx.fillStyle = 'rgba(182, 199, 216, 0.9)';
-      ctx.fillRect(x, y + 1, w, 1);
-    }
-    // Base en sombra
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-    ctx.fillRect(x, y + h - 3, w, 3);
-
-    // AO en esquinas/uniones de muros (oscurece los encuentros entre muros)
+    // Auto-tiling: una variante por máscara de vecinos. El recorte es por muro
+    // para que una celda parcial no invada el hueco de una puerta.
     ctx.save();
-    for (const pt of [
-      { px: wall.x1, py: wall.y1 },
-      { px: wall.x2, py: wall.y2 },
-    ]) {
-      const g = ctx.createRadialGradient(pt.px, pt.py, 0, pt.px, pt.py, 16);
-      g.addColorStop(0, 'rgba(0, 0, 0, 0.6)');
-      g.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(pt.px, pt.py, 16, 0, Math.PI * 2);
-      ctx.fill();
+    ctx.beginPath();
+    ctx.rect(b.x, b.y, b.w, b.h);
+    ctx.clip();
+    for (const celda of celdas.celdas(wall)) {
+      ctx.drawImage(lienzoMuro(celda.mascara), celda.x, celda.y);
+      // Nieve acumulada solo en el borde libre: nunca en una unión interior.
+      if (nieve && (celda.mascara & LADOS_MURO.norte) === 0) {
+        ctx.fillStyle = P.nieve.brillo;
+        ctx.fillRect(celda.x, celda.y, celda.w, 2);
+      }
+    }
+    // El remate cierra el borde suelto aunque la última celda quede recortada.
+    ctx.fillStyle = CONTORNO;
+    for (const remate of rematesMuro(b, celdas.cubre)) {
+      ctx.fillRect(remate.x, remate.y, remate.w, remate.h);
     }
     ctx.restore();
   }
@@ -1466,7 +1449,7 @@ function drawLighting(
     lctx.beginPath();
     lctx.arc(fx, fy, radius, 0, Math.PI * 2);
     lctx.fill();
-    glowSources.push({ x: fx, y: fy, radius: radius * 0.7, color: '#F59E0B' });
+    glowSources.push({ x: fx, y: fy, radius: radius * 0.7, color: ACENTOS.advertencia });
   }
 
   lctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1601,7 +1584,7 @@ export function renderScene(
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.imageSmoothingEnabled = false;
-  ctx.fillStyle = '#05080D';
+  ctx.fillStyle = CONTORNO;
   ctx.fillRect(0, 0, BUFFER_W, BUFFER_H);
 
   ctx.save();

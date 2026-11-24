@@ -4,19 +4,30 @@
  * Cada patrón es una rejilla de 8x8 caracteres con su paleta; el motor de
  * `bitmap.ts` los rasteriza y los repite con volteos. Las claves son las que
  * piden los pintores de `scene.ts` (suelo de cada tipo de sala, muro, muebles).
+ *
+ * Los muros no se repiten con volteos: se piden por máscara de vecinos. Las 16
+ * variantes de `muro` llevan el caparazón iluminado (cap) en el borde libre
+ * norte, el zócalo en sombra en el sur y el canto en los laterales, así que un
+ * encuentro en L, una T o un extremo suelto se leen sin gradientes.
+ *
+ * Ningún color se escribe aquí: todos salen de `palette.ts`.
  */
 
 import { art, createTileSet, type PixelArt } from './bitmap';
+import { CONTORNO, PINCELES_ESCENA, TINTES } from './palette';
 
 export const TILE = 16; // tamaño de baldosa en unidades de mundo
 export const ART_SCALE = 2; // cada píxel de arte mide 2x2 en el buffer
+
+const { asfalto, baldosa, cama, cuero, fuego, hormigon, madera, metal, muro, muroCanto, nieve, piedra } =
+  PINCELES_ESCENA;
 
 /* ------------------------------------------------------------------ */
 /* Arte: patrones de 8x8 píxeles autorizados a mano                    */
 /* ------------------------------------------------------------------ */
 
 const SNOW_ART = art(
-  { a: '#9FB2C4', b: '#C2D2E2', c: '#8FA3B6', d: '#DBE7F2' },
+  { a: nieve.base, b: nieve.luz, c: nieve.sombra, d: nieve.brillo },
   [
     '..bbb...',
     '.bbdbb..',
@@ -30,7 +41,7 @@ const SNOW_ART = art(
 );
 
 const SNOW_DRIFT_ART = art(
-  { a: '#9FB2C4', b: '#C2D2E2', c: '#8FA3B6', d: '#DBE7F2' },
+  { a: nieve.base, b: nieve.luz, c: nieve.sombra, d: nieve.brillo },
   [
     'bbbbbbb.',
     'bbdbbbb.',
@@ -44,7 +55,7 @@ const SNOW_DRIFT_ART = art(
 );
 
 const WOOD_ART = art(
-  { a: '#4E3826', b: '#63492F', c: '#2B1D13', d: '#5A4029', e: '#3E2B1C' },
+  { a: madera.base, b: madera.luz, c: madera.sombra, d: madera.brillo, e: TINTES.maderaVeta },
   [
     'cccccccc',
     'baaaaaab',
@@ -58,7 +69,7 @@ const WOOD_ART = art(
 );
 
 const WOOD_ART_B = art(
-  { a: '#4E3826', b: '#63492F', c: '#2B1D13', d: '#5A4029', e: '#3E2B1C' },
+  { a: madera.base, b: madera.luz, c: madera.sombra, d: madera.brillo, e: TINTES.maderaVeta },
   [
     'cccccccc',
     'baaaaaab',
@@ -72,7 +83,7 @@ const WOOD_ART_B = art(
 );
 
 const STONE_FLOOR_ART = art(
-  { a: '#2A3441', b: '#1D2531', c: '#33404F', d: '#3D4B5A' },
+  { a: piedra.base, b: piedra.sombra, c: piedra.luz, d: piedra.brillo },
   [
     'aaaaaaab',
     'acaacaab',
@@ -85,22 +96,8 @@ const STONE_FLOOR_ART = art(
   ]
 );
 
-const WALL_ART = art(
-  { a: '#39434F', b: '#1A2029', c: '#2C3540', d: '#46525F' },
-  [
-    'aabaaaba',
-    'aabaaabd',
-    'bbbbbbbb',
-    'aaaaaaaa',
-    'abaaaaba',
-    'abaaaaba',
-    'bbbbbbbb',
-    'cccccccc',
-  ]
-);
-
 const LEATHER_ART = art(
-  { a: '#5E241C', b: '#6E2C22', c: '#8A3B2C', d: '#3A1410' },
+  { a: cuero.base, b: cuero.luz, c: cuero.brillo, d: cuero.sombra },
   [
     'bbbbbbbb',
     'bccbbbbd',
@@ -114,7 +111,7 @@ const LEATHER_ART = art(
 );
 
 const METAL_ART = art(
-  { a: '#2E3742', b: '#3E4A57', c: '#55636F', d: '#20262E' },
+  { a: metal.base, b: metal.luz, c: metal.brillo, d: metal.sombra },
   [
     'bbbbbbbc',
     'bddddddb',
@@ -128,7 +125,7 @@ const METAL_ART = art(
 );
 
 const BED_ART = art(
-  { a: '#C9CDD6', b: '#AEB4BF', c: '#8F95A1', d: '#E4E8EE' },
+  { a: cama.luz, b: cama.base, c: cama.sombra, d: cama.brillo },
   [
     'dddddddd',
     'dbbbbbbd',
@@ -142,7 +139,7 @@ const BED_ART = art(
 );
 
 const ASPHALT_ART = art(
-  { a: '#181E25', b: '#1F262E', c: '#0E1318', d: '#262E37' },
+  { a: asfalto.base, b: asfalto.luz, c: asfalto.sombra, d: asfalto.brillo },
   [
     'abaaaaba',
     'aaaaadaa',
@@ -156,7 +153,7 @@ const ASPHALT_ART = art(
 );
 
 const CONCRETE_ART = art(
-  { a: '#2F3741', b: '#3A434E', c: '#262D35', d: '#454F5B' },
+  { a: hormigon.base, b: hormigon.luz, c: hormigon.sombra, d: hormigon.brillo },
   [
     'aaaaaaab',
     'aadaaaaa',
@@ -170,7 +167,7 @@ const CONCRETE_ART = art(
 );
 
 const TILE_ART = art(
-  { a: '#3C4652', b: '#48535F', c: '#2A323C', d: '#555F6C' },
+  { a: baldosa.base, b: baldosa.luz, c: baldosa.sombra, d: baldosa.brillo },
   [
     'cccccccc',
     'cdbbbbbc',
@@ -184,7 +181,7 @@ const TILE_ART = art(
 );
 
 const FIRE_ART = art(
-  { a: '#F59E0B', b: '#FDE68A', c: '#DC2626', d: '#7C2D12', e: '#B45309' },
+  { a: fuego.luz, b: fuego.brillo, c: TINTES.ascuas, d: fuego.sombra, e: fuego.base },
   [
     '...dd...',
     '..dcb...',
@@ -198,7 +195,7 @@ const FIRE_ART = art(
 );
 
 const FIRE_ART_B = art(
-  { a: '#F59E0B', b: '#FDE68A', c: '#DC2626', d: '#7C2D12', e: '#B45309' },
+  { a: fuego.luz, b: fuego.brillo, c: TINTES.ascuas, d: fuego.sombra, e: fuego.base },
   [
     '..dd....',
     '..dcb...',
@@ -211,11 +208,87 @@ const FIRE_ART_B = art(
   ]
 );
 
+/* ------------------------------------------------------------------ */
+/* Muros: 16 variantes por máscara de vecinos                          */
+/* ------------------------------------------------------------------ */
+
+/** Bits de `arteMuro`: un bit encendido es un vecino del mismo material. */
+export const LADOS_MURO = {
+  norte: 1,
+  este: 2,
+  sur: 4,
+  oeste: 8,
+} as const;
+
+export const MASCARAS_MURO = 16;
+
+/** Ladrillo base: juntas verticales alternadas y hiladas de mortero. */
+const CUERPO_MURO = [
+  'blbsbbbb',
+  'bbbsbbbb',
+  'bbbsbbbb',
+  'ssssssss',
+  'bbbbbbls',
+  'bbbbbbbs',
+  'bbbbbbbs',
+  'ssssssss',
+];
+
+const COLORES_MURO: Record<string, string> = {
+  b: muro.base,
+  l: muro.luz,
+  r: muro.brillo,
+  s: muro.sombra,
+  c: muroCanto.base,
+  C: muroCanto.luz,
+  k: muroCanto.sombra,
+  '#': CONTORNO,
+};
+
+/**
+ * Baldosa de muro para una máscara de vecinos. El cap (filas 0-1) solo aparece
+ * cuando no hay muro al norte; el zócalo (filas 6-7) cuando no lo hay al sur; y
+ * los cantos laterales cuando la celda queda expuesta a este u oeste.
+ */
+export function arteMuro(mascara: number): PixelArt {
+  const m = ((Math.round(mascara) % MASCARAS_MURO) + MASCARAS_MURO) % MASCARAS_MURO;
+  const filas = CUERPO_MURO.map((fila) => fila.split(''));
+  const abierto = (lado: number): boolean => (m & lado) === 0;
+
+  if (abierto(LADOS_MURO.norte)) {
+    filas[0] = Array(8).fill('C');
+    filas[1] = Array(8).fill('c');
+  }
+  if (abierto(LADOS_MURO.sur)) {
+    filas[6] = Array(8).fill('s');
+    filas[7] = Array(8).fill('#');
+  }
+  if (abierto(LADOS_MURO.oeste)) {
+    for (let y = 1; y < 7; y++) {
+      filas[y][0] = 'k';
+      if (y > 1 && y < 6) filas[y][1] = 'l';
+    }
+    filas[1][0] = '#';
+  }
+  if (abierto(LADOS_MURO.este)) {
+    for (let y = 1; y < 7; y++) {
+      filas[y][7] = '#';
+      if (y > 1 && y < 6) filas[y][6] = 's';
+    }
+  }
+
+  return art(COLORES_MURO, filas.map((fila) => fila.join('')));
+}
+
+const VARIANTES_MURO = Array.from({ length: MASCARAS_MURO }, (_, mascara) => arteMuro(mascara));
+
 const TILES: Record<string, PixelArt[]> = {
   snow: [SNOW_ART, SNOW_DRIFT_ART],
   wood: [WOOD_ART, WOOD_ART_B],
   stone: [STONE_FLOOR_ART],
-  wall: [WALL_ART],
+  muro: VARIANTES_MURO,
+  // Muro interior para el hogar de la chimenea: cuerpo macizo, sin bordes.
+  wall: [arteMuro(15)],
   leather: [LEATHER_ART],
   metal: [METAL_ART],
   bed: [BED_ART],

@@ -63,12 +63,12 @@ export const SEMILLA_E2E_TEXTO = `0x${SEMILLA_E2E.toString(16)}`;
 // entrada, 455 → 490 kB) y volvió a bajar a 1725 KiB al optimizar el emblema del
 // título: era el asset más grande del build (106 KiB de SVG de Inkscape) y ahora
 // son 56 KiB sin diferencia visible a los 96×112 px en que se muestra. El build
-// queda en 1675 KiB: los binarios pesados son sprite 396, tarjeta social 122 y
-// textura del battlemap 80. Si un asset crece de verdad, se sube aquí a mano.
+// quedó holgado al pasar el sprite del operador a píxeles nativos (sin hoja de
+// 560 px); los binarios pesados son la tarjeta social y la textura del battlemap.
+// Si un asset crece de verdad, se sube aquí a mano.
 export const PRESUPUESTO = {
   entradaJs: 490 * 1024,
   entradaJsGzip: 170 * 1024,
-  sprite: 450 * 1024,
   tarjetaSocial: 150 * 1024,
   dist: 1725 * 1024,
   // `arranque` no es el peso de dist/ sino lo que el navegador baja antes de poder

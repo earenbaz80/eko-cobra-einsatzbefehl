@@ -1,37 +1,8 @@
 import { ActorEntity, AlertLevel, PrimaryWeaponId } from './types';
+import { dibujarOperador, fogonazoOperador, lienzoOperador, type ArmaOperador } from './pixelArt/operador';
 
 // Multi-Frame Pixel Art Sprite Sheet Engine for EKO COBRA - EINSATZBEFEHL
 // Supports 4-frame walk/stance cycles driven by movement velocity and alert state (CALM | READY | COMBAT)
-
-// Hoja de 8 direcciones del operador (4 columnas x 2 filas de 560x560 px).
-const EKO_SPRITE_URL = `${import.meta.env.BASE_URL}assets/aistudio/operador-8dir.webp`;
-
-let ekoSpriteImage: HTMLImageElement | null = null;
-
-/** La hoja solo se usa ya decodificada; mientras carga, el actor cae al sprite procedural. */
-function getEkoSpriteImage(): HTMLImageElement | null {
-  if (typeof window === 'undefined') return null;
-  if (!ekoSpriteImage) {
-    ekoSpriteImage = new Image();
-    ekoSpriteImage.src = EKO_SPRITE_URL;
-  }
-  return ekoSpriteImage.complete && ekoSpriteImage.naturalWidth > 0 ? ekoSpriteImage : null;
-}
-
-// 8-Direction Frame Map for the original EKO Cobra operator sprite sheet
-// (4 cols x 2 rows, 560x560 per frame)
-// Row 0: Col 0 = South (Down), Col 1 = West (Left), Col 2 = East (Right), Col 3 = North (Up)
-// Row 1: Col 0 = South-West, Col 1 = South-East, Col 2 = North-West, Col 3 = North-East
-const EKO_8DIR_FRAMES: Record<number, { row: number; col: number; baseAngle: number }> = {
-  0: { row: 0, col: 2, baseAngle: 0 },                  // East (0 rad) -> gun pointing Right
-  1: { row: 1, col: 1, baseAngle: Math.PI / 4 },        // South-East (45 deg) -> gun pointing Down-Right
-  2: { row: 0, col: 0, baseAngle: Math.PI / 2 },        // South (90 deg) -> gun pointing Down
-  3: { row: 1, col: 0, baseAngle: (3 * Math.PI) / 4 },  // South-West (135 deg) -> gun pointing Down-Left
-  4: { row: 0, col: 1, baseAngle: Math.PI },            // West (180 deg) -> gun pointing Left
-  5: { row: 1, col: 2, baseAngle: (5 * Math.PI) / 4 },  // North-West (225 deg) -> gun pointing Up-Left
-  6: { row: 0, col: 3, baseAngle: (3 * Math.PI) / 2 },  // North (270 deg) -> gun pointing Up
-  7: { row: 1, col: 3, baseAngle: (7 * Math.PI) / 4 },  // North-East (315 deg) -> gun pointing Up-Right
-};
 
 type PaletteMap = Record<string, string>;
 
@@ -75,114 +46,6 @@ const PALETTE: PaletteMap = {
   'Y': '#FDE047', // Blonde hair / Cuffs gold
   'E': '#34D399', // Optic Sonar Green
 };
-
-// Base 16x16 grids for Kobra Operators with Alert State & Frame variations
-function buildKobraGrid(
-  weaponType: 'AUG' | 'MP7' | 'SHIELD' | 'TASER',
-  isSquadmate: boolean,
-  alertLevel: AlertLevel,
-  frame: number,
-  isFiring: boolean
-): string[] {
-  const patch = isSquadmate ? 'b' : 'B';
-  // Alert state changes visor/laser pixel: CALM = 'N', READY = 'G' (emerald NVG), COMBAT = 'O' (amber combat strobe)
-  const optic = alertLevel === 'COMBAT' ? 'O' : alertLevel === 'READY' ? 'G' : 'N';
-  // Frame 0..3 shifts shoulder/arm stance slightly for dynamic CQB movement
-  const leftShoulderShift = frame === 1 ? 'u' : 'U';
-  const rightShoulderShift = frame === 3 ? 'u' : 'U';
-
-  if (weaponType === 'SHIELD') {
-    return [
-      '....#####...###.',
-      `...#${leftShoulderShift}UUUU#.#wV#.`,
-      '..#UU###UU##wV#.',
-      '..#U#VVV#UU#wV#.',
-      '.#U#VhhhV###wV#.',
-      `.#U#hHHHh${optic}.#wV#.`,
-      `.#U#hH${patch}${patch}h${optic}.#wV#.`,
-      `.#U#hHHHh${optic}.#wV#.`,
-      '.#U#VhhhV#S#wV#.',
-      isFiring ? '.#U#VVPVV#WWWWF.' : '.#U#VVPVV#WWWW#.',
-      '..#U#VVV#U##wV#.',
-      '..#UU###UU##wV#.',
-      `...#${rightShoulderShift}UUUU#.#wV#.`,
-      '....#####...###.',
-      '................',
-      '................',
-    ];
-  }
-
-  if (weaponType === 'TASER') {
-    return [
-      '....#####.......',
-      `...#${leftShoulderShift}UUUU#......`,
-      '..#UU###UU#.....',
-      '..#U#VVV#U#.....',
-      '.#U#VhhhV#U#....',
-      '.#U#hHHHh#S#....',
-      `.#U#hH${patch}${patch}h${optic}#TTT#.`,
-      isFiring ? `.#U#hHHHh${optic}#TTTF.` : `.#U#hHHHh${optic}#TTTG.`,
-      '.#U#VhhhV#S####.',
-      '.#U#VVPVV#......',
-      '..#U#VVV#U#.....',
-      '..#UU###UU#.....',
-      `...#${rightShoulderShift}UUUU#......`,
-      '....#####.......',
-      '................',
-      '................',
-    ];
-  }
-
-  if (weaponType === 'MP7') {
-    // Low-ready when CALM, shouldered high-ready when READY or COMBAT
-    const barrelRow = isFiring ? `.#U#hHHHh${optic}#WWWWF` : `.#U#hHHHh${optic}#WWWW.`;
-    return [
-      '....#####.......',
-      `...#${leftShoulderShift}UUUU#......`,
-      '..#UU###UU#.....',
-      '..#U#VVV#U##....',
-      '.#U#VhhhV#UU#...',
-      '.#U#hHHHh####...',
-      `.#U#hH${patch}${patch}h${optic}#WW#..`,
-      barrelRow,
-      '.#U#VhhhV#S##...',
-      '.#U#VVPVV#......',
-      '..#U#VVV#U#.....',
-      '..#UU###UU#.....',
-      `...#${rightShoulderShift}UUUU#......`,
-      '....#####.......',
-      '................',
-      '................',
-    ];
-  }
-
-  // Default: Steyr AUG A3 / AUG Para
-  // In COMBAT or READY, rifle is shouldered tight; when firing, muzzle spark 'F' appears
-  const augBarrel = isFiring
-    ? `.#U#hHHHh${optic}#AAWWF`
-    : alertLevel === 'CALM'
-      ? `.#U#hHHHh${optic}#AAWW.`
-      : `.#U#hHHHh${optic}#AAWWW`;
-
-  return [
-    '....#####.......',
-    `...#${leftShoulderShift}UUUU#......`,
-    '..#UU###UU#.....',
-    '..#U#VVV#U##....',
-    '.#U#VhhhV#UU#...',
-    '.#U#hHHHh####...',
-    `.#U#hH${patch}${patch}h${optic}#AA###`,
-    augBarrel,
-    '.#U#VhhhV#S#W###',
-    '.#U#VVPVV#S#....',
-    '..#U#VVV#U#.....',
-    '..#UU###UU#.....',
-    `...#${rightShoulderShift}UUUU#......`,
-    '....#####.......',
-    '................',
-    '................',
-  ];
-}
 
 // Suspect Armed (with CALM patrol stance vs READY/COMBAT aiming stance)
 function buildSuspectArmedGrid(
@@ -420,16 +283,23 @@ export function drawPixelArtActor(
   const alertLevel: AlertLevel = actor.alertLevel ?? 'READY';
   const isFiring = (actor.recoilTimer ?? 0) > 0;
 
-  // 1. Contact shadow under the actor (soft edge, pixel art stays crisp above)
+  // 1. Sombra de contacto bajo el actor, ajustada al cuerpo de 48 px: una elipse
+  //    mayor que el sprite lo hacía parecer flotando sobre una mancha.
   ctx.imageSmoothingEnabled = true;
-  ctx.fillStyle = 'rgba(4, 7, 12, 0.48)';
+  ctx.fillStyle = 'rgba(4, 7, 12, 0.42)';
   ctx.beginPath();
-  ctx.ellipse(0, 10, 16, 7, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, 8, 13, 5.5, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.imageSmoothingEnabled = false;
 
   // 2. Multi-Frame Animated Pixel Boots (4-frame walk cycle scaled by movement velocity)
-  if (actor.state !== 'DEAD' && actor.state !== 'ARRESTED') {
+  //    Solo para los actores procedurales: el operador pinta sus propias piernas.
+  if (
+    actor.role !== 'PLAYER' &&
+    actor.role !== 'SQUAD' &&
+    actor.state !== 'DEAD' &&
+    actor.state !== 'ARRESTED'
+  ) {
     const isMoving = speed > 6;
     // Frame 0: neutral, Frame 1: left forward / right back, Frame 2: neutral, Frame 3: right forward / left back
     let leftOffset = 0;
@@ -461,129 +331,104 @@ export function drawPixelArtActor(
   let grid: string[] = [];
 
   if (actor.role === 'PLAYER' || actor.role === 'SQUAD') {
-    const ekoImg = getEkoSpriteImage();
-    if (ekoImg) {
-      const normAngle = (actor.angle % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
-      const dirIndex = Math.floor(((normAngle + Math.PI / 8) % (Math.PI * 2)) / (Math.PI / 4)) % 8;
-      const frameData = EKO_8DIR_FRAMES[dirIndex] || { row: 0, col: 2, baseAngle: 0 };
-      const sw = 560;
-      const sh = 560;
-      const sx = frameData.col * sw;
-      const sy = frameData.row * sh;
-      const baseAngle = frameData.baseAngle;
-
-      // Micro-angle rotation so the weapon barrel precisely matches actor.angle at 360 degrees
-      let deltaAngle = actor.angle - baseAngle;
-      while (deltaAngle > Math.PI) deltaAngle -= Math.PI * 2;
-      while (deltaAngle < -Math.PI) deltaAngle += Math.PI * 2;
-      ctx.rotate(deltaAngle);
-
-      if (actor.state === 'DEAD') {
-        ctx.globalAlpha = 0.65;
-      }
-
-      // Dynamic leg-trauma limp tilt
-      const bh = actor.bodyHealth;
-      if (bh && bh.legs < 75 && speed > 5 && actor.state !== 'DEAD' && actor.state !== 'ARRESTED') {
-        const limpSeverity = (75 - bh.legs) / 75;
-        const limpTilt = Math.sin(elapsedTime * 11) * (0.14 + limpSeverity * 0.18);
-        ctx.rotate(limpTilt);
-      }
-
-      // Ballistic hit reaction
-      const hitTimer = actor.hitReactionTimer ?? 0;
-      if (hitTimer > 0) {
-        const hitNorm = Math.min(1, hitTimer / 0.28);
-        const relHitAngle = (actor.hitAngle ?? actor.angle) - actor.angle;
-        const joltMag = Math.sin(hitNorm * Math.PI) * 6.5;
-        const hitJoltX = Math.cos(relHitAngle) * joltMag;
-        const hitJoltY = Math.sin(relHitAngle) * joltMag;
-        const flinchRot = Math.sin(hitNorm * Math.PI * 3) * 0.26 * hitNorm;
-        ctx.translate(hitJoltX, hitJoltY);
-        ctx.rotate(flinchRot);
-        const squash = Math.sin(hitNorm * Math.PI) * 0.16;
-        ctx.scale(1 - squash, 1 + squash * 0.85);
-      }
-
-      // Subtle breathing idle animation
-      if (actor.state !== 'DEAD' && actor.state !== 'ARRESTED') {
-        const breathCycle = Math.sin(elapsedTime * 2.5) * 0.035;
-        ctx.scale(1 + breathCycle * 0.5, 1 + breathCycle);
-      }
-
-      const recoilShift = isFiring ? -3 : 0;
-      const size = 52;
-      ctx.drawImage(ekoImg, sx, sy, sw, sh, -size / 2 + recoilShift, -size / 2, size, size);
-
-      // Distinct Call-sign Patch on Operator Shoulder
-      const isSquad = actor.role === 'SQUAD';
-      const patchColor = isSquad ? '#38BDF8' : '#0284C7';
-      ctx.fillStyle = patchColor;
-      ctx.fillRect(-size / 2 + 13, -size / 2 + 12, 4, 3);
-
-      // Dynamic Muzzle Spark when firing
-      if (isFiring) {
-        ctx.fillStyle = '#FEF08A';
-        ctx.fillRect(size / 2 - 4, -2, 6, 4);
-      }
-
-      // Hit Flash Overlay
-      const flashTimer = actor.hitFlashTimer ?? 0;
-      if (flashTimer > 0) {
-        const flashRatio = Math.min(1, flashTimer / 0.14);
-        const hitType = actor.lastHitType ?? 'BLOOD';
-        ctx.save();
-        const primaryFlash = hitType === 'TASER' ? '#38BDF8' : hitType === 'ARMOR' ? '#FBBF24' : '#EF4444';
-        const coreFlash = hitType === 'TASER' ? '#E0F2FE' : hitType === 'ARMOR' ? '#FEF08A' : '#FCA5A5';
-        ctx.globalAlpha = Math.min(0.95, flashRatio * 0.95);
-        ctx.fillStyle = primaryFlash;
-        ctx.fillRect(-10, -2, 20, 4);
-        ctx.fillRect(-2, -10, 4, 20);
-        ctx.fillRect(-6, -6, 12, 12);
-        ctx.fillStyle = coreFlash;
-        ctx.fillRect(-4, -4, 8, 8);
-        ctx.restore();
-      }
-
-      // Tactical Cover Badge
-      if (!sinTextoDelSistema && actor.inCover && actor.state !== 'DEAD' && actor.state !== 'ARRESTED') {
-        ctx.fillStyle = 'rgba(16, 185, 129, 0.88)';
-        ctx.fillRect(-14, -26, 28, 5);
-        ctx.fillStyle = '#06090E';
-        ctx.font = '700 7px "JetBrains Mono", monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText('🛡️ COBERTURA', 0, -21);
-      }
-
-      // Stun Stars
-      if (actor.stunTimer > 0 && actor.state !== 'DEAD') {
-        const step = Math.floor(elapsedTime * 8) % 2;
-        ctx.fillStyle = step === 0 ? '#FACC15' : '#38BDF8';
-        ctx.fillRect(-10, -18, 4, 4);
-        ctx.fillRect(6, -18, 4, 4);
-        ctx.fillRect(-2, 14, 4, 4);
-      }
-
-      ctx.restore();
-      return;
-    }
-
-    // Procedural Fallback if asset is still loading
-    ctx.rotate(actor.angle);
-    const isSquad = actor.role === 'SQUAD';
-    const wType: 'AUG' | 'MP7' | 'SHIELD' | 'TASER' = isSquad
-      ? 'MP7'
-      : activeTool === 'TASER'
-        ? 'TASER'
+    const direccion = Math.round(actor.angle / (Math.PI / 4));
+    const arma: ArmaOperador =
+      actor.role === 'SQUAD'
+        ? 'CORTA'
         : primaryWeapon === 'GLOCK_SHIELD'
-          ? 'SHIELD'
-          : primaryWeapon === 'MP7A1'
-            ? 'MP7'
+          ? 'ESCUDO'
+          : activeTool === 'TASER' || primaryWeapon === 'MP7A1'
+            ? 'CORTA'
             : 'AUG';
 
-    spriteKey = `KOBRA_${isSquad ? '2' : '1'}_${wType}_${alertLevel}_F${frame}_${isFiring ? 'FIRE' : 'IDLE'}`;
-    grid = buildKobraGrid(wType, isSquad, alertLevel, frame, isFiring);
-  } else if (actor.id.startsWith('TARGET_')) {
+    if (actor.state === 'DEAD') ctx.globalAlpha = 0.65;
+
+    // Lesión en las piernas: cojera al caminar, en ángulo, con el sprite entero.
+    const piernas = actor.bodyHealth;
+    if (piernas && piernas.legs < 75 && speed > 5 && actor.state !== 'DEAD' && actor.state !== 'ARRESTED') {
+      const cojera = (75 - piernas.legs) / 75;
+      ctx.rotate(Math.sin(elapsedTime * 11) * (0.14 + cojera * 0.18));
+    }
+
+    // Reacción al impacto: el salto se redondea a píxeles enteros para no
+    // desalinear la rejilla del buffer.
+    const golpeTimer = actor.hitReactionTimer ?? 0;
+    if (golpeTimer > 0) {
+      const golpe = Math.min(1, golpeTimer / 0.28);
+      const anguloRelativo = (actor.hitAngle ?? actor.angle) - actor.angle;
+      const empuje = Math.sin(golpe * Math.PI) * 6.5;
+      ctx.translate(
+        Math.round(Math.cos(anguloRelativo) * empuje),
+        Math.round(Math.sin(anguloRelativo) * empuje)
+      );
+      ctx.rotate(Math.sin(golpe * Math.PI * 3) * 0.26 * golpe);
+      const aplaste = Math.sin(golpe * Math.PI) * 0.16;
+      ctx.scale(1 - aplaste, 1 + aplaste * 0.85);
+    }
+
+    // Sprite nativo de 48×48: ocho direcciones y cuatro fotogramas, sin rotar
+    // entre pasos ni reescalar. El paso solo avanza si el actor se mueve.
+    dibujarOperador(ctx, {
+      rol: actor.role,
+      arma,
+      alerta: alertLevel,
+      direccion,
+      frame: speed > 6 ? frame : 0,
+    });
+
+    // Fogonazo en la boca del cañón: mismo giro de 45° que el sprite y la boca
+    // de cada arma (el escudo no hereda la longitud del fusil).
+    if (isFiring) {
+      const fogonazo = fogonazoOperador(arma, direccion);
+      ctx.save();
+      ctx.rotate(fogonazo.angulo);
+      ctx.fillStyle = '#FDE68A';
+      ctx.fillRect(fogonazo.adelante, fogonazo.costado - 2, 4, 4);
+      ctx.fillStyle = '#F59E0B';
+      ctx.fillRect(fogonazo.adelante + 4, fogonazo.costado - 1, 3, 2);
+      ctx.restore();
+    }
+
+    // Hit Flash Overlay
+    const flashTimer = actor.hitFlashTimer ?? 0;
+    if (flashTimer > 0) {
+      const flashRatio = Math.min(1, flashTimer / 0.14);
+      const hitType = actor.lastHitType ?? 'BLOOD';
+      ctx.save();
+      const primaryFlash = hitType === 'TASER' ? '#38BDF8' : hitType === 'ARMOR' ? '#FBBF24' : '#EF4444';
+      const coreFlash = hitType === 'TASER' ? '#E0F2FE' : hitType === 'ARMOR' ? '#FEF08A' : '#FCA5A5';
+      ctx.globalAlpha = Math.min(0.95, flashRatio * 0.95);
+      ctx.fillStyle = primaryFlash;
+      ctx.fillRect(-10, -2, 20, 4);
+      ctx.fillRect(-2, -10, 4, 20);
+      ctx.fillRect(-6, -6, 12, 12);
+      ctx.fillStyle = coreFlash;
+      ctx.fillRect(-4, -4, 8, 8);
+      ctx.restore();
+    }
+
+    // Tactical Cover Badge
+    if (!sinTextoDelSistema && actor.inCover && actor.state !== 'DEAD' && actor.state !== 'ARRESTED') {
+      ctx.fillStyle = 'rgba(16, 185, 129, 0.88)';
+      ctx.fillRect(-14, -26, 28, 5);
+      ctx.fillStyle = '#06090E';
+      ctx.font = '700 7px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('🛡️ COBERTURA', 0, -21);
+    }
+
+    // Stun Stars
+    if (actor.stunTimer > 0 && actor.state !== 'DEAD') {
+      const step = Math.floor(elapsedTime * 8) % 2;
+      ctx.fillStyle = step === 0 ? '#FACC15' : '#38BDF8';
+      ctx.fillRect(-10, -18, 4, 4);
+      ctx.fillRect(6, -18, 4, 4);
+      ctx.fillRect(-2, 14, 4, 4);
+    }
+
+    ctx.restore();
+    return;
+    } else if (actor.id.startsWith('TARGET_')) {
     // Custom Shooting Range Targets
     if (actor.id.includes('PAPER')) {
       // Paper Silhouette Target
@@ -1223,16 +1068,19 @@ function renderHighDetailCharacterLayers(
 export function getPixelPreviewCanvas(
   type: 'KOBRA1' | 'KOBRA2' | 'KOBRA_SHIELD' | 'MARKUS' | 'JULIA'
 ): string {
-  let grid = buildKobraGrid('AUG', false, 'READY', 0, false);
-  const key = `PREVIEW_${type}`;
+  if (type === 'KOBRA1') {
+    return lienzoOperador({ rol: 'PLAYER', arma: 'AUG', alerta: 'READY', direccion: 2, frame: 0 }).toDataURL();
+  }
   if (type === 'KOBRA2') {
-    grid = buildKobraGrid('MP7', true, 'READY', 0, false);
-  } else if (type === 'KOBRA_SHIELD') {
-    grid = buildKobraGrid('SHIELD', false, 'COMBAT', 0, false);
-  } else if (type === 'MARKUS') {
+    return lienzoOperador({ rol: 'SQUAD', arma: 'CORTA', alerta: 'READY', direccion: 2, frame: 0 }).toDataURL();
+  }
+  if (type === 'KOBRA_SHIELD') {
+    return lienzoOperador({ rol: 'PLAYER', arma: 'ESCUDO', alerta: 'COMBAT', direccion: 2, frame: 0 }).toDataURL();
+  }
+  let grid = buildSurrenderedGrid('J', 'j', 'Y', 0);
+  const key = `PREVIEW_${type}`;
+  if (type === 'MARKUS') {
     grid = buildSuspectArmedGrid('M', 'm', 'd', 'COMBAT', 0);
-  } else if (type === 'JULIA') {
-    grid = buildSurrenderedGrid('J', 'j', 'Y', 0);
   }
   const c = getCachedGridCanvas(key, grid);
   return c.toDataURL();
