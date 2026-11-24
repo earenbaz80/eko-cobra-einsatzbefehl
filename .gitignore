@@ -13,6 +13,7 @@ coverage/
 .aistudio/
 .cortexkit/
 .freebuff/
+skills/
 
 # Captura, traza e informe del humo fallido (el CI lo sube como artifact)
 .smoke-fallos/
@@ -20,3 +21,7 @@ backups/
 
 # Capturas de trabajo del art proof (iteración local, no documentación)
 docs/prueba-*.png
+
+# Scripts de captura y capturas de iteración local (no forman parte de la app)
+.tmp/
+capturas/
