@@ -1537,6 +1537,120 @@ describe('despeje en el snapshot del HUD', () => {
     expect(sospechoso.roomName).toBe('VORRAUM');
   });
 
+  /** Motor con el binomio dentro de la cocina y el rendido donde lo deje el caso. */
+  const motorConCamaraEnLaCocina = (rendido: ActorEntity) => {
+    const layout = createGrazApartmentLayout();
+    const operador = { ...player, x: 1150, y: 780, roomName: 'LOGGIA' } as ActorEntity;
+    const binomio = { ...squad, x: 400, y: 232, roomName: 'WOHNKUECHE' } as ActorEntity;
+    const onHudUpdate = vi.fn();
+    const engine = createEngine({
+      plan: { ...plan, inspectionDevice: 'MICRO_CAM' },
+      rooms: layout.rooms,
+      walls: layout.walls,
+      doors: layout.doors,
+      furniture: layout.furniture,
+      actors: [operador, binomio, rendido],
+      getPlayer: vi.fn(() => operador),
+      getSquadmate: vi.fn(() => binomio),
+      onHudUpdate,
+      radio: { txTimer: 0, staticTimer: 0, items: [] },
+      exteriorWindows: [],
+      despejeMemoria: new Set(['WOHNKUECHE']),
+      heldKeys: new Set<string>(),
+      sprintModeToggled: false,
+      emitHudSnapshot: TacticalEngineCore.prototype.emitHudSnapshot,
+      computeVisibilityPolygon: () => [],
+      getWeatherVisibilityMultiplier: () => 1,
+      isFocusedAiming: () => false,
+      getActiveBiometricHudTarget: () => null,
+      computeContextPrompt: () => null,
+      getStationAlertLevel: () => 'CALM',
+      elapsedSeconds: 12,
+      score: 0,
+      baseCareerXp: 0,
+      sessionXp: 0,
+      armor: 90,
+      ifakCount: 2,
+      playerFatigue: 10,
+      squadFatigue: 10,
+      ammoInMag: 25,
+      magCount: 4,
+      taserCharges: 2,
+      gadgetCount: 2,
+      flashlightOn: true,
+      nvgActive: false,
+      nvgKeyCode: 'KeyN',
+      playerStance: 'PARADO',
+      currentMovementGait: 'RESTING',
+      activeTool: 'PRIMARY',
+      aimZoneMode: 'TORSO',
+      thermalActive: false,
+      mirrorDoorId: null,
+    });
+    return { engine, onHudUpdate };
+  };
+
+  const makeRendido = (overrides: Partial<ActorEntity> = {}) =>
+    ({
+      id: 'SUSPECT_COCINA',
+      name: 'Lukas',
+      role: 'SUSPECT',
+      state: 'SURRENDERED',
+      x: 400,
+      y: 260,
+      angle: 0,
+      radius: 14,
+      hp: 75,
+      maxHp: 75,
+      roomName: 'WOHNKUECHE',
+      isArmed: false,
+      visibleToPlayer: false,
+      visibleToSquad: true,
+      spottedByMirror: false,
+      identifiedByRadio: false,
+      ...overrides,
+    }) as unknown as ActorEntity;
+
+  it('un rendido que ve la cámara del binomio pinta su estancia EN CONTACTO', () => {
+    const rendido = makeRendido();
+    const { engine, onHudUpdate } = motorConCamaraEnLaCocina(rendido);
+    engine.emitHudSnapshot();
+
+    const hud = onHudUpdate.mock.calls[0][0] as HudSnapshot;
+    const cocina = hud.despeje.salas.find((sala) => sala.id === 'WOHNKUECHE');
+    expect(hud.tacticalPad.rooms.find((r) => r.id === 'WOHNKUECHE')?.knownHostiles).toBe(1);
+    expect(cocina?.estado).toBe('EN_CONTACTO');
+  });
+
+  it('cuenta en la cocina al rendido parado en el vano aunque su etiqueta diga VORRAUM', () => {
+    // El borde y = 280 es el sur de WOHNKUECHE y el norte de VORRAUM: con el cuerpo en la
+    // hoja, `getRoomAt` puede devolver la estancia de al lado. El pad tiene que contarlo
+    // en la cocina igual, porque es lo que ve la cámara del binomio desde dentro.
+    const rendido = makeRendido({ x: 400, y: 280, roomName: 'VORRAUM' });
+    const { engine, onHudUpdate } = motorConCamaraEnLaCocina(rendido);
+
+    engine.emitHudSnapshot();
+
+    const hud = onHudUpdate.mock.calls[0][0] as HudSnapshot;
+    const estado = new Map(hud.despeje.salas.map((sala) => [sala.id, sala.estado]));
+    expect(hud.tacticalPad.rooms.find((r) => r.id === 'WOHNKUECHE')?.knownHostiles).toBe(1);
+    expect(estado.get('WOHNKUECHE')).toBe('EN_CONTACTO');
+    // El vano pertenece a las dos estancias que une.
+    expect(estado.get('VORRAUM')).toBe('EN_CONTACTO');
+  });
+
+  it('no le suma a la cocina un rendido que se queda en el recibidor', () => {
+    const rendido = makeRendido({ x: 400, y: 330 });
+    const { engine, onHudUpdate } = motorConCamaraEnLaCocina(rendido);
+
+    engine.emitHudSnapshot();
+
+    const hud = onHudUpdate.mock.calls[0][0] as HudSnapshot;
+    const estado = new Map(hud.despeje.salas.map((sala) => [sala.id, sala.estado]));
+    expect(estado.get('WOHNKUECHE')).toBe('DESPEJADA');
+    expect(estado.get('VORRAUM')).toBe('EN_CONTACTO');
+  });
+
   it('saca del guardado la estancia barrida que vuelve a contacto', () => {
     // VORRAUM estaba en la memoria de una partida anterior; el hostil del
     // escenario está dentro, así que el snapshot la pasa a contacto y la borra.

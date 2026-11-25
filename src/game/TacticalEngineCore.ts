@@ -8454,6 +8454,30 @@ public nightMode: boolean = false;
   }
 
   /**
+   * Estancias cuyo suelo toca un cuerpo de radio `radio` centrado en (x, y).
+   *
+   * `getRoomAt` devuelve un solo id y resuelve las lindes por orden del array, así que
+   * un cuerpo parado justo en el vano de la cocina —donde WOHNKUECHE y VORRAUM comparten
+   * el borde y = 280— cambia de estancia con el subpíxel. Para el despeje manda la
+   * geometría: si el cuerpo toca el rectángulo de la estancia, la estancia lo cuenta, y
+   * un cuerpo en el vano cuenta en las dos que el vano une.
+   */
+  protected salasQuePisa(x: number, y: number, radio: number): Set<string> {
+    const salas = new Set<string>();
+    for (const r of this.rooms) {
+      if (
+        x + radio >= r.x &&
+        x - radio <= r.x + r.w &&
+        y + radio >= r.y &&
+        y - radio <= r.y + r.h
+      ) {
+        salas.add(r.id);
+      }
+    }
+    return salas;
+  }
+
+  /**
    * Mueve al operador con la ruta de simulation.ts: mismo recorte de paso, misma
    * normalización de entrada y misma colisión que los tests. El reloj del motor
    * (tick/tiempo) se espeja en la partida para que ambos usen el mismo tiempo.
@@ -8900,9 +8924,28 @@ public nightMode: boolean = false;
         )
       : [];
 
+    // Estancia de cada cuerpo por geometría: se resuelve una vez por snapshot y no
+    // una vez por estancia.
+    const salasPorCuerpo = new Map<ActorEntity, Set<string>>();
+    const pisaSala = (actor: ActorEntity | undefined, id: string) => {
+      if (!actor) return false;
+      let salas = salasPorCuerpo.get(actor);
+      if (!salas) {
+        salas = this.salasQuePisa(actor.x, actor.y, actor.radius ?? 12);
+        salasPorCuerpo.set(actor, salas);
+      }
+      return salas.has(id);
+    };
+
     const tacticalPad = {
       rooms: this.rooms.map((r) => {
-        const roomActors = this.actors.filter((a) => a.roomName === r.id);
+        // La estancia de un cuerpo es la que pisa, no el id único de su etiqueta:
+        // `roomName` se resuelve con un test de rectángulo cerrado y un cuerpo parado
+        // en un vano cae de un lado o del otro según el subpíxel y el orden del array
+        // (el borde y = 280 es a la vez el sur de WOHNKUECHE y el norte de VORRAUM).
+        // El recuento del pad se hace por geometría del cuerpo para que la estancia que
+        // ve la cámara del binomio no desaparezca cuando el rendido se para en la hoja.
+        const roomActors = this.actors.filter((a) => pisaSala(a, r.id));
         const activeHostilesInRoom = roomActors.filter(
           (a) => a.role === 'SUSPECT' && a.state !== 'ARRESTED' && a.state !== 'DEAD'
         );
@@ -8920,8 +8963,8 @@ public nightMode: boolean = false;
             a.state !== 'DEAD' &&
             (a.visibleToPlayer || a.visibleToSquad || a.spottedByMirror || a.identifiedByRadio)
         ).length;
-        const hasPlayer = player?.roomName === r.id;
-        const hasSquad = squad?.roomName === r.id;
+        const hasPlayer = pisaSala(player, r.id);
+        const hasSquad = pisaSala(squad, r.id);
         return {
           id: r.id,
           nameDe: r.nameDe,
