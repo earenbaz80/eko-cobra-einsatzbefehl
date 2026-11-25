@@ -92,6 +92,8 @@ const PUNTO_BARRIDO = { x: 540, y: 262 };
 const DISTANCIA_BARRIDO = 120;
 /** A menos de 85 px la cámara del binomio marca al rendido sin depender del ángulo. */
 const CERCANIA_CAMARA = 60;
+/** Tiempo que la cámara del binomio tiene que sostener la vista antes de dar el contacto. */
+const VISTA_SOSTENIDA_MS = 800;
 /** Pared este del comedor (x = 660) menos 20 px de aire. */
 const X_MAXIMA_BARRIDO = 640;
 
@@ -189,6 +191,39 @@ const CADENCIA_AVANCE = 100;
 const RADIO_OBSTACULO = 60;
 /** Registro de avance que la espera deja en la propia página. */
 const REGISTRO_AVANCE = '__ekoAvanceDeCaminata';
+/** Tope de cada caminata, en ms. Se informa para medir el margen, no se toca. */
+const TOPE_CAMINATA = 8000;
+
+/** Una fila por caminata de la pasada: duración real, px recorridos y muestras. */
+const CAMINATAS = [];
+
+/** Deja constancia de una caminata en el log y en el resumen final. */
+function registrarCaminata(fila) {
+  CAMINATAS.push(fila);
+  console.log(
+    `caminarHasta · ${String(fila.ms).padStart(5)} ms · ${fila.px.toFixed(1).padStart(5)} px · ` +
+      `${fila.tecla} ${fila.umbral} · «${fila.paso}»`
+  );
+}
+
+/** Margen real del tope: las caminatas de la pasada, de la más lenta a la más rápida. */
+function volcarTablaCaminatas() {
+  if (!CAMINATAS.length) return;
+  const ordenadas = [...CAMINATAS].sort((a, b) => b.ms - a.ms);
+  const masLenta = ordenadas[0];
+  console.log(
+    `caminarHasta: ${ordenadas.length} caminatas, tope ${TOPE_CAMINATA} ms; ` +
+      `la más lenta usó ${masLenta.ms} ms (${(100 * masLenta.ms / TOPE_CAMINATA).toFixed(1)} % ` +
+      `del tope, ${(TOPE_CAMINATA - masLenta.ms)} ms de margen)`
+  );
+  for (const fila of ordenadas) {
+    console.log(
+      `  ${String(fila.ms).padStart(5)} ms · ${fila.px.toFixed(1).padStart(5)} px de ` +
+        `${fila.objetivo.toFixed(1).padStart(5)} px · ${String(fila.muestras).padStart(3)} muestras · ` +
+        `${fila.tecla} ${fila.umbral} · «${fila.paso}»`
+    );
+  }
+}
 
 /** Estado de una puerta en palabras, para el diagnóstico de un bloqueo. */
 function estadoDePuerta(puerta) {
@@ -300,6 +335,7 @@ async function caminarHasta(page, tecla, umbral, paso) {
   if (!direccion) throw new Error(`tecla sin dirección: ${tecla}`);
   if (!paso) throw new Error(`caminarHasta sin etiqueta de paso (${tecla} ${umbral})`);
   const idEspera = `${Date.now()}-${tecla}-${umbral}`;
+  const comienzo = Date.now();
   await page.keyboard.down(tecla);
   try {
     await page.waitForFunction(
@@ -332,8 +368,23 @@ async function caminarHasta(page, tecla, umbral, paso) {
         return hacia > 0 ? jugador[eje] >= umbral : jugador[eje] <= umbral;
       },
       { eje: direccion.eje, umbral, hacia: direccion.hacia, registro: REGISTRO_AVANCE, id: idEspera },
-      { timeout: 8000, polling: CADENCIA_AVANCE }
+      { timeout: TOPE_CAMINATA, polling: CADENCIA_AVANCE }
     );
+    const avance = await page
+      .evaluate((registro) => {
+        const actual = window[registro];
+        return actual ? { inicio: actual.inicio, mejor: actual.mejor, muestras: actual.muestras } : null;
+      }, REGISTRO_AVANCE)
+      .catch(() => null);
+    registrarCaminata({
+      paso,
+      tecla,
+      umbral,
+      ms: Date.now() - comienzo,
+      px: avance ? Math.abs(avance.mejor - avance.inicio) : 0,
+      objetivo: avance ? Math.abs(umbral - avance.inicio) : 0,
+      muestras: avance?.muestras ?? 0,
+    });
   } catch {
     const avance = await page
       .evaluate((registro) => {
@@ -363,6 +414,15 @@ async function caminarHasta(page, tecla, umbral, paso) {
       ? bloqueo.obstaculos.map(describirObstaculo).join('; ')
       : `nada a menos de ${RADIO_OBSTACULO} px del operador`;
 
+    registrarCaminata({
+      paso,
+      tecla,
+      umbral,
+      ms: Date.now() - comienzo,
+      px: avanzado ?? 0,
+      objetivo: total ?? 0,
+      muestras: avance?.muestras ?? 0,
+    });
     throw new Error(
       `el operador no llegó a ${tecla} ${umbral} en 8 s durante «${paso}» ` +
         `(${muestreo}; ${posiciones}; ${estorbo})`
@@ -374,6 +434,173 @@ async function caminarHasta(page, tecla, umbral, paso) {
 
 /** Banda alrededor del carril de un vano dentro de la cual el operador ya cruza franco. */
 const HOLGURA_CARRIL = 6;
+
+/** Caja interior de la cocina donde tiene sentido apostar al binomio. */
+const CAJA_APOSTADERO = { x0: 372, y0: 112, x1: 642, y1: 272 };
+
+/**
+ * Elige dónde apostar a Kobra-2 para que su cámara de casco vea al rendido.
+ *
+ * Antes el punto se ponía a `CERCANIA_CAMARA` px sobre la recta rendido -> barrido, sin
+ * mirar la geometría: si un mueble con `blocksSight` o una hoja quedaban en medio, la
+ * cámara no lo veía aunque el binomio llegara al punto exacto. Aquí se prueban
+ * candidatos alrededor del rendido —primero hacia el barrido, luego girando— y se
+ * acepta el primero que cumple las dos cosas que exige el motor:
+ *
+ *   - paso: el punto queda a `radio + MARGEN_PARED` (17 px) de muros y hojas cerradas,
+ *     a 14 px de los muebles que bloquean el paso y a 22 px de los jambs;
+ *   - visión: el segmento rendido -> punto no cruza muros, hojas ni muebles de vista,
+ *     mirando sólo el tramo que va del cuerpo del rendido al punto.
+ *
+ * Todos los radios probados quedan por debajo de 85 px, donde la cámara del binomio no
+ * depende del ángulo con el que llegue. Devuelve `{ punto, motivo }`: `punto` con la
+ * posición elegida y `motivo` con cuántos candidatos se descartaron por cada causa.
+ */
+async function elegirApostaderoDeCamara(page, { sospechoso, hacia, distancias }) {
+  return page.evaluate(
+    ({ sx, sy, hx, hy, radios, caja }) => {
+      const estado = window.__eko?.snapshot();
+      if (!estado) return { punto: null, motivo: 'sin snapshot' };
+
+      const RADIO = 14;
+      const MARGEN_PARED = 3;
+      const HOLGURA = RADIO + MARGEN_PARED;
+      const HOLGURA_JAMB = 22;
+
+      const aSegmento = (px, py, segmento) => {
+        const dx = segmento.bx - segmento.ax;
+        const dy = segmento.by - segmento.ay;
+        const largo = dx * dx + dy * dy;
+        if (!largo) return Math.hypot(px - segmento.ax, py - segmento.ay);
+        const t = Math.max(
+          0,
+          Math.min(1, ((px - segmento.ax) * dx + (py - segmento.ay) * dy) / largo)
+        );
+        return Math.hypot(px - (segmento.ax + dx * t), py - (segmento.ay + dy * t));
+      };
+      const parametroDeCruce = (ax, ay, bx, by, segmento) => {
+        const denom =
+          (segmento.by - segmento.ay) * (bx - ax) - (segmento.bx - segmento.ax) * (by - ay);
+        if (denom === 0) return null;
+        const ua =
+          ((segmento.bx - segmento.ax) * (ay - segmento.ay) -
+            (segmento.by - segmento.ay) * (ax - segmento.ax)) /
+          denom;
+        const ub =
+          ((bx - ax) * (ay - segmento.ay) - (by - ay) * (ax - segmento.ax)) / denom;
+        return ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1 ? ua : null;
+      };
+
+      // Muros y hojas que frenan el paso.
+      const solidos = [];
+      for (const muro of estado.world.walls ?? []) {
+        solidos.push({ ax: muro.x1, ay: muro.y1, bx: muro.x2, by: muro.y2, id: muro.id });
+      }
+      const puertas = estado.world.doors ?? [];
+      for (const puerta of puertas) {
+        if (!puerta.isFullyOpen && !puerta.isDestroyed && !puerta.isBreached) {
+          solidos.push({ ax: puerta.x1, ay: puerta.y1, bx: puerta.x2, by: puerta.y2, id: puerta.id });
+        }
+      }
+      const mueblesSolidos = (estado.world.furniture ?? []).filter(
+        (mueble) => mueble.blocksMovement && !mueble.isDestroyed
+      );
+
+      // Lo que corta la visión: muros, hojas y muebles de vista (igual que `raycastSurface`).
+      const bloqueantes = solidos.slice();
+      for (const mueble of estado.world.furniture ?? []) {
+        if (!mueble.blocksSight || mueble.isDestroyed) continue;
+        const { x, y, w, h } = mueble;
+        bloqueantes.push(
+          { ax: x, ay: y, bx: x + w, by: y, id: mueble.id },
+          { ax: x + w, ay: y, bx: x + w, by: y + h, id: mueble.id },
+          { ax: x + w, ay: y + h, bx: x, by: y + h, id: mueble.id },
+          { ax: x, ay: y + h, bx: x, by: y, id: mueble.id }
+        );
+      }
+
+      const motivo = { fueraDeCaja: 0, sinPaso: 0, sinVision: 0 };
+      // Primero hacia el barrido (el operador queda lejos) y luego girando 22,5° a 67,5°.
+      const base = Math.atan2(hy, hx);
+      const giros = [0, 0.3927, -0.3927, 0.7854, -0.7854, 1.1781, -1.1781, Math.PI];
+
+      for (const radio of radios) {
+        for (const giro of giros) {
+          const angulo = base + giro;
+          const px = sx + Math.cos(angulo) * radio;
+          const py = sy + Math.sin(angulo) * radio;
+          if (px < caja.x0 || px > caja.x1 || py < caja.y0 || py > caja.y1) {
+            motivo.fueraDeCaja += 1;
+            continue;
+          }
+
+          let pasoLibre = true;
+          for (const segmento of solidos) {
+            if (aSegmento(px, py, segmento) < HOLGURA) {
+              pasoLibre = false;
+              break;
+            }
+          }
+          if (pasoLibre) {
+            for (const mueble of mueblesSolidos) {
+              const cx = Math.max(mueble.x, Math.min(px, mueble.x + mueble.w));
+              const cy = Math.max(mueble.y, Math.min(py, mueble.y + mueble.h));
+              if (Math.hypot(px - cx, py - cy) < RADIO) {
+                pasoLibre = false;
+                break;
+              }
+            }
+          }
+          // El jamb de una puerta franca sigue estorbando: la hoja abierta cuelga de uno.
+          if (pasoLibre) {
+            for (const puerta of puertas) {
+              const a = Math.hypot(px - puerta.x1, py - puerta.y1);
+              const b = Math.hypot(px - puerta.x2, py - puerta.y2);
+              if (Math.min(a, b) < HOLGURA_JAMB) {
+                pasoLibre = false;
+                break;
+              }
+            }
+          }
+          if (!pasoLibre) {
+            motivo.sinPaso += 1;
+            continue;
+          }
+
+          const largo = Math.hypot(px - sx, py - sy) || 1;
+          let visionLibre = true;
+          for (const segmento of bloqueantes) {
+            const t = parametroDeCruce(sx, sy, px, py, segmento);
+            if (t === null) continue;
+            // El cuerpo del rendido y los últimos píxeles del punto no bloquean.
+            if (t * largo > RADIO && (1 - t) * largo > 8) {
+              visionLibre = false;
+              break;
+            }
+          }
+          if (!visionLibre) {
+            motivo.sinVision += 1;
+            continue;
+          }
+
+          return {
+            punto: { x: px, y: py, radio, grados: Math.round((angulo * 180) / Math.PI) },
+            motivo,
+          };
+        }
+      }
+      return { punto: null, motivo };
+    },
+    {
+      sx: sospechoso.x,
+      sy: sospechoso.y,
+      hx: hacia.x,
+      hy: hacia.y,
+      radios: distancias,
+      caja: CAJA_APOSTADERO,
+    }
+  );
+}
 
 /**
  * Deja al operador en el carril del vano antes de cruzarlo.
@@ -671,6 +898,11 @@ export async function comprobarPersistencia(page, { url }) {
     // espejo de la sonda será el único que pueda delatarlo.
     await caminarHasta(page, 'KeyS', 430, `bajar al vano de ${PUERTA_SALON}`);
     await caminarHasta(page, 'KeyD', 500, `acercarse a ${PUERTA_SALON}`);
+    // El carril se corrige con la hoja todavía cerrada: el vano mide 70 px y el motor
+    // frena a 17 px de cada jamb, así que la banda franca es y ∈ [412, 448]. La
+    // caminata al vano se pasa del punto medio (hasta 19 px de más) y el cruce se
+    // clavaba en el borde sur con la puerta franca («entrar en WOHNZIMMER», 0 px).
+    await alinearConElVano(page, PUERTA_SALON);
     if (!(await accionarPuerta(page, PUERTA_SALON, (puerta) => puerta.isFullyOpen))) {
       fail(
         `persistencia: ${PUERTA_SALON} no se abre para entrar al salón ` +
@@ -971,22 +1203,34 @@ export async function comprobarPersistencia(page, { url }) {
     // detrás del operador y, desde el fondo de la cocina, eso es al otro lado de la pared
     // sur, donde el guiado local se clava (medido: binomio en 477.0, 297.1, con y = 297
     // fuera de la estancia y sin línea de visión al rendido). El marcador navega la ruta y
-    // abre las puertas que estorban. El punto se pone a `CERCANIA_CAMARA` px del rendido,
-    // sobre la recta que lo une con el punto del barrido —ambos pisos transitables—: a
-    // menos de 85 px la cámara del binomio lo marca sin depender del ángulo con el que
-    // llegue, y el operador sigue a más de 95 px del suyo, como exige la comprobación.
-    const haciaElBarrido = {
-      x: puntoBarrido.x - sospechoso.x,
-      y: puntoBarrido.y - sospechoso.y,
-    };
-    const largo = Math.hypot(haciaElBarrido.x, haciaElBarrido.y) || 1;
-    const puntoBinomio = {
-      x: Math.min(
-        X_MAXIMA_BARRIDO,
-        Math.max(270, sospechoso.x + (haciaElBarrido.x / largo) * CERCANIA_CAMARA)
-      ),
-      y: Math.min(270, Math.max(110, sospechoso.y + (haciaElBarrido.y / largo) * CERCANIA_CAMARA)),
-    };
+    // abre las puertas que estorban. El apostadero se busca a `CERCANIA_CAMARA` px del
+    // rendido, empezando por la recta que lo une con el punto del barrido —así el
+    // operador queda lejos— pero sólo se acepta si hay paso y línea de visión en el
+    // snapshot: a menos de 85 px la cámara del binomio lo marca sin depender del ángulo
+    // con el que llegue, y el operador sigue a más de 95 px del suyo.
+    // El rendido se movió desde el barrido (medido: 50 px, y con eso el apostadero de
+    // antes quedaba a 108.7 px), así que su posición se relee aquí y el punto se elige
+    // comprobando paso y línea de visión sobre el snapshot, no sobre una recta supuesta.
+    const rendidoAhora = await hostilEnSala(page, SALA_CONTACTO);
+    if (!rendidoAhora) {
+      fail(`persistencia: el rendido de ${SALA_CONTACTO} desapareció antes del arresto`);
+      return;
+    }
+    const haciaElBarrido = { x: puntoBarrido.x - rendidoAhora.x, y: puntoBarrido.y - rendidoAhora.y };
+    const apostadero = await elegirApostaderoDeCamara(page, {
+      sospechoso: rendidoAhora,
+      hacia: haciaElBarrido,
+      distancias: [CERCANIA_CAMARA, 45, 30],
+    });
+    if (!apostadero?.punto) {
+      fail(
+        `persistencia: no hay apostadero con paso y visión al rendido en ` +
+          `(${rendidoAhora.x.toFixed(1)}, ${rendidoAhora.y.toFixed(1)}) ` +
+          `(descartados ${JSON.stringify(apostadero?.motivo ?? 'sin lectura')})`
+      );
+      return;
+    }
+    const puntoBinomio = { x: apostadero.punto.x, y: apostadero.punto.y };
     const puntoMarcado = await marcarPuntoDeAvance(page, puntoBinomio);
     // Sin marcador no hay ruta: se deja el seguimiento como último recurso, que al menos
     // arrima al binomio al vano, y la espera de cámara decide.
@@ -1015,17 +1259,32 @@ export async function comprobarPersistencia(page, { url }) {
     // esperar la cámara del binomio.
     await apuntarA(page, MIRA_BARRIDO);
 
+    // El HUD publica un solo contacto, el primero del orden del mapa, y el salón sigue en
+    // contacto por el espejo de la sonda: la cocina no es lo que muestra
+    // `data-en-contacto` aunque su cámara la esté viendo. Lo que aporta la cámara es
+    // `visibleToSquad`; que la estancia quede EN_CONTACTO se afirma después, por
+    // estancia, en el EKO-Pad.
+    // El binomio sigue caminando hacia el marcador cuando la primera línea de visión
+    // aparece en el vano: se exige que la vista se sostenga `VISTA_SOSTENIDA_MS` para no
+    // tomar un cuadro de paso por contacto estable.
     let porCamara = false;
     let lecturaCamara = null;
+    let desdeQueVe = null;
     const limiteDelSeguimiento = Date.now() + 20000;
-    while (!porCamara && Date.now() < limiteDelSeguimiento) {
+    while (Date.now() < limiteDelSeguimiento) {
       lecturaCamara = await leerContactoDeCamara();
       if (!lecturaCamara) break;
-      porCamara =
-        lecturaCamara.contacto === NOMBRE_SALA_CONTACTO &&
-        lecturaCamara.visibleToSquad &&
-        !lecturaCamara.visibleToPlayer;
-      if (!porCamara) await page.waitForTimeout(60);
+      const ahoraVe = lecturaCamara.visibleToSquad && !lecturaCamara.visibleToPlayer;
+      if (ahoraVe) {
+        desdeQueVe ??= Date.now();
+        if (Date.now() - desdeQueVe >= VISTA_SOSTENIDA_MS) {
+          porCamara = true;
+          break;
+        }
+      } else {
+        desdeQueVe = null;
+      }
+      await page.waitForTimeout(60);
     }
     if (!porCamara) {
       const squad = await leerBinomio(page);
@@ -1038,7 +1297,8 @@ export async function comprobarPersistencia(page, { url }) {
           `a ${Number.isNaN(distanciaAlPunto) ? '?' : distanciaAlPunto.toFixed(0)} px del punto de ` +
           `avance (${puntoBinomio.x.toFixed(0)}, ${puntoBinomio.y.toFixed(0)}) que el pad ` +
           `${puntoMarcado ? 'fijó' : 'no fijó'}; ` +
-          `contacto ${lecturaCamara?.contacto || 'ninguno'}, a la vista del binomio ` +
+          `HUD con contacto en ${lecturaCamara?.contacto || 'ninguna estancia'}, ` +
+          `a la vista del binomio ` +
           `${lecturaCamara?.visibleToSquad === true}, del operador ` +
           `${lecturaCamara?.visibleToPlayer === true}` +
           (squad && lecturaCamara?.actor
@@ -1046,6 +1306,18 @@ export async function comprobarPersistencia(page, { url }) {
               `a ${Math.hypot(lecturaCamara.actor.x - squad.x, lecturaCamara.actor.y - squad.y).toFixed(1)} px`
             : '') +
           ')'
+      );
+      return;
+    }
+
+    const contactoRendido = await estadoEnPad(page, SALA_CONTACTO);
+    if (contactoRendido !== 'EN_CONTACTO') {
+      const squad = await leerBinomio(page);
+      fail(
+        `persistencia: la cámara del binomio ve al rendido pero ${SALA_CONTACTO} figura ` +
+          `${contactoRendido ?? 'ausente'} en el EKO-Pad ` +
+          `(binomio en ${squad ? `${squad.x.toFixed(1)}, ${squad.y.toFixed(1)}` : 'sin binomio'}; ` +
+          `rendido en ${lecturaCamara?.actor ? `${lecturaCamara.actor.x.toFixed(1)}, ${lecturaCamara.actor.y.toFixed(1)}` : '?'})`
       );
       return;
     }
@@ -1147,5 +1419,7 @@ export async function comprobarPersistencia(page, { url }) {
     );
   } catch (error) {
     fail(`persistencia: ${error.message.split('\n')[0]}`);
+  } finally {
+    volcarTablaCaminatas();
   }
 }
