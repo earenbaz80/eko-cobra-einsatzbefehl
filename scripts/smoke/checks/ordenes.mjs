@@ -16,6 +16,7 @@ import {
   acercarseAPuerta,
   arrancarMision,
   distanciaAPuerta,
+  marcarPuntoDeAvance,
   pulsarConAzarSembrado,
 } from '../navegador.mjs';
 
@@ -25,10 +26,12 @@ const PUERTA = 'DOOR_MAIN_A';
 const PUERTA_CONTEXTUAL = 'DOOR_LIVING';
 const PUERTA_RAM = 'DOOR_MAIN_A';
 const PUERTA_C4 = 'DOOR_LINZ_DOCK_B';
-/** Punto del salón marcado en el pad: a 309 px de Milán, fuera del aborto en tránsito (260 px). */
+/**
+ * Punto del salón marcado en el pad, en coordenadas del mundo: a 309 px de Milán,
+ * fuera del aborto en tránsito (260 px). La proyección al SVG la hace
+ * `marcarPuntoDeAvance` con la banda `MAPA_PAD` del pad.
+ */
 const PUNTO_PAD = { x: 570, y: 355 };
-/** `handleSvgMapClick` proyecta worldX = 80 + relX * 1060, worldY = 60 + relY * 700. */
-const MAPA_PAD = { x: 80, y: 60, w: 1060, h: 700 };
 
 const leerEstado = (page) => page.evaluate(() => window.__eko?.snapshot() ?? null);
 
@@ -997,51 +1000,15 @@ async function comprobarPuntoEnPad(page, url) {
     const jugadorAntes = { x: antes.player.x, y: antes.player.y };
 
     // El punto sale del EKO-Pad, no de una tecla: PUNTO DE AVANCE sobre el mapa.
-    await page.keyboard.press('KeyM');
-    const mapa = page.locator('[role="dialog"] svg.cursor-crosshair');
-    await mapa.waitFor({ state: 'visible', timeout: 8000 });
-    await page.getByRole('button', { name: /Avance GPS/ }).click();
-    await page.evaluate(() => {
-      document.querySelector('[role="dialog"] svg.cursor-crosshair')?.scrollIntoView({ block: 'center' });
-    });
-    await page.waitForTimeout(200);
-
-    // Misma proyección que el manejador del pad, así el punto cae donde se pulsa.
-    const enPantalla = await page.evaluate(({ mapaPad, punto }) => {
-      const svg = document.querySelector('[role="dialog"] svg.cursor-crosshair');
-      if (!svg) return null;
-      const caja = svg.getBoundingClientRect();
-      if (caja.width <= 0 || caja.height <= 0) return null;
-      const x = caja.left + ((punto.x - mapaPad.x) / mapaPad.w) * caja.width;
-      const y = caja.top + ((punto.y - mapaPad.y) / mapaPad.h) * caja.height;
-      return {
-        x,
-        y,
-        dentro: x > 0 && y > 0 && x < window.innerWidth && y < window.innerHeight,
-      };
-    }, { mapaPad: MAPA_PAD, punto: PUNTO_PAD });
-    if (!enPantalla?.dentro) {
-      fail('órdenes · punto: el punto del salón no cae dentro del mapa visible del pad');
-      return;
-    }
-    await page.mouse.click(enPantalla.x, enPantalla.y);
-    try {
-      await page.waitForFunction(
-        () =>
-          (window.__eko?.snapshot()?.radioFeed ?? []).some(
-            (linea) =>
-              /EKO-PAD C4I/.test(linea.speaker) &&
-              /PUNTO DE AVANCE/.test(linea.text) &&
-              /WOHNZIMMER/.test(linea.text)
-          ),
-        undefined,
-        { timeout: 4000 }
+    // `marcarPuntoDeAvance` abre el pad, proyecta el punto con `MAPA_PAD`, pulsa
+    // el mapa, espera la confirmación y cierra el pad.
+    if (!(await marcarPuntoDeAvance(page, PUNTO_PAD))) {
+      fail(
+        'órdenes · punto: el EKO-Pad no fijó el PUNTO DE AVANCE del salón ' +
+          `(${JSON.stringify(PUNTO_PAD)})`
       );
-    } catch {
-      fail('órdenes · punto: el EKO-Pad no fijó el PUNTO DE AVANCE del salón al pulsar el mapa');
       return;
     }
-    await page.keyboard.press('Escape');
 
     // Recibidor deducido de las puertas que lo rodean: entre la de entrada y la
     // del salón, de la cocina al baño. Sirve para ver que la ruta lo atraviesa.
