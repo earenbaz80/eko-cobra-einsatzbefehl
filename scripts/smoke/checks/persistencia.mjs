@@ -183,10 +183,18 @@ const DIRECCION = {
   KeyD: { eje: 'x', hacia: 1 },
 };
 
-/** Mantiene una tecla hasta que el jugador cruza el umbral en ese eje. */
-async function caminarHasta(page, tecla, umbral) {
+/**
+ * Mantiene una tecla hasta que el jugador cruza el umbral en ese eje.
+ *
+ * `paso` nombra el tramo del recorrido ("entrar en WOHNZIMMER", "barrido: …"): un
+ * timeout de 8 s no dice cuál de las caminatas se trabó, y el flujo pasa por
+ * varios umbrales de la misma tecla. La etiqueta viaja en el error junto a la
+ * tecla, el umbral y las posiciones reales del operador y del binomio.
+ */
+async function caminarHasta(page, tecla, umbral, paso) {
   const direccion = DIRECCION[tecla];
   if (!direccion) throw new Error(`tecla sin dirección: ${tecla}`);
+  if (!paso) throw new Error(`caminarHasta sin etiqueta de paso (${tecla} ${umbral})`);
   await page.keyboard.down(tecla);
   try {
     await page.waitForFunction(
@@ -204,7 +212,7 @@ async function caminarHasta(page, tecla, umbral) {
     const jugador = await leerJugador(page);
     const binomio = await leerBinomio(page);
     throw new Error(
-      `el operador no llegó a ${tecla} ${umbral} en 8 s ` +
+      `el operador no llegó a ${tecla} ${umbral} en 8 s durante «${paso}» ` +
         `(jugador en ${jugador ? `${jugador.x.toFixed(1)}, ${jugador.y.toFixed(1)}` : '?'}; ` +
         `binomio en ${binomio ? `${binomio.x.toFixed(1)}, ${binomio.y.toFixed(1)}` : '?'})`
     );
@@ -316,7 +324,7 @@ export async function comprobarPersistencia(page, { url }) {
       timeout: 5000,
     });
 
-    await caminarHasta(page, 'KeyD', X_DENTRO_SALA);
+    await caminarHasta(page, 'KeyD', X_DENTRO_SALA, `entrar en ${SALA_DESPEJADA}`);
     if (!(await esperarHudDespejadas(page, despejadasEnSala))) {
       const hud = await leerDespejeHud(page);
       fail(
@@ -326,7 +334,7 @@ export async function comprobarPersistencia(page, { url }) {
       return;
     }
 
-    await caminarHasta(page, 'KeyA', X_FUERA_SALA);
+    await caminarHasta(page, 'KeyA', X_FUERA_SALA, `salir de ${SALA_DESPEJADA}`);
     const hudFuera = await leerDespejeHud(page);
     if (hudFuera?.despejadas !== despejadasEnSala) {
       fail(
@@ -424,7 +432,12 @@ export async function comprobarPersistencia(page, { url }) {
     // queda en la escalera y, con la hoja puesta, no hay línea de visión desde
     // allí hasta la cocina. Si el binomio viera al sospechoso, lo volvería intel
     // del jugador y la estancia no podría quedar despejada.
-    await caminarHasta(page, 'KeyD', 300);
+    await caminarHasta(
+      page,
+      'KeyD',
+      300,
+      `volver a ${PUERTA_ENTRADA} desde ${SALA_DESPEJADA}`
+    );
     if (!(await accionarPuerta(page, PUERTA_ENTRADA, (puerta) => puerta.isOpen === false))) {
       fail(
         `persistencia: ${PUERTA_ENTRADA} no queda cerrada antes del barrido ` +
@@ -432,13 +445,13 @@ export async function comprobarPersistencia(page, { url }) {
       );
       return;
     }
-    await caminarHasta(page, 'KeyD', 390);
+    await caminarHasta(page, 'KeyD', 390, `cruzar el recibidor hacia ${PUERTA_SALON}`);
 
     // Salón: se entra un paso y se sale para dejarlo DESPEJADO y en la memoria sin
     // acercarse a Milán (285 px). La puerta se cierra al salir, así que después el
     // espejo de la sonda será el único que pueda delatarlo.
-    await caminarHasta(page, 'KeyS', 430);
-    await caminarHasta(page, 'KeyD', 500);
+    await caminarHasta(page, 'KeyS', 430, `bajar al vano de ${PUERTA_SALON}`);
+    await caminarHasta(page, 'KeyD', 500, `acercarse a ${PUERTA_SALON}`);
     if (!(await accionarPuerta(page, PUERTA_SALON, (puerta) => puerta.isFullyOpen))) {
       fail(
         `persistencia: ${PUERTA_SALON} no se abre para entrar al salón ` +
@@ -446,12 +459,12 @@ export async function comprobarPersistencia(page, { url }) {
       );
       return;
     }
-    await caminarHasta(page, 'KeyD', 545);
+    await caminarHasta(page, 'KeyD', 545, `entrar en ${SALA_SONDA}`);
     if ((await estadoEnPad(page, SALA_SONDA)) !== 'DESPEJADA') {
       fail(`persistencia: ${SALA_SONDA} no queda DESPEJADA al entrar`);
       return;
     }
-    await caminarHasta(page, 'KeyA', 500);
+    await caminarHasta(page, 'KeyA', 500, `salir de ${SALA_SONDA} al vano`);
     if (!(await accionarPuerta(page, PUERTA_SALON, (puerta) => puerta.isOpen === false))) {
       fail(
         `persistencia: ${PUERTA_SALON} no queda cerrada al salir del salón ` +
@@ -459,7 +472,7 @@ export async function comprobarPersistencia(page, { url }) {
       );
       return;
     }
-    await caminarHasta(page, 'KeyA', 390);
+    await caminarHasta(page, 'KeyA', 390, `volver al recibidor desde ${SALA_SONDA}`);
 
     // VORRAUM está DESPEJADA por la memoria restaurada. La cocina, en cambio,
     // guarda al cómplice. El grito va con la puerta cerrada: el muro amortigua la
@@ -468,7 +481,7 @@ export async function comprobarPersistencia(page, { url }) {
     // esposa—, pero su IA queda inerte y el barrido no depende de su puntería ni
     // de que no oiga los pasos (ver la cabecera: con un hostil activo la prueba
     // no es determinista).
-    await caminarHasta(page, 'KeyW', 330);
+    await caminarHasta(page, 'KeyW', 330, `entrar en ${SALA_CONTACTO}`);
     await page.evaluate(() => document.activeElement?.blur?.());
 
     let rendido = false;
@@ -534,8 +547,18 @@ export async function comprobarPersistencia(page, { url }) {
       return;
     }
     await apuntarA(page, MIRA_BARRIDO);
-    await caminarHasta(page, 'KeyW', puntoBarrido.y);
-    await caminarHasta(page, 'KeyD', puntoBarrido.x);
+    await caminarHasta(
+      page,
+      'KeyW',
+      puntoBarrido.y,
+      `barrido: subir al fondo de ${SALA_CONTACTO}`
+    );
+    await caminarHasta(
+      page,
+      'KeyD',
+      puntoBarrido.x,
+      'barrido: apartarse a la pared este'
+    );
     await apuntarA(page, MIRA_BARRIDO);
 
     // La visita relámpago al salón sumó otra despejada a la cuenta de partida.
@@ -611,8 +634,8 @@ export async function comprobarPersistencia(page, { url }) {
     // ve a Milán (285 px y hoja cerrada) y el salón sigue DESPEJADO por la memoria
     // que dejó la visita anterior. El espejo de [4] barre las dos estancias del vano
     // y lo marca sin que el operador lo mire; ninguna cámara tiene línea de visión.
-    await caminarHasta(page, 'KeyA', 390);
-    await caminarHasta(page, 'KeyS', 330);
+    await caminarHasta(page, 'KeyA', 390, `salir de ${SALA_CONTACTO} al vano`);
+    await caminarHasta(page, 'KeyS', 330, `bajar al vano de ${PUERTA_SALON} para la sonda`);
     if (!(await accionarPuerta(page, PUERTA_COCINA, (puerta) => puerta.isOpen === false))) {
       fail(
         `persistencia: ${PUERTA_COCINA} no queda cerrada al salir ` +
@@ -620,8 +643,8 @@ export async function comprobarPersistencia(page, { url }) {
       );
       return;
     }
-    await caminarHasta(page, 'KeyS', 430);
-    await caminarHasta(page, 'KeyD', 470);
+    await caminarHasta(page, 'KeyS', 430, 'bajar al recibidor tras cerrar la cocina');
+    await caminarHasta(page, 'KeyD', 470, `plantarse junto a ${PUERTA_SALON}`);
     await apuntarA(page, MIRA_BARRIDO);
     const antesDeLaSonda = await estadoEnPad(page, SALA_SONDA);
     if (antesDeLaSonda !== 'DESPEJADA') {
@@ -688,8 +711,8 @@ export async function comprobarPersistencia(page, { url }) {
     // arresto saque al rendido de la cuenta de hostiles conocidos, y el rendido sigue
     // fuera del intel del operador (a más de 95 px y sin entrar en el cono) mientras el
     // binomio entra a la estancia.
-    await caminarHasta(page, 'KeyA', 390);
-    await caminarHasta(page, 'KeyW', 330);
+    await caminarHasta(page, 'KeyA', 390, `volver al vano de ${SALA_CONTACTO} para el arresto`);
+    await caminarHasta(page, 'KeyW', 330, `subir al vano de ${SALA_CONTACTO}`);
     if (!(await accionarPuerta(page, PUERTA_COCINA, (puerta) => puerta.isFullyOpen))) {
       fail(
         `persistencia: ${PUERTA_COCINA} no queda franca para volver a entrar ` +
@@ -698,8 +721,18 @@ export async function comprobarPersistencia(page, { url }) {
       return;
     }
     await apuntarA(page, MIRA_BARRIDO);
-    await caminarHasta(page, 'KeyW', puntoBarrido.y);
-    await caminarHasta(page, 'KeyD', puntoBarrido.x);
+    await caminarHasta(
+      page,
+      'KeyW',
+      puntoBarrido.y,
+      `arresto: subir al fondo de ${SALA_CONTACTO}`
+    );
+    await caminarHasta(
+      page,
+      'KeyD',
+      puntoBarrido.x,
+      'arresto: apartarse a la pared este'
+    );
     await apuntarA(page, MIRA_BARRIDO);
 
     // [6] esposa al rendido más cercano al binomio, no al que el operador tiene delante:
