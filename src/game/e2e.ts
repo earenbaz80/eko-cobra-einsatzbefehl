@@ -51,6 +51,7 @@ export function instalarHookE2E(engine: TacticalEngineCore): () => void {
       return engine.snapshotE2E().radioFeed;
     },
     snapshot: () => engine.snapshotE2E(),
+    clearHeldKeys: () => engine.clearHeldKeys(),
     worldToScreen: (x: number, y: number) => engine.worldToScreen(x, y),
     artBufferHash: () => paseDeArteCargado()?.artProofBufferHash() ?? null,
     artBufferSize: () => paseDeArteCargado()?.artBufferSize() ?? null,

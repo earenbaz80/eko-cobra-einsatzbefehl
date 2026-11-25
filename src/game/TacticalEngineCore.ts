@@ -477,6 +477,12 @@ export interface EkoE2EState {
 export interface EkoE2EHook extends EkoE2EState {
   /** Lee todos los campos en el mismo instante de simulación. */
   snapshot(): EkoE2EState;
+  /**
+   * Suelta las teclas que el motor tiene retenidas. El humo corta la caminata con
+   * esto y no con el `keyup`: con la máquina cargada el evento llega tarde y el
+   * cuerpo sigue avanzando mientras tanto.
+   */
+  clearHeldKeys(): void;
   /** Coordenadas CSS para pulsar una posición del mundo desde Playwright. */
   worldToScreen(x: number, y: number): { x: number; y: number };
   /** FNV-1a del buffer del pase de arte; null si `?art=classic` o aún no pintó. */
