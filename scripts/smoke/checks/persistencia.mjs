@@ -183,42 +183,261 @@ const DIRECCION = {
   KeyD: { eje: 'x', hacia: 1 },
 };
 
+/** Cadencia con la que la espera mira el avance mientras la tecla está pisada. */
+const CADENCIA_AVANCE = 100;
+/** Radio con el que se busca qué tiene pegado el operador cuando deja de avanzar. */
+const RADIO_OBSTACULO = 60;
+/** Registro de avance que la espera deja en la propia página. */
+const REGISTRO_AVANCE = '__ekoAvanceDeCaminata';
+
+/** Estado de una puerta en palabras, para el diagnóstico de un bloqueo. */
+function estadoDePuerta(puerta) {
+  if (puerta.isDestroyed) return 'derribada';
+  if (puerta.isBreached) return 'abierta a la fuerza';
+  if (puerta.isFullyOpen) return 'franca';
+  if (puerta.isOpen) return 'a medio abrir';
+  return puerta.isLocked ? 'cerrada con llave' : 'cerrada';
+}
+
+/**
+ * Qué tiene pegado el operador en el cuadro del fallo: la puerta, la pared y el
+ * mueble que bloquean a menos de `RADIO_OBSTACULO` px, y dónde está el binomio.
+ *
+ * La posición sola no dice por qué se trabó: una puerta a medio girar, un vano
+ * cerrado y el compañero parado en el paso se ven igual desde las coordenadas.
+ * Se miden distancias reales contra el snapshot del motor, no se adivina.
+ */
+async function diagnosticoDelBloqueo(page) {
+  return page.evaluate((radio) => {
+    const estado = window.__eko?.snapshot();
+    const jugador = estado?.player;
+    if (!jugador) return { jugador: null, binomio: null, obstaculos: [] };
+
+    const aSegmento = (px, py, x1, y1, x2, y2) => {
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const largo = dx * dx + dy * dy;
+      if (!largo) return Math.hypot(px - x1, py - y1);
+      const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / largo));
+      return Math.hypot(px - (x1 + dx * t), py - (y1 + dy * t));
+    };
+    const aRectangulo = (px, py, x, y, w, h) =>
+      Math.hypot(Math.max(x - px, 0, px - (x + w)), Math.max(y - py, 0, py - (y + h)));
+
+    const puertas = (estado.world.doors ?? [])
+      .map((puerta) => ({
+        id: puerta.id,
+        distancia: aSegmento(jugador.x, jugador.y, puerta.x1, puerta.y1, puerta.x2, puerta.y2),
+        isOpen: puerta.isOpen,
+        isFullyOpen: puerta.isFullyOpen,
+        isLocked: puerta.isLocked,
+        isBreached: puerta.isBreached,
+        isDestroyed: puerta.isDestroyed,
+      }))
+      .filter((puerta) => puerta.distancia <= radio)
+      .sort((a, b) => a.distancia - b.distancia);
+    const paredes = (estado.world.walls ?? [])
+      .map((muro) => ({
+        id: muro.id,
+        isWindow: muro.isWindow,
+        distancia: aSegmento(jugador.x, jugador.y, muro.x1, muro.y1, muro.x2, muro.y2),
+      }))
+      .filter((muro) => muro.distancia <= radio)
+      .sort((a, b) => a.distancia - b.distancia);
+    const muebles = (estado.world.furniture ?? [])
+      .filter((mueble) => mueble.blocksMovement)
+      .map((mueble) => ({
+        id: mueble.id,
+        label: mueble.label,
+        distancia: aRectangulo(jugador.x, jugador.y, mueble.x, mueble.y, mueble.w, mueble.h),
+      }))
+      .filter((mueble) => mueble.distancia <= radio)
+      .sort((a, b) => a.distancia - b.distancia);
+    const binomio = estado.squad ?? null;
+
+    const obstaculos = [
+      ...puertas.slice(0, 2).map((puerta) => ({ ...puerta, clase: 'puerta' })),
+      ...paredes.slice(0, 2).map((muro) => ({ ...muro, clase: 'muro' })),
+      ...muebles.slice(0, 2).map((mueble) => ({ ...mueble, clase: 'mueble' })),
+    ]
+      .sort((a, b) => a.distancia - b.distancia)
+      .slice(0, 3);
+
+    return {
+      jugador: { x: jugador.x, y: jugador.y },
+      binomio: binomio ? { x: binomio.x, y: binomio.y } : null,
+      obstaculos,
+    };
+  }, RADIO_OBSTACULO);
+}
+
+/** Texto de un obstáculo: qué es, a qué distancia y en qué estado. */
+function describirObstaculo(obstaculo) {
+  const distancia = `${obstaculo.distancia.toFixed(1)} px`;
+  if (obstaculo.clase === 'puerta') return `${obstaculo.id} a ${distancia} (${estadoDePuerta(obstaculo)})`;
+  if (obstaculo.clase === 'muro') {
+    return `${obstaculo.id} a ${distancia}${obstaculo.isWindow ? ' (ventana)' : ''}`;
+  }
+  return `${obstaculo.label || obstaculo.id} a ${distancia}`;
+}
+
 /**
  * Mantiene una tecla hasta que el jugador cruza el umbral en ese eje.
  *
  * `paso` nombra el tramo del recorrido ("entrar en WOHNZIMMER", "barrido: …"): un
  * timeout de 8 s no dice cuál de las caminatas se trabó, y el flujo pasa por
- * varios umbrales de la misma tecla. La etiqueta viaja en el error junto a la
- * tecla, el umbral y las posiciones reales del operador y del binomio.
+ * varios umbrales de la misma tecla.
+ *
+ * El tope no cambia —8 s y el mismo umbral—, pero mientras la tecla está pisada
+ * se muestrea el avance cada `CADENCIA_AVANCE` ms: cuánto avanzó, cuánto le
+ * faltaba y desde cuándo está quieto. El muestreo corre dentro de la página, así
+ * que no añade un viaje por cuadro, y su registro se renueva en cada llamada. En
+ * el fallo se suma qué puerta, muro o mueble tiene pegado el operador y dónde
+ * está el binomio: el mensaje y la traza ya no hay que cruzarlos a mano.
  */
 async function caminarHasta(page, tecla, umbral, paso) {
   const direccion = DIRECCION[tecla];
   if (!direccion) throw new Error(`tecla sin dirección: ${tecla}`);
   if (!paso) throw new Error(`caminarHasta sin etiqueta de paso (${tecla} ${umbral})`);
+  const idEspera = `${Date.now()}-${tecla}-${umbral}`;
   await page.keyboard.down(tecla);
   try {
     await page.waitForFunction(
-      ({ eje, umbral, hacia }) => {
-        const jugador = window.__eko?.snapshot()?.player;
+      ({ eje, umbral, hacia, registro, id }) => {
+        const estado = window.__eko?.snapshot();
+        const jugador = estado?.player;
         if (!jugador) return false;
+        let avance = window[registro];
+        if (!avance || avance.id !== id) {
+          avance = {
+            id,
+            inicio: jugador[eje],
+            mejor: jugador[eje],
+            ultimoAvanceEn: Date.now(),
+            tickInicio: estado.tick ?? null,
+            tickFin: estado.tick ?? null,
+            muestras: 0,
+          };
+          window[registro] = avance;
+        }
+        const ahora = Date.now();
+        avance.muestras += 1;
+        avance.tickFin = estado.tick ?? null;
+        // Sólo cuenta el avance en el sentido de la tecla: retroceder no acerca al umbral.
+        const progreso = hacia > 0 ? jugador[eje] - avance.mejor : avance.mejor - jugador[eje];
+        if (progreso >= 1) {
+          avance.mejor = jugador[eje];
+          avance.ultimoAvanceEn = ahora;
+        }
         return hacia > 0 ? jugador[eje] >= umbral : jugador[eje] <= umbral;
       },
-      { eje: direccion.eje, umbral, hacia: direccion.hacia },
-      { timeout: 8000 }
+      { eje: direccion.eje, umbral, hacia: direccion.hacia, registro: REGISTRO_AVANCE, id: idEspera },
+      { timeout: 8000, polling: CADENCIA_AVANCE }
     );
   } catch {
-    // El mensaje de Playwright no dice qué paso se trabó ni contra qué: se leen las dos
-    // posiciones reales para que el fallo se pueda ubicar sin abrir la traza.
-    const jugador = await leerJugador(page);
-    const binomio = await leerBinomio(page);
+    const avance = await page
+      .evaluate((registro) => {
+        const actual = window[registro];
+        return actual ? { ...actual, ahora: Date.now() } : null;
+      }, REGISTRO_AVANCE)
+      .catch(() => null);
+    const bloqueo = await diagnosticoDelBloqueo(page).catch(() => null);
+
+    const avanzado = avance ? Math.abs(avance.mejor - avance.inicio) : null;
+    const total = avance ? Math.abs(umbral - avance.inicio) : null;
+    const quieto = avance ? Math.max(0, avance.ahora - avance.ultimoAvanceEn) : null;
+    const muestreo = avance
+      ? `avanzó ${avanzado.toFixed(1)} de ${total.toFixed(1)} px y llevaba ` +
+        `${(quieto / 1000).toFixed(1)} s sin avanzar ` +
+        `(${avance.muestras} muestras, tick ${avance.tickInicio ?? '?'}→${avance.tickFin ?? '?'})`
+      : 'sin registro de avance';
+    const jugador = bloqueo?.jugador ?? null;
+    const binomio = bloqueo?.binomio ?? null;
+    const posiciones =
+      `jugador en ${jugador ? `${jugador.x.toFixed(1)}, ${jugador.y.toFixed(1)}` : '?'}` +
+      `; binomio en ${binomio ? `${binomio.x.toFixed(1)}, ${binomio.y.toFixed(1)}` : '?'}` +
+      (jugador && binomio
+        ? ` a ${Math.hypot(jugador.x - binomio.x, jugador.y - binomio.y).toFixed(1)} px`
+        : '');
+    const estorbo = bloqueo?.obstaculos?.length
+      ? bloqueo.obstaculos.map(describirObstaculo).join('; ')
+      : `nada a menos de ${RADIO_OBSTACULO} px del operador`;
+
     throw new Error(
       `el operador no llegó a ${tecla} ${umbral} en 8 s durante «${paso}» ` +
-        `(jugador en ${jugador ? `${jugador.x.toFixed(1)}, ${jugador.y.toFixed(1)}` : '?'}; ` +
-        `binomio en ${binomio ? `${binomio.x.toFixed(1)}, ${binomio.y.toFixed(1)}` : '?'})`
+        `(${muestreo}; ${posiciones}; ${estorbo})`
     );
   } finally {
     await page.keyboard.up(tecla);
   }
+}
+
+/** Banda alrededor del carril de un vano dentro de la cual el operador ya cruza franco. */
+const HOLGURA_CARRIL = 6;
+
+/**
+ * Deja al operador en el carril del vano antes de cruzarlo.
+ *
+ * Un vano mide 70 px y el motor frena a 17 px de cada hoja abierta y de cada jamb,
+ * así que el paso franco es una banda de ~36 px en el centro. Cruzar al filo deja al
+ * cuerpo clavado a media puerta aunque la puerta esté franca: pasó al entrar en la
+ * cocina con la hoja a un lado y al entrar en el salón por el borde del jamb sur.
+ *
+ * El carril se deriva del propio hueco —su punto medio, equidistante de los dos
+ * jambs sea cual sea el lado del hinge— y se corrige con pulsos cortos midiendo
+ * después de cada uno: una tecla sostenida rebasa el carril en hasta 15 px por el
+ * retardo del `keyup`, que es lo que volvía a dejarlo al filo. Es una ayuda, no una
+ * comprobación: si no llega, avisa con el motor, el tick y los obstáculos, y el
+ * cruce falla después con el mensaje completo de `caminarHasta`.
+ */
+async function alinearConElVano(page, puertaId) {
+  const puerta = await leerPuerta(page, puertaId);
+  if (!puerta) {
+    console.warn(`alineación: sin lectura de ${puertaId}`);
+    return;
+  }
+  const motor = () =>
+    page.evaluate(() => {
+      const estado = window.__eko?.snapshot();
+      return estado ? { gameState: estado.gameState, tick: estado.tick ?? null } : null;
+    });
+  const antes = await motor();
+  // Con el menú de pausa abierto el motor no lee el movimiento: un Escape lo cierra.
+  if (antes?.gameState === 'PAUSED') {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(150);
+  }
+  // La hoja corre a lo largo del hueco: si el hueco es horizontal se cruza en y y el
+  // carril es una x, y al revés.
+  const horizontal = Math.abs(puerta.x2 - puerta.x1) >= Math.abs(puerta.y2 - puerta.y1);
+  const eje = horizontal ? 'x' : 'y';
+  const objetivo = horizontal ? (puerta.x1 + puerta.x2) / 2 : (puerta.y1 + puerta.y2) / 2;
+  const [positiva, negativa] = horizontal ? ['KeyD', 'KeyA'] : ['KeyS', 'KeyW'];
+  for (let pulso = 0; pulso < 16; pulso += 1) {
+    const jugador = await leerJugador(page);
+    if (!jugador) {
+      console.warn(`alineación: sin jugador para el vano de ${puertaId}`);
+      return;
+    }
+    const desvio = objetivo - jugador[eje];
+    if (Math.abs(desvio) <= HOLGURA_CARRIL) return;
+    const tecla = desvio > 0 ? positiva : negativa;
+    await page.keyboard.down(tecla);
+    await page.waitForTimeout(70);
+    await page.keyboard.up(tecla);
+    await page.waitForTimeout(60);
+  }
+  const despues = await motor();
+  const bloqueo = await diagnosticoDelBloqueo(page).catch(() => null);
+  const estorbo = bloqueo?.obstaculos?.length
+    ? bloqueo.obstaculos.map(describirObstaculo).join('; ')
+    : `nada a menos de ${RADIO_OBSTACULO} px del operador`;
+  console.warn(
+    `alineación: no se llegó al carril de ${puertaId} ` +
+      `(${eje} = ${objetivo} ± ${HOLGURA_CARRIL}; jugador en ${await dondeEsta(page)}; ` +
+      `motor ${antes?.gameState}→${despues?.gameState}, tick ${antes?.tick}→${despues?.tick}; ` +
+      `${estorbo})`
+  );
 }
 
 /**
@@ -460,8 +679,12 @@ export async function comprobarPersistencia(page, { url }) {
       return;
     }
     await caminarHasta(page, 'KeyD', 545, `entrar en ${SALA_SONDA}`);
-    if ((await estadoEnPad(page, SALA_SONDA)) !== 'DESPEJADA') {
-      fail(`persistencia: ${SALA_SONDA} no queda DESPEJADA al entrar`);
+    const estadoAlEntrar = await estadoEnPad(page, SALA_SONDA);
+    if (estadoAlEntrar !== 'DESPEJADA') {
+      fail(
+        `persistencia: ${SALA_SONDA} no queda DESPEJADA al entrar ` +
+          `(pad: ${estadoAlEntrar ?? 'ausente'}; jugador en ${await dondeEsta(page)})`
+      );
       return;
     }
     await caminarHasta(page, 'KeyA', 500, `salir de ${SALA_SONDA} al vano`);
@@ -547,6 +770,7 @@ export async function comprobarPersistencia(page, { url }) {
       return;
     }
     await apuntarA(page, MIRA_BARRIDO);
+    await alinearConElVano(page, PUERTA_COCINA);
     await caminarHasta(
       page,
       'KeyW',
@@ -721,6 +945,7 @@ export async function comprobarPersistencia(page, { url }) {
       return;
     }
     await apuntarA(page, MIRA_BARRIDO);
+    await alinearConElVano(page, PUERTA_COCINA);
     await caminarHasta(
       page,
       'KeyW',
@@ -778,6 +1003,7 @@ export async function comprobarPersistencia(page, { url }) {
               contacto: document.querySelector(selector)?.getAttribute('data-en-contacto') ?? '',
               visibleToSquad: Boolean(actor?.visibleToSquad),
               visibleToPlayer: Boolean(actor?.visibleToPlayer),
+              actor: actor ? { x: actor.x, y: actor.y } : null,
             };
           },
           { selector: PANEL_DESPEJE, sala: SALA_CONTACTO }
@@ -814,7 +1040,12 @@ export async function comprobarPersistencia(page, { url }) {
           `${puntoMarcado ? 'fijó' : 'no fijó'}; ` +
           `contacto ${lecturaCamara?.contacto || 'ninguno'}, a la vista del binomio ` +
           `${lecturaCamara?.visibleToSquad === true}, del operador ` +
-          `${lecturaCamara?.visibleToPlayer === true})`
+          `${lecturaCamara?.visibleToPlayer === true}` +
+          (squad && lecturaCamara?.actor
+            ? `; rendido en ${lecturaCamara.actor.x.toFixed(1)}, ${lecturaCamara.actor.y.toFixed(1)} ` +
+              `a ${Math.hypot(lecturaCamara.actor.x - squad.x, lecturaCamara.actor.y - squad.y).toFixed(1)} px`
+            : '') +
+          ')'
       );
       return;
     }
