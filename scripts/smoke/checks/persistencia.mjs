@@ -65,6 +65,15 @@ import {
   marcarPuntoDeAvance,
 } from '../navegador.mjs';
 import { leerHud as leerDespejeHud, leerPad as leerDespejePad } from './despeje.mjs';
+import { SEMILLA_E2E_TEXTO } from '../config.mjs';
+import { contarMundo, huellaDelMundo } from '../huella-mundo.mjs';
+import {
+  HOLGURA_CUERPO,
+  PASO_REJILLA,
+  cabeElCuerpo,
+  obstaculosDelMundo,
+  planificarRuta,
+} from '../ruta.mjs';
 
 const MISION = 'Misión 1: Piso Graz - Lend';
 const CLAVE_GUARDADO = 'eko_cobra_partida_en_curso';
@@ -86,16 +95,29 @@ const SALA_CONTACTO = 'WOHNKUECHE';
 const NOMBRE_SALA_CONTACTO = 'Cocina-Comedor';
 /** Punto al este de la cocina: lejos del hostil y fuera del cono de la mira. */
 const MIRA_BARRIDO = { x: 700, y: 320 };
+/** La misma mira contra la pared oeste, para barrer caminando hacia el vano. */
+const MIRA_BARRIDO_OESTE = { x: 320, y: 320 };
+/** Extremos de la banda de la cocina donde se busca el punto de barrido. */
+const X_MINIMA_BARRIDO = 400;
 /** Punto de barrido base, en el fondo de la cocina (la estancia llega a x = 660). */
 const PUNTO_BARRIDO = { x: 540, y: 262 };
 /** El rendido entra en intel a menos de 95 px: se barre con 25 px de margen. */
 const DISTANCIA_BARRIDO = 120;
-/** A menos de 85 px la cámara del binomio marca al rendido sin depender del ángulo. */
+/** Distancia a la que se apuesta al binomio: bien dentro del alcance de su cámara. */
 const CERCANIA_CAMARA = 60;
+/** Por debajo de este alcance la cámara de casco marca al rendido sin depender del ángulo. */
+const ALCANCE_CAMARA = 85;
 /** Tiempo que la cámara del binomio tiene que sostener la vista antes de dar el contacto. */
 const VISTA_SOSTENIDA_MS = 800;
 /** Pared este del comedor (x = 660) menos 20 px de aire. */
 const X_MAXIMA_BARRIDO = 640;
+
+/**
+ * Huella del mundo procedural de la Misión 1 con la semilla del humo. Cualquier
+ * cambio de mobiliario, muro o puerta la mueve; si deja de coincidir, el escenario
+ * no es el del arranque limpio y ningún fallo posterior se puede atribuir al paso.
+ */
+const HUELLA_MUNDO_ESPERADA = '14011c54';
 
 /** Lee una instantánea atómica del motor; falla si no hay jugador creado. */
 async function leerEstado(page) {
@@ -177,32 +199,42 @@ async function esperarHudDespejadas(page, despejadas, timeout = 5000) {
   }
 }
 
-/** Eje y sentido de cada tecla de movimiento; lo usa `caminarHasta`. */
-const DIRECCION = {
-  KeyW: { eje: 'y', hacia: -1 },
-  KeyS: { eje: 'y', hacia: 1 },
-  KeyA: { eje: 'x', hacia: -1 },
-  KeyD: { eje: 'x', hacia: 1 },
-};
-
-/** Cadencia con la que la espera mira el avance mientras la tecla está pisada. */
-const CADENCIA_AVANCE = 100;
-/** Radio con el que se busca qué tiene pegado el operador cuando deja de avanzar. */
+/** Punto de barrido: distancia al rendido que lo deja fuera del intel. */
 const RADIO_OBSTACULO = 60;
-/** Registro de avance que la espera deja en la propia página. */
-const REGISTRO_AVANCE = '__ekoAvanceDeCaminata';
-/** Tope de cada caminata, en ms. Se informa para medir el margen, no se toca. */
+/** Holgura de cuerpo con la que se comprueba el corredor hasta el punto de barrido. */
+const HOLGURA_BARRIDO = 17;
+/** Tope de cada caminata, en ms: presupuesto de la caminata entera, no de un tramo. */
 const TOPE_CAMINATA = 8000;
-
-/** Una fila por caminata de la pasada: duración real, px recorridos y muestras. */
+/**
+ * Distancia a la que se da por alcanzado un punto intermedio de la ruta: lo que avanza
+ * el cuerpo en el toque más corto. Con menos, el operador rebota alrededor del punto
+ * —ida y vuelta de 6 px— hasta gastar el tope sin haberse movido de sitio.
+ */
+const HOLGURA_PASO = 10;
+/** Distancia a la que se da por alcanzado el destino final. */
+const HOLGURA_FINAL = 4;
+/**
+ * Tolerancia de la aserción final, por eje.
+ *
+ * Es lo que avanza el cuerpo en un frame del motor con la máquina cargada: en la pasada
+ * completa un frame puede durar ~100 ms y a 200 px/s son ~20 px, de modo que ningún
+ * toque puede dejar al operador más fino que eso. Los tramos del piso se miden en
+ * decenas de píxeles: la coordenada pedida se sigue afirmando, con la precisión que
+ * permite el motor.
+ */
+const HOLGURA_DESTINO = 12;
+/** Espera tras soltar, para que la lectura del motor sea la del cuerpo ya parado. */
+const ASENTAR_MS = 90;
+/** Una fila por caminata de la pasada: duración real, px recorridos y tramos. */
 const CAMINATAS = [];
 
 /** Deja constancia de una caminata en el log y en el resumen final. */
 function registrarCaminata(fila) {
   CAMINATAS.push(fila);
   console.log(
-    `caminarHasta · ${String(fila.ms).padStart(5)} ms · ${fila.px.toFixed(1).padStart(5)} px · ` +
-      `${fila.tecla} ${fila.umbral} · «${fila.paso}»`
+    `caminarA · ${String(fila.ms).padStart(5)} ms · ${fila.px.toFixed(1).padStart(5)} px · ` +
+      `${String(fila.tramos).padStart(2)} tramos → (${fila.destino.x.toFixed(0)}, ` +
+      `${fila.destino.y.toFixed(0)}) · «${fila.paso}»`
   );
 }
 
@@ -212,15 +244,15 @@ function volcarTablaCaminatas() {
   const ordenadas = [...CAMINATAS].sort((a, b) => b.ms - a.ms);
   const masLenta = ordenadas[0];
   console.log(
-    `caminarHasta: ${ordenadas.length} caminatas, tope ${TOPE_CAMINATA} ms; ` +
+    `caminarA: ${ordenadas.length} caminatas, tope ${TOPE_CAMINATA} ms; ` +
       `la más lenta usó ${masLenta.ms} ms (${(100 * masLenta.ms / TOPE_CAMINATA).toFixed(1)} % ` +
       `del tope, ${(TOPE_CAMINATA - masLenta.ms)} ms de margen)`
   );
   for (const fila of ordenadas) {
     console.log(
       `  ${String(fila.ms).padStart(5)} ms · ${fila.px.toFixed(1).padStart(5)} px de ` +
-        `${fila.objetivo.toFixed(1).padStart(5)} px · ${String(fila.muestras).padStart(3)} muestras · ` +
-        `${fila.tecla} ${fila.umbral} · «${fila.paso}»`
+        `${fila.objetivo.toFixed(1).padStart(5)} px · ${String(fila.tramos).padStart(2)} tramos · ` +
+        `(${fila.destino.x.toFixed(0)}, ${fila.destino.y.toFixed(0)}) · «${fila.paso}»`
     );
   }
 }
@@ -316,124 +348,252 @@ function describirObstaculo(obstaculo) {
   return `${obstaculo.label || obstaculo.id} a ${distancia}`;
 }
 
+/** Teclas de movimiento; se sueltan todas al final de cada pulso. */
+const TECLAS_DE_MOVIMIENTO = ['KeyW', 'KeyA', 'KeyS', 'KeyD'];
+
 /**
- * Mantiene una tecla hasta que el jugador cruza el umbral en ese eje.
+ * Suelta las teclas de movimiento por partida doble: por el canal del navegador y con
+ * un `keyup` dentro de la página.
  *
- * `paso` nombra el tramo del recorrido ("entrar en WOHNZIMMER", "barrido: …"): un
- * timeout de 8 s no dice cuál de las caminatas se trabó, y el flujo pasa por
- * varios umbrales de la misma tecla.
- *
- * El tope no cambia —8 s y el mismo umbral—, pero mientras la tecla está pisada
- * se muestrea el avance cada `CADENCIA_AVANCE` ms: cuánto avanzó, cuánto le
- * faltaba y desde cuándo está quieto. El muestreo corre dentro de la página, así
- * que no añade un viaje por cuadro, y su registro se renueva en cada llamada. En
- * el fallo se suma qué puerta, muro o mueble tiene pegado el operador y dónde
- * está el binomio: el mensaje y la traza ya no hay que cruzarlos a mano.
+ * Con la máquina cargada (perfil completo, otras pestañas con el motor andando) se vio
+ * al operador seguir caminando después de soltar: el `keyup` del navegador se perdió y
+ * el cuerpo se plantó 40 px más allá del punto, sin nada cerca que lo explicara.
  */
-async function caminarHasta(page, tecla, umbral, paso) {
-  const direccion = DIRECCION[tecla];
-  if (!direccion) throw new Error(`tecla sin dirección: ${tecla}`);
-  if (!paso) throw new Error(`caminarHasta sin etiqueta de paso (${tecla} ${umbral})`);
-  const idEspera = `${Date.now()}-${tecla}-${umbral}`;
+async function soltarTeclas(page) {
+  for (const tecla of TECLAS_DE_MOVIMIENTO) await page.keyboard.up(tecla);
+  await page
+    .evaluate((teclas) => {
+      for (const tecla of teclas) {
+        const letra = tecla.slice(3).toLowerCase();
+        for (const destino of [window, document]) {
+          destino.dispatchEvent(
+            new KeyboardEvent('keyup', { code: tecla, key: letra, bubbles: true })
+          );
+        }
+      }
+    }, TECLAS_DE_MOVIMIENTO)
+    .catch(() => {});
+}
+
+/**
+ * Suelta las teclas y espera a que el cuerpo se quede quieto; si deriva, vuelve a soltar.
+ * Devuelve la última posición leída, ya sin deriva.
+ */
+async function aquietar(page, jugador) {
+  let actual = jugador;
+  for (let intento = 0; intento < 3; intento += 1) {
+    await soltarTeclas(page);
+    await page.waitForTimeout(120);
+    const siguiente = await leerJugador(page);
+    if (!siguiente) return actual;
+    const deriva = Math.hypot(siguiente.x - actual.x, siguiente.y - actual.y) > 1;
+    actual = siguiente;
+    if (!deriva) return actual;
+  }
+  return actual;
+}
+
+/**
+ * Acerca al operador a un punto con toques cortos, midiendo entre uno y otro.
+ *
+ * Medido en el motor: una tecla sostenida mueve al cuerpo de forma continua (200 ms son
+ * 39 px) y una pulsación de 60 ms unos 13 px, pero el corte de una tecla sostenida se
+ * pasa ~10 px porque la posición que se lee va un frame atrás. Con toques la carrera se
+ * corta sola —el cuerpo queda quieto antes de leer— y lo que sobra por toque es lo que
+ * avanza ese toque (30 ms ≈ 6 px). Después de cada toque se espera `ASENTAR_MS` para que
+ * la lectura sea la del cuerpo ya parado, y se decide el toque siguiente.
+ */
+async function seguirHasta(page, punto, { holgura = HOLGURA_PASO, tope = TOPE_CAMINATA } = {}) {
   const comienzo = Date.now();
-  await page.keyboard.down(tecla);
+  let muestras = 0;
+  let jugador = await leerJugador(page);
+  if (!jugador) throw new Error('window.__eko no expone un jugador');
+  let sinAvance = 0;
+  let rodeos = 0;
+  while (Date.now() - comienzo < tope) {
+    const dx = punto.x - jugador.x;
+    const dy = punto.y - jugador.y;
+    const distancia = Math.hypot(dx, dy);
+    if (distancia <= holgura) {
+      jugador = await aquietar(page, jugador);
+      const quieto = Math.hypot(punto.x - jugador.x, punto.y - jugador.y);
+      if (quieto <= holgura) return { ok: true, muestras, distancia: quieto, jugador };
+      continue;
+    }
+    const teclas = [];
+    if (Math.abs(dx) > 1.5) teclas.push(dx > 0 ? 'KeyD' : 'KeyA');
+    if (Math.abs(dy) > 1.5) teclas.push(dy > 0 ? 'KeyS' : 'KeyW');
+    if (!teclas.length) continue;
+    // Trabado: el cuerpo se engancha en un jamb que la rejilla no distingue. Un paso
+    // perpendicular corto lo desengancha y el toque siguiente vuelve al rumbo.
+    if (sinAvance >= 2 && rodeos < 6) {
+      const costado = Math.abs(dx) >= Math.abs(dy) ? (dy >= 0 ? 'KeyS' : 'KeyW') : dx >= 0 ? 'KeyD' : 'KeyA';
+      await tocar(page, [costado], 60);
+      rodeos += 1;
+      sinAvance = 0;
+      jugador = (await leerJugador(page)) ?? jugador;
+      muestras += 1;
+      continue;
+    }
+    await tocar(page, teclas, Math.round(Math.min(140, Math.max(30, distancia * 4.5))));
+    const actual = await leerJugador(page);
+    if (!actual) break;
+    const avance = Math.hypot(actual.x - jugador.x, actual.y - jugador.y);
+    sinAvance = avance < 0.5 ? sinAvance + 1 : 0;
+    jugador = actual;
+    muestras += 1;
+  }
+  jugador = await aquietar(page, jugador);
+  const distancia = Math.hypot(punto.x - jugador.x, punto.y - jugador.y);
+  return {
+    ok: distancia <= holgura,
+    motivo: distancia <= holgura ? '' : 'tope',
+    distancia,
+    muestras,
+    jugador,
+  };
+}
+
+/**
+ * Da un toque de `ms`, suelta todo y espera a que la lectura refleje el cuerpo parado.
+ *
+ * Con la máquina cargada un frame puede durar más que `ASENTAR_MS`; leer al tiempo
+ * fijo devuelve una posición a mitad del toque y el toque siguiente se decide sobre
+ * datos viejos, que es como el operador acaba 30 px pasado del destino. Después del
+ * margen fijo se sondea hasta que dos lecturas seguidas coinciden: la decisión
+ * siguiente ya se toma sobre el cuerpo quieto.
+ */
+async function tocar(page, teclas, ms) {
+  for (const tecla of teclas) await page.keyboard.down(tecla);
   try {
-    await page.waitForFunction(
-      ({ eje, umbral, hacia, registro, id }) => {
-        const estado = window.__eko?.snapshot();
-        const jugador = estado?.player;
-        if (!jugador) return false;
-        let avance = window[registro];
-        if (!avance || avance.id !== id) {
-          avance = {
-            id,
-            inicio: jugador[eje],
-            mejor: jugador[eje],
-            ultimoAvanceEn: Date.now(),
-            tickInicio: estado.tick ?? null,
-            tickFin: estado.tick ?? null,
-            muestras: 0,
-          };
-          window[registro] = avance;
-        }
-        const ahora = Date.now();
-        avance.muestras += 1;
-        avance.tickFin = estado.tick ?? null;
-        // Sólo cuenta el avance en el sentido de la tecla: retroceder no acerca al umbral.
-        const progreso = hacia > 0 ? jugador[eje] - avance.mejor : avance.mejor - jugador[eje];
-        if (progreso >= 1) {
-          avance.mejor = jugador[eje];
-          avance.ultimoAvanceEn = ahora;
-        }
-        return hacia > 0 ? jugador[eje] >= umbral : jugador[eje] <= umbral;
-      },
-      { eje: direccion.eje, umbral, hacia: direccion.hacia, registro: REGISTRO_AVANCE, id: idEspera },
-      { timeout: TOPE_CAMINATA, polling: CADENCIA_AVANCE }
-    );
-    const avance = await page
-      .evaluate((registro) => {
-        const actual = window[registro];
-        return actual ? { inicio: actual.inicio, mejor: actual.mejor, muestras: actual.muestras } : null;
-      }, REGISTRO_AVANCE)
-      .catch(() => null);
-    registrarCaminata({
-      paso,
-      tecla,
-      umbral,
-      ms: Date.now() - comienzo,
-      px: avance ? Math.abs(avance.mejor - avance.inicio) : 0,
-      objetivo: avance ? Math.abs(umbral - avance.inicio) : 0,
-      muestras: avance?.muestras ?? 0,
-    });
-  } catch {
-    const avance = await page
-      .evaluate((registro) => {
-        const actual = window[registro];
-        return actual ? { ...actual, ahora: Date.now() } : null;
-      }, REGISTRO_AVANCE)
-      .catch(() => null);
-    const bloqueo = await diagnosticoDelBloqueo(page).catch(() => null);
-
-    const avanzado = avance ? Math.abs(avance.mejor - avance.inicio) : null;
-    const total = avance ? Math.abs(umbral - avance.inicio) : null;
-    const quieto = avance ? Math.max(0, avance.ahora - avance.ultimoAvanceEn) : null;
-    const muestreo = avance
-      ? `avanzó ${avanzado.toFixed(1)} de ${total.toFixed(1)} px y llevaba ` +
-        `${(quieto / 1000).toFixed(1)} s sin avanzar ` +
-        `(${avance.muestras} muestras, tick ${avance.tickInicio ?? '?'}→${avance.tickFin ?? '?'})`
-      : 'sin registro de avance';
-    const jugador = bloqueo?.jugador ?? null;
-    const binomio = bloqueo?.binomio ?? null;
-    const posiciones =
-      `jugador en ${jugador ? `${jugador.x.toFixed(1)}, ${jugador.y.toFixed(1)}` : '?'}` +
-      `; binomio en ${binomio ? `${binomio.x.toFixed(1)}, ${binomio.y.toFixed(1)}` : '?'}` +
-      (jugador && binomio
-        ? ` a ${Math.hypot(jugador.x - binomio.x, jugador.y - binomio.y).toFixed(1)} px`
-        : '');
-    const estorbo = bloqueo?.obstaculos?.length
-      ? bloqueo.obstaculos.map(describirObstaculo).join('; ')
-      : `nada a menos de ${RADIO_OBSTACULO} px del operador`;
-
-    registrarCaminata({
-      paso,
-      tecla,
-      umbral,
-      ms: Date.now() - comienzo,
-      px: avanzado ?? 0,
-      objetivo: total ?? 0,
-      muestras: avance?.muestras ?? 0,
-    });
-    throw new Error(
-      `el operador no llegó a ${tecla} ${umbral} en 8 s durante «${paso}» ` +
-        `(${muestreo}; ${posiciones}; ${estorbo})`
-    );
+    await page.waitForTimeout(ms);
   } finally {
-    await page.keyboard.up(tecla);
+    await soltarTeclas(page);
+  }
+  await page.waitForTimeout(ASENTAR_MS);
+  let anterior = await leerJugador(page);
+  for (let intento = 0; intento < 12 && anterior; intento += 1) {
+    await page.waitForTimeout(30);
+    const actual = await leerJugador(page);
+    if (!actual) return;
+    if (Math.hypot(actual.x - anterior.x, actual.y - anterior.y) <= 0.5) return;
+    anterior = actual;
   }
 }
 
-/** Banda alrededor del carril de un vano dentro de la cual el operador ya cruza franco. */
-const HOLGURA_CARRIL = 6;
+/**
+ * Lleva al operador a `destino` por una ruta derivada del snapshot.
+ *
+ * `caminarHasta(tecla, umbral)` codificaba la geometría del mapa en la comprobación:
+ * sostenía una tecla hasta cruzar una coordenada y el carril de cada vano se corregía
+ * aparte, a mano. Con una puerta nueva en el mapa eso deja de valer. Aquí la ruta la
+ * calcula `planificarRuta` sobre muros, hojas y mobiliario con 17 px de holgura, cruza
+ * cada vano por su punto medio y termina en la coordenada pedida; lo que se afirma al
+ * final es esa coordenada, no la tecla. Un eje que no se pide conserva la posición
+ * actual, igual que antes.
+ */
+async function caminarA(page, destino, paso) {
+  if (!paso) throw new Error(`caminarA sin etiqueta de paso (${JSON.stringify(destino)})`);
+  const desde = await leerJugador(page);
+  if (!desde) throw new Error('window.__eko no expone un jugador');
+  const objetivo = { x: destino.x ?? desde.x, y: destino.y ?? desde.y };
+  const comienzo = Date.now();
+  const estado = await page.evaluate(() => {
+    const snap = window.__eko?.snapshot();
+    return snap ? { mundo: snap.world, gameState: snap.gameState } : null;
+  });
+  if (!estado) throw new Error('window.__eko no expone el motor');
+  // Con el menú de pausa abierto el motor no lee el movimiento: un Escape lo cierra.
+  if (estado.gameState === 'PAUSED') {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(150);
+  }
+  const ruta = planificarRuta(estado.mundo, desde, objetivo);
+  const consumido = () => Date.now() - comienzo;
+  const fila = {
+    paso,
+    destino: objetivo,
+    ms: 0,
+    px: 0,
+    objetivo: Math.hypot(objetivo.x - desde.x, objetivo.y - desde.y),
+    tramos: ruta.puntos.length,
+    muestras: 0,
+  };
+  try {
+    if (!ruta.puntos.length) {
+      const bloqueo = await diagnosticoDelBloqueo(page).catch(() => null);
+      const estorbo = bloqueo?.obstaculos?.length
+        ? bloqueo.obstaculos.map(describirObstaculo).join('; ')
+        : `nada a menos de ${RADIO_OBSTACULO} px del operador`;
+      throw new Error(
+        `sin ruta hasta (${objetivo.x.toFixed(1)}, ${objetivo.y.toFixed(1)}) durante «${paso}» ` +
+          `(${ruta.motivo}; jugador en ${desde.x.toFixed(1)}, ${desde.y.toFixed(1)}; ${estorbo})`
+      );
+    }
+    let muestras = 0;
+    for (let tramo = 0; tramo < ruta.puntos.length; tramo += 1) {
+      const punto = ruta.puntos[tramo];
+      const ultimo = tramo === ruta.puntos.length - 1;
+      const seguimiento = await seguirHasta(page, punto, {
+        // El último tramo se da por bueno con la tolerancia de la aserción final: exigirle
+        // más precisión que la que se afirma deja al operador sin margen en un rincón.
+        holgura: ultimo ? HOLGURA_DESTINO : HOLGURA_PASO,
+        tope: Math.max(500, TOPE_CAMINATA - consumido()),
+      });
+      muestras += seguimiento.muestras;
+      fila.muestras = muestras;
+      if (!seguimiento.ok) {
+        const bloqueo = await diagnosticoDelBloqueo(page).catch(() => null);
+        const jugador = bloqueo?.jugador ?? seguimiento.jugador ?? null;
+        const binomio = bloqueo?.binomio ?? null;
+        const estorbo = bloqueo?.obstaculos?.length
+          ? bloqueo.obstaculos.map(describirObstaculo).join('; ')
+          : `nada a menos de ${RADIO_OBSTACULO} px del operador`;
+        throw new Error(
+          `el operador no llegó al tramo ${tramo + 1}/${ruta.puntos.length} de «${paso}» ` +
+            `en ${TOPE_CAMINATA} ms (${seguimiento.motivo}; faltaban ` +
+            `${Number.isNaN(seguimiento.distancia) ? '?' : seguimiento.distancia.toFixed(1)} px ` +
+            `para (${punto.x}, ${punto.y}) de la ruta ` +
+            `${ruta.puntos.map((item) => `(${item.x}, ${item.y})`).join(' → ')}; ` +
+            `jugador en ${jugador ? `${jugador.x.toFixed(1)}, ${jugador.y.toFixed(1)}` : '?'}` +
+            `; binomio en ${binomio ? `${binomio.x.toFixed(1)}, ${binomio.y.toFixed(1)}` : '?'}` +
+            `; ${estorbo})`
+        );
+      }
+    }
+    // El motor empuja al cuerpo al rozar un jamb, así que el último tramo puede
+    // dejarlo unos píxeles fuera: antes de afirmar la coordenada se corrige una vez.
+    let final = await leerJugador(page);
+    if (!final) throw new Error('window.__eko no expone un jugador al terminar la ruta');
+    final = await aquietar(page, final);
+    if (Math.max(Math.abs(final.x - objetivo.x), Math.abs(final.y - objetivo.y)) > HOLGURA_FINAL / 2) {
+      await seguirHasta(page, objetivo, { holgura: HOLGURA_FINAL / 2, tope: 1200 });
+      // La corrección termina con el cuerpo parado: leer justo después del último toque
+      // devuelve a veces una posición de un frame antes y la aserción falla por décimas.
+      final = await aquietar(page, (await leerJugador(page)) ?? final);
+    }
+    fila.px = Math.hypot(final.x - desde.x, final.y - desde.y);
+    const desvio = Math.max(Math.abs(final.x - objetivo.x), Math.abs(final.y - objetivo.y));
+    if (desvio > HOLGURA_DESTINO) {
+      const bloqueo = await diagnosticoDelBloqueo(page).catch(() => null);
+      const estorbo = bloqueo?.obstaculos?.length
+        ? bloqueo.obstaculos.map(describirObstaculo).join('; ')
+        : `nada a menos de ${RADIO_OBSTACULO} px del operador`;
+      throw new Error(
+        `el operador quedó en (${final.x.toFixed(1)}, ${final.y.toFixed(1)}) y no en ` +
+          `(${objetivo.x.toFixed(1)}, ${objetivo.y.toFixed(1)}) durante «${paso}»: ` +
+          `${desvio.toFixed(1)} px de desvío, tolerancia ${HOLGURA_DESTINO} px ` +
+          `(ruta ${ruta.puntos.map((item) => `(${item.x}, ${item.y})`).join(' → ')}` +
+          `; jugador en ${final.x.toFixed(1)}, ${final.y.toFixed(1)}` +
+          `; binomio en ${bloqueo?.binomio ? `${bloqueo.binomio.x.toFixed(1)}, ${bloqueo.binomio.y.toFixed(1)}` : '?'}` +
+          `; ${estorbo})`
+      );
+    }
+  } finally {
+    fila.ms = consumido();
+    registrarCaminata(fila);
+  }
+}
 
 /** Caja interior de la cocina donde tiene sentido apostar al binomio. */
 const CAJA_APOSTADERO = { x0: 372, y0: 112, x1: 642, y1: 272 };
@@ -603,71 +763,6 @@ async function elegirApostaderoDeCamara(page, { sospechoso, hacia, distancias })
 }
 
 /**
- * Deja al operador en el carril del vano antes de cruzarlo.
- *
- * Un vano mide 70 px y el motor frena a 17 px de cada hoja abierta y de cada jamb,
- * así que el paso franco es una banda de ~36 px en el centro. Cruzar al filo deja al
- * cuerpo clavado a media puerta aunque la puerta esté franca: pasó al entrar en la
- * cocina con la hoja a un lado y al entrar en el salón por el borde del jamb sur.
- *
- * El carril se deriva del propio hueco —su punto medio, equidistante de los dos
- * jambs sea cual sea el lado del hinge— y se corrige con pulsos cortos midiendo
- * después de cada uno: una tecla sostenida rebasa el carril en hasta 15 px por el
- * retardo del `keyup`, que es lo que volvía a dejarlo al filo. Es una ayuda, no una
- * comprobación: si no llega, avisa con el motor, el tick y los obstáculos, y el
- * cruce falla después con el mensaje completo de `caminarHasta`.
- */
-async function alinearConElVano(page, puertaId) {
-  const puerta = await leerPuerta(page, puertaId);
-  if (!puerta) {
-    console.warn(`alineación: sin lectura de ${puertaId}`);
-    return;
-  }
-  const motor = () =>
-    page.evaluate(() => {
-      const estado = window.__eko?.snapshot();
-      return estado ? { gameState: estado.gameState, tick: estado.tick ?? null } : null;
-    });
-  const antes = await motor();
-  // Con el menú de pausa abierto el motor no lee el movimiento: un Escape lo cierra.
-  if (antes?.gameState === 'PAUSED') {
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(150);
-  }
-  // La hoja corre a lo largo del hueco: si el hueco es horizontal se cruza en y y el
-  // carril es una x, y al revés.
-  const horizontal = Math.abs(puerta.x2 - puerta.x1) >= Math.abs(puerta.y2 - puerta.y1);
-  const eje = horizontal ? 'x' : 'y';
-  const objetivo = horizontal ? (puerta.x1 + puerta.x2) / 2 : (puerta.y1 + puerta.y2) / 2;
-  const [positiva, negativa] = horizontal ? ['KeyD', 'KeyA'] : ['KeyS', 'KeyW'];
-  for (let pulso = 0; pulso < 16; pulso += 1) {
-    const jugador = await leerJugador(page);
-    if (!jugador) {
-      console.warn(`alineación: sin jugador para el vano de ${puertaId}`);
-      return;
-    }
-    const desvio = objetivo - jugador[eje];
-    if (Math.abs(desvio) <= HOLGURA_CARRIL) return;
-    const tecla = desvio > 0 ? positiva : negativa;
-    await page.keyboard.down(tecla);
-    await page.waitForTimeout(70);
-    await page.keyboard.up(tecla);
-    await page.waitForTimeout(60);
-  }
-  const despues = await motor();
-  const bloqueo = await diagnosticoDelBloqueo(page).catch(() => null);
-  const estorbo = bloqueo?.obstaculos?.length
-    ? bloqueo.obstaculos.map(describirObstaculo).join('; ')
-    : `nada a menos de ${RADIO_OBSTACULO} px del operador`;
-  console.warn(
-    `alineación: no se llegó al carril de ${puertaId} ` +
-      `(${eje} = ${objetivo} ± ${HOLGURA_CARRIL}; jugador en ${await dondeEsta(page)}; ` +
-      `motor ${antes?.gameState}→${despues?.gameState}, tick ${antes?.tick}→${despues?.tick}; ` +
-      `${estorbo})`
-  );
-}
-
-/**
  * Apunta la mira del ratón a un punto del mundo. La visión del jugador y el cono
  * de la linterna siguen la mira, no la última tecla de movimiento pulsada.
  */
@@ -687,8 +782,45 @@ async function apuntarA(page, destino) {
  * medio girar el vano sigue bloqueado. Antes de la primera pulsación se deja al
  * operador dentro del radio de la puerta (ver `acercarseAPuerta`).
  */
-async function accionarPuerta(page, puertaId, hecho) {
+/**
+ * Aparta al operador del carril de la hoja antes de cerrarla.
+ *
+ * Con la hoja cerrada el motor rechaza cualquier paso cuyo destino siga a menos de
+ * `HOLGURA_CUERPO` (17 px) de la hoja cerrada, así que un cuerpo que queda dentro de
+ * esa banda al cerrar no puede salir: cada paso corto vuelve a caer dentro y el
+ * operador queda encerrado en el vano. Por eso la puerta se cierra desde el carril,
+ * a dos holguras del plano de la hoja cerrada, que es el mismo eje que usa la ruta.
+ */
+async function apartarseDeLaHoja(page, puerta) {
+  const jugador = await leerJugador(page);
+  if (!jugador) return;
+  const dx = puerta.x2 - puerta.x1;
+  const dy = puerta.y2 - puerta.y1;
+  const largo = Math.hypot(dx, dy);
+  if (!largo) return;
+  const normal = { x: -dy / largo, y: dx / largo };
+  const medio = { x: (puerta.x1 + puerta.x2) / 2, y: (puerta.y1 + puerta.y2) / 2 };
+  const lado = Math.sign((jugador.x - medio.x) * normal.x + (jugador.y - medio.y) * normal.y) || 1;
+  const distancia = Math.abs(
+    (jugador.x - medio.x) * normal.x + (jugador.y - medio.y) * normal.y
+  );
+  if (distancia >= HOLGURA_CUERPO * 2) return;
+  await caminarA(
+    page,
+    {
+      x: medio.x + normal.x * lado * HOLGURA_CUERPO * 2,
+      y: medio.y + normal.y * lado * HOLGURA_CUERPO * 2,
+    },
+    `apartarse de ${puerta.id} para cerrarla`
+  );
+}
+
+async function accionarPuerta(page, puertaId, hecho, { alCerrar = false } = {}) {
   await acercarseAPuerta(page, puertaId);
+  if (alCerrar) {
+    const puerta = await leerPuerta(page, puertaId);
+    if (puerta?.isFullyOpen) await apartarseDeLaHoja(page, puerta);
+  }
   for (let paso = 0; paso < 8; paso += 1) {
     const puerta = await leerPuerta(page, puertaId);
     if (puerta && hecho(puerta)) return true;
@@ -740,6 +872,26 @@ async function despejadasGuardadas(page) {
 export async function comprobarPersistencia(page, { url }) {
   try {
     await arrancarMision(page, url, MISION, { asentarMs: 400 });
+    // Antes de mover nada se afirma el escenario: así un fallo en un paso se puede
+    // atribuir al paso. Sin esta huella, una partida guardada heredada o una misión
+    // retomada cambian el punto de partida y el fallo no dice de qué es.
+    const mundoInicial = await page.evaluate(() => window.__eko?.snapshot()?.world ?? null);
+    if (!mundoInicial) {
+      fail('persistencia: el motor no publica el mundo al arrancar');
+      return;
+    }
+    const huella = huellaDelMundo(mundoInicial);
+    const recuento = contarMundo(mundoInicial);
+    const escenario = `${recuento.muros} muros, ${recuento.puertas} puertas, ${recuento.muebles} muebles`;
+    if (huella !== HUELLA_MUNDO_ESPERADA) {
+      fail(
+        `persistencia: el mundo no es el procedural de la semilla ${SEMILLA_E2E_TEXTO} ` +
+          `(huella ${huella}, esperada ${HUELLA_MUNDO_ESPERADA}; ${escenario}); el estado ` +
+          `de partida no es un arranque limpio, así que un fallo posterior no es del paso`
+      );
+      return;
+    }
+    console.log(`persistencia: mundo procedural ${SEMILLA_E2E_TEXTO} · huella ${huella} · ${escenario}`);
     const jugadorInicial = await leerJugador(page);
     if (!jugadorInicial) throw new Error('window.__eko no expone un jugador');
     if (Math.abs(jugadorInicial.x - X_FUERA_SALA) > 40) {
@@ -770,7 +922,7 @@ export async function comprobarPersistencia(page, { url }) {
       timeout: 5000,
     });
 
-    await caminarHasta(page, 'KeyD', X_DENTRO_SALA, `entrar en ${SALA_DESPEJADA}`);
+    await caminarA(page, { x: X_DENTRO_SALA }, `entrar en ${SALA_DESPEJADA}`);
     if (!(await esperarHudDespejadas(page, despejadasEnSala))) {
       const hud = await leerDespejeHud(page);
       fail(
@@ -780,7 +932,7 @@ export async function comprobarPersistencia(page, { url }) {
       return;
     }
 
-    await caminarHasta(page, 'KeyA', X_FUERA_SALA, `salir de ${SALA_DESPEJADA}`);
+    await caminarA(page, { x: X_FUERA_SALA }, `salir de ${SALA_DESPEJADA}`);
     const hudFuera = await leerDespejeHud(page);
     if (hudFuera?.despejadas !== despejadasEnSala) {
       fail(
@@ -878,31 +1030,21 @@ export async function comprobarPersistencia(page, { url }) {
     // queda en la escalera y, con la hoja puesta, no hay línea de visión desde
     // allí hasta la cocina. Si el binomio viera al sospechoso, lo volvería intel
     // del jugador y la estancia no podría quedar despejada.
-    await caminarHasta(
-      page,
-      'KeyD',
-      300,
-      `volver a ${PUERTA_ENTRADA} desde ${SALA_DESPEJADA}`
-    );
-    if (!(await accionarPuerta(page, PUERTA_ENTRADA, (puerta) => puerta.isOpen === false))) {
+    await caminarA(page, { x: 300 }, `volver a ${PUERTA_ENTRADA} desde ${SALA_DESPEJADA}`);
+    if (!(await accionarPuerta(page, PUERTA_ENTRADA, (puerta) => puerta.isOpen === false, { alCerrar: true }))) {
       fail(
         `persistencia: ${PUERTA_ENTRADA} no queda cerrada antes del barrido ` +
           `(${await distanciaAPuerta(page, PUERTA_ENTRADA)})`
       );
       return;
     }
-    await caminarHasta(page, 'KeyD', 390, `cruzar el recibidor hacia ${PUERTA_SALON}`);
+    await caminarA(page, { x: 390 }, `cruzar el recibidor hacia ${PUERTA_SALON}`);
 
     // Salón: se entra un paso y se sale para dejarlo DESPEJADO y en la memoria sin
     // acercarse a Milán (285 px). La puerta se cierra al salir, así que después el
     // espejo de la sonda será el único que pueda delatarlo.
-    await caminarHasta(page, 'KeyS', 430, `bajar al vano de ${PUERTA_SALON}`);
-    await caminarHasta(page, 'KeyD', 500, `acercarse a ${PUERTA_SALON}`);
-    // El carril se corrige con la hoja todavía cerrada: el vano mide 70 px y el motor
-    // frena a 17 px de cada jamb, así que la banda franca es y ∈ [412, 448]. La
-    // caminata al vano se pasa del punto medio (hasta 19 px de más) y el cruce se
-    // clavaba en el borde sur con la puerta franca («entrar en WOHNZIMMER», 0 px).
-    await alinearConElVano(page, PUERTA_SALON);
+    await caminarA(page, { y: 430 }, `bajar al vano de ${PUERTA_SALON}`);
+    await caminarA(page, { x: 500 }, `acercarse a ${PUERTA_SALON}`);
     if (!(await accionarPuerta(page, PUERTA_SALON, (puerta) => puerta.isFullyOpen))) {
       fail(
         `persistencia: ${PUERTA_SALON} no se abre para entrar al salón ` +
@@ -910,7 +1052,7 @@ export async function comprobarPersistencia(page, { url }) {
       );
       return;
     }
-    await caminarHasta(page, 'KeyD', 545, `entrar en ${SALA_SONDA}`);
+    await caminarA(page, { x: 545 }, `entrar en ${SALA_SONDA}`);
     const estadoAlEntrar = await estadoEnPad(page, SALA_SONDA);
     if (estadoAlEntrar !== 'DESPEJADA') {
       fail(
@@ -919,15 +1061,15 @@ export async function comprobarPersistencia(page, { url }) {
       );
       return;
     }
-    await caminarHasta(page, 'KeyA', 500, `salir de ${SALA_SONDA} al vano`);
-    if (!(await accionarPuerta(page, PUERTA_SALON, (puerta) => puerta.isOpen === false))) {
+    await caminarA(page, { x: 500 }, `salir de ${SALA_SONDA} al vano`);
+    if (!(await accionarPuerta(page, PUERTA_SALON, (puerta) => puerta.isOpen === false, { alCerrar: true }))) {
       fail(
         `persistencia: ${PUERTA_SALON} no queda cerrada al salir del salón ` +
           `(${await distanciaAPuerta(page, PUERTA_SALON)})`
       );
       return;
     }
-    await caminarHasta(page, 'KeyA', 390, `volver al recibidor desde ${SALA_SONDA}`);
+    await caminarA(page, { x: 390 }, `volver al recibidor desde ${SALA_SONDA}`);
 
     // VORRAUM está DESPEJADA por la memoria restaurada. La cocina, en cambio,
     // guarda al cómplice. El grito va con la puerta cerrada: el muro amortigua la
@@ -936,7 +1078,7 @@ export async function comprobarPersistencia(page, { url }) {
     // esposa—, pero su IA queda inerte y el barrido no depende de su puntería ni
     // de que no oiga los pasos (ver la cabecera: con un hostil activo la prueba
     // no es determinista).
-    await caminarHasta(page, 'KeyW', 330, `entrar en ${SALA_CONTACTO}`);
+    await caminarA(page, { y: 330 }, `entrar en ${SALA_CONTACTO}`);
     await page.evaluate(() => document.activeElement?.blur?.());
 
     let rendido = false;
@@ -985,10 +1127,50 @@ export async function comprobarPersistencia(page, { url }) {
     // detenía a ~48 px del último ruido y quedaba a 94 px, un px dentro del intel: el
     // rojo dependía de dónde se parara. La regla no cambia —se barre a más de 95 px—,
     // lo que cambia es que el punto se deriva de la posición real del sospechoso.
-    const puntoBarrido = {
-      x: Math.min(X_MAXIMA_BARRIDO, Math.max(PUNTO_BARRIDO.x, sospechoso.x + DISTANCIA_BARRIDO)),
-      y: PUNTO_BARRIDO.y,
-    };
+    // El fondo de la cocina tiene muebles arrimados a las paredes, así que un x derivado
+    // del rendido puede caer sin holgura o sin corredor hasta él. Se prueban los puntos
+    // de la estancia de rejilla en rejilla y se toma el más lejano al rendido que tenga
+    // ruta, corredor recto con holgura de cuerpo y sitio donde pararse. El humo no
+    // codifica dónde está el último mueble del mapa.
+    let motivoBarrido = 'ningún punto de la cocina deja ruta y holgura';
+    let puntoBarrido = { x: PUNTO_BARRIDO.x, y: PUNTO_BARRIDO.y };
+    {
+      const mundoDelBarrido = await page.evaluate(() => window.__eko.snapshot().world);
+      const obstaculosBarrido = obstaculosDelMundo(mundoDelBarrido);
+      const corredorLibre = (destino) => {
+        const largo = Math.abs(destino.x - PUNTO_BARRIDO.x);
+        const pasos = Math.max(1, Math.round(largo / 3));
+        for (let paso = 0; paso <= pasos; paso += 1) {
+          const x = PUNTO_BARRIDO.x + ((destino.x - PUNTO_BARRIDO.x) * paso) / pasos;
+          if (!cabeElCuerpo(x, destino.y, obstaculosBarrido, HOLGURA_BARRIDO)) return false;
+        }
+        return true;
+      };
+      const candidatos = [];
+      for (let x = X_MINIMA_BARRIDO; x <= X_MAXIMA_BARRIDO; x += PASO_REJILLA) {
+        const punto = { x, y: PUNTO_BARRIDO.y };
+        if (!cabeElCuerpo(x, punto.y, obstaculosBarrido, HOLGURA_BARRIDO)) continue;
+        if (!corredorLibre(punto)) continue;
+        candidatos.push(punto);
+      }
+      // Primero el más lejano: el barrido existe para salir del intel del rendido.
+      candidatos.sort(
+        (a, b) =>
+          Math.hypot(b.x - sospechoso.x, b.y - sospechoso.y) -
+          Math.hypot(a.x - sospechoso.x, a.y - sospechoso.y)
+      );
+      for (const candidato of candidatos) {
+        const intento = planificarRuta(mundoDelBarrido, PUNTO_BARRIDO, candidato);
+        if (intento.puntos.length) {
+          puntoBarrido = candidato;
+          motivoBarrido = '';
+          break;
+        }
+        motivoBarrido = intento.motivo;
+      }
+    }
+    // La mira acompaña al extremo elegido: se barre mirando a la pared de enfrente.
+    const miraBarrido = puntoBarrido.x >= PUNTO_BARRIDO.x ? MIRA_BARRIDO : MIRA_BARRIDO_OESTE;
     const distanciaAlBarrido = Math.hypot(
       sospechoso.x - puntoBarrido.x,
       sospechoso.y - puntoBarrido.y
@@ -997,25 +1179,18 @@ export async function comprobarPersistencia(page, { url }) {
       fail(
         `persistencia: el rendido (${sospechoso.x.toFixed(0)}, ${sospechoso.y.toFixed(0)}) queda a ` +
           `${distanciaAlBarrido.toFixed(0)} px del punto de barrido más lejano ` +
-          `(${puntoBarrido.x.toFixed(0)}, ${puntoBarrido.y.toFixed(0)}); con menos de 95 entra en intel`
+          `(${puntoBarrido.x.toFixed(0)}, ${puntoBarrido.y.toFixed(0)}); con menos de 95 entra en intel` +
+          (motivoBarrido ? ` [${motivoBarrido}]` : '')
       );
       return;
     }
-    await apuntarA(page, MIRA_BARRIDO);
-    await alinearConElVano(page, PUERTA_COCINA);
-    await caminarHasta(
+    await apuntarA(page, miraBarrido);
+    await caminarA(
       page,
-      'KeyW',
-      puntoBarrido.y,
-      `barrido: subir al fondo de ${SALA_CONTACTO}`
+      { x: puntoBarrido.x, y: puntoBarrido.y },
+      `barrido: plantarse en el fondo de ${SALA_CONTACTO}`
     );
-    await caminarHasta(
-      page,
-      'KeyD',
-      puntoBarrido.x,
-      'barrido: apartarse a la pared este'
-    );
-    await apuntarA(page, MIRA_BARRIDO);
+    await apuntarA(page, miraBarrido);
 
     // La visita relámpago al salón sumó otra despejada a la cuenta de partida.
     if (!(await esperarHudDespejadas(page, despejadasEnSala + 2))) {
@@ -1090,17 +1265,17 @@ export async function comprobarPersistencia(page, { url }) {
     // ve a Milán (285 px y hoja cerrada) y el salón sigue DESPEJADO por la memoria
     // que dejó la visita anterior. El espejo de [4] barre las dos estancias del vano
     // y lo marca sin que el operador lo mire; ninguna cámara tiene línea de visión.
-    await caminarHasta(page, 'KeyA', 390, `salir de ${SALA_CONTACTO} al vano`);
-    await caminarHasta(page, 'KeyS', 330, `bajar al vano de ${PUERTA_SALON} para la sonda`);
-    if (!(await accionarPuerta(page, PUERTA_COCINA, (puerta) => puerta.isOpen === false))) {
+    await caminarA(page, { x: 390 }, `salir de ${SALA_CONTACTO} al vano`);
+    await caminarA(page, { y: 330 }, `bajar al vano de ${PUERTA_SALON} para la sonda`);
+    if (!(await accionarPuerta(page, PUERTA_COCINA, (puerta) => puerta.isOpen === false, { alCerrar: true }))) {
       fail(
         `persistencia: ${PUERTA_COCINA} no queda cerrada al salir ` +
           `(${await distanciaAPuerta(page, PUERTA_COCINA)})`
       );
       return;
     }
-    await caminarHasta(page, 'KeyS', 430, 'bajar al recibidor tras cerrar la cocina');
-    await caminarHasta(page, 'KeyD', 470, `plantarse junto a ${PUERTA_SALON}`);
+    await caminarA(page, { y: 430 }, 'bajar al recibidor tras cerrar la cocina');
+    await caminarA(page, { x: 470 }, `plantarse junto a ${PUERTA_SALON}`);
     await apuntarA(page, MIRA_BARRIDO);
     const antesDeLaSonda = await estadoEnPad(page, SALA_SONDA);
     if (antesDeLaSonda !== 'DESPEJADA') {
@@ -1167,8 +1342,8 @@ export async function comprobarPersistencia(page, { url }) {
     // arresto saque al rendido de la cuenta de hostiles conocidos, y el rendido sigue
     // fuera del intel del operador (a más de 95 px y sin entrar en el cono) mientras el
     // binomio entra a la estancia.
-    await caminarHasta(page, 'KeyA', 390, `volver al vano de ${SALA_CONTACTO} para el arresto`);
-    await caminarHasta(page, 'KeyW', 330, `subir al vano de ${SALA_CONTACTO}`);
+    await caminarA(page, { x: 390 }, `volver al vano de ${SALA_CONTACTO} para el arresto`);
+    await caminarA(page, { y: 330 }, `subir al vano de ${SALA_CONTACTO}`);
     if (!(await accionarPuerta(page, PUERTA_COCINA, (puerta) => puerta.isFullyOpen))) {
       fail(
         `persistencia: ${PUERTA_COCINA} no queda franca para volver a entrar ` +
@@ -1177,18 +1352,10 @@ export async function comprobarPersistencia(page, { url }) {
       return;
     }
     await apuntarA(page, MIRA_BARRIDO);
-    await alinearConElVano(page, PUERTA_COCINA);
-    await caminarHasta(
+    await caminarA(
       page,
-      'KeyW',
-      puntoBarrido.y,
-      `arresto: subir al fondo de ${SALA_CONTACTO}`
-    );
-    await caminarHasta(
-      page,
-      'KeyD',
-      puntoBarrido.x,
-      'arresto: apartarse a la pared este'
+      { x: puntoBarrido.x, y: puntoBarrido.y },
+      `arresto: plantarse en el fondo de ${SALA_CONTACTO}`
     );
     await apuntarA(page, MIRA_BARRIDO);
 
@@ -1230,6 +1397,28 @@ export async function comprobarPersistencia(page, { url }) {
       );
       return;
     }
+    // La distancia se afirma contra el rendido releído, no contra el del barrido: si el
+    // cuerpo se movió, el apostadero queda fuera del alcance de la cámara y el fallo tiene
+    // que nombrar la deriva en vez de aparecer después como «no llegó a verlo».
+    const derivaDelBarrido = sospechoso
+      ? Math.hypot(rendidoAhora.x - sospechoso.x, rendidoAhora.y - sospechoso.y)
+      : Number.NaN;
+    const distanciaAlRendido = Math.hypot(
+      apostadero.punto.x - rendidoAhora.x,
+      apostadero.punto.y - rendidoAhora.y
+    );
+    if (!(distanciaAlRendido < ALCANCE_CAMARA)) {
+      fail(
+        `persistencia: el apostadero (${apostadero.punto.x.toFixed(1)}, ` +
+          `${apostadero.punto.y.toFixed(1)}) queda a ${distanciaAlRendido.toFixed(1)} px del ` +
+          `rendido releído (${rendidoAhora.x.toFixed(1)}, ${rendidoAhora.y.toFixed(1)}), fuera ` +
+          `del alcance de ${ALCANCE_CAMARA} px de la cámara del binomio; el rendido del barrido ` +
+          `estaba en ` +
+          `(${sospechoso ? `${sospechoso.x.toFixed(1)}, ${sospechoso.y.toFixed(1)}` : '?'})` +
+          (Number.isNaN(derivaDelBarrido) ? '' : `, ${derivaDelBarrido.toFixed(1)} px atrás`)
+      );
+      return;
+    }
     const puntoBinomio = { x: apostadero.punto.x, y: apostadero.punto.y };
     const puntoMarcado = await marcarPuntoDeAvance(page, puntoBinomio);
     // Sin marcador no hay ruta: se deja el seguimiento como último recurso, que al menos
@@ -1248,6 +1437,7 @@ export async function comprobarPersistencia(page, { url }) {
               visibleToSquad: Boolean(actor?.visibleToSquad),
               visibleToPlayer: Boolean(actor?.visibleToPlayer),
               actor: actor ? { x: actor.x, y: actor.y } : null,
+              binomio: snap?.squad ? { x: snap.squad.x, y: snap.squad.y } : null,
             };
           },
           { selector: PANEL_DESPEJE, sala: SALA_CONTACTO }
@@ -1269,12 +1459,25 @@ export async function comprobarPersistencia(page, { url }) {
     // tomar un cuadro de paso por contacto estable.
     let porCamara = false;
     let lecturaCamara = null;
+    let distanciaBinomio = Number.NaN;
     let desdeQueVe = null;
     const limiteDelSeguimiento = Date.now() + 20000;
     while (Date.now() < limiteDelSeguimiento) {
       lecturaCamara = await leerContactoDeCamara();
       if (!lecturaCamara) break;
-      const ahoraVe = lecturaCamara.visibleToSquad && !lecturaCamara.visibleToPlayer;
+      distanciaBinomio =
+        lecturaCamara.binomio && lecturaCamara.actor
+          ? Math.hypot(
+              lecturaCamara.binomio.x - lecturaCamara.actor.x,
+              lecturaCamara.binomio.y - lecturaCamara.actor.y
+            )
+          : Number.NaN;
+      // La cámara sólo vale como contacto dentro de su alcance incondicional: más lejos el
+      // ángulo decide, y un dato viejo del rendido dejaría pasar un contacto que no existe.
+      const ahoraVe =
+        lecturaCamara.visibleToSquad &&
+        !lecturaCamara.visibleToPlayer &&
+        distanciaBinomio < ALCANCE_CAMARA;
       if (ahoraVe) {
         desdeQueVe ??= Date.now();
         if (Date.now() - desdeQueVe >= VISTA_SOSTENIDA_MS) {
@@ -1300,7 +1503,9 @@ export async function comprobarPersistencia(page, { url }) {
           `HUD con contacto en ${lecturaCamara?.contacto || 'ninguna estancia'}, ` +
           `a la vista del binomio ` +
           `${lecturaCamara?.visibleToSquad === true}, del operador ` +
-          `${lecturaCamara?.visibleToPlayer === true}` +
+          `${lecturaCamara?.visibleToPlayer === true}, a ` +
+          `${Number.isNaN(distanciaBinomio) ? '?' : distanciaBinomio.toFixed(1)} px ` +
+          `(alcance ${ALCANCE_CAMARA})` +
           (squad && lecturaCamara?.actor
             ? `; rendido en ${lecturaCamara.actor.x.toFixed(1)}, ${lecturaCamara.actor.y.toFixed(1)} ` +
               `a ${Math.hypot(lecturaCamara.actor.x - squad.x, lecturaCamara.actor.y - squad.y).toFixed(1)} px`
@@ -1317,7 +1522,8 @@ export async function comprobarPersistencia(page, { url }) {
         `persistencia: la cámara del binomio ve al rendido pero ${SALA_CONTACTO} figura ` +
           `${contactoRendido ?? 'ausente'} en el EKO-Pad ` +
           `(binomio en ${squad ? `${squad.x.toFixed(1)}, ${squad.y.toFixed(1)}` : 'sin binomio'}; ` +
-          `rendido en ${lecturaCamara?.actor ? `${lecturaCamara.actor.x.toFixed(1)}, ${lecturaCamara.actor.y.toFixed(1)}` : '?'})`
+          `rendido en ${lecturaCamara?.actor ? `${lecturaCamara.actor.x.toFixed(1)}, ${lecturaCamara.actor.y.toFixed(1)}` : '?'}; ` +
+          `a ${Number.isNaN(distanciaBinomio) ? '?' : distanciaBinomio.toFixed(1)} px, alcance ${ALCANCE_CAMARA})`
       );
       return;
     }
