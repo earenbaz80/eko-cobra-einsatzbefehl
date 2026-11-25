@@ -429,6 +429,19 @@ export interface EkoE2EActor {
 
 export interface EkoE2EState {
   readonly gameState: GameState;
+  /**
+   * Teclas que el motor tiene retenidas. El humo lo usa para separar "la entrada no
+   * llega" de "el movimiento está frenado": si la tecla está acá y el cuerpo no se
+   * mueve, el teclado sí llegó y el bloqueo es de la simulación.
+   */
+  readonly heldKeys: readonly string[];
+  /** Teclas configuradas para caminar; el E2E comprueba que no se hayan reasignado. */
+  readonly caminar: {
+    readonly adelante: string;
+    readonly atras: string;
+    readonly izquierda: string;
+    readonly derecha: string;
+  };
   readonly player: {
     readonly x: number;
     readonly y: number;
@@ -9413,6 +9426,13 @@ public nightMode: boolean = false;
 
     return Object.freeze({
       gameState: this.gameState,
+      heldKeys: Object.freeze([...this.heldKeys]),
+      caminar: Object.freeze({
+        adelante: this.keybinds.moveForward,
+        atras: this.keybinds.moveBackward,
+        izquierda: this.keybinds.moveLeft,
+        derecha: this.keybinds.moveRight,
+      }),
       player: player
         ? Object.freeze({
             x: player.x,

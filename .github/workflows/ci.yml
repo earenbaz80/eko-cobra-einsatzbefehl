@@ -92,4 +92,7 @@ jobs:
           name: smoke-fallos
           path: .smoke-fallos
           if-no-files-found: ignore
+          # `.smoke-fallos` empieza con punto y la acción lo descarta por defecto: sin
+          # esto no subía nada y el fallo quedaba sin captura ni línea de tiempo.
+          include-hidden-files: true
           retention-days: 7

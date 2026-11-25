@@ -366,6 +366,8 @@ async function diagnosticoDelBloqueo(page) {
       estado: estado.gameState,
       modal: document.querySelector('[role="dialog"]')?.getAttribute('aria-label') ?? null,
       foco: document.hasFocus(),
+      heldKeys: estado.heldKeys ?? [],
+      caminar: estado.caminar ?? null,
     };
   }, RADIO_OBSTACULO);
 }
@@ -694,6 +696,8 @@ async function caminarA(page, destino, paso) {
             `; juego ${bloqueo?.estado ?? '?'}` +
             `${bloqueo?.modal ? ` con ${bloqueo.modal} abierto` : ''}` +
             `${bloqueo?.foco === false ? ' (sin foco)' : ''}` +
+            `; teclas ${bloqueo?.heldKeys?.length ? bloqueo.heldKeys.join('+') : 'ninguna'}` +
+            `${bloqueo?.caminar ? ` (camina ${bloqueo.caminar.adelante}/${bloqueo.caminar.izquierda}/${bloqueo.caminar.atras}/${bloqueo.caminar.derecha})` : ''}` +
             `; ${estorbo})`
         );
       }
