@@ -31,8 +31,10 @@
  * lectura del pad después del arresto—, no como una ventana del avance. La orden
  * tiene que rodear el piso desde el rellano (escalera → recibidor), abriendo la
  * puerta de entrada pero no la que va a sondar. El arresto de la cocina se cierra
- * con [6] y la cámara de casco del binomio como confirmación. La posición real de
- * los actores se lee de `actors` en el snapshot E2E.
+ * con [6], y el binomio entra antes en la estancia con un PUNTO DE AVANCE del pad
+ * pegado al rendido: la orden elige al rendido más cercano al binomio, no al que ve
+ * el operador, y su cámara de casco es la confirmación de que está dentro. La
+ * posición real de los actores se lee de `actors` en el snapshot E2E.
  *
  * El arresto cierra el ciclo: con el hostil en intel, sólo esposarlo lo saca de la
  * cuenta de hostiles conocidos, y la sala vuelve a DESPEJADA por la presencia del
@@ -60,6 +62,7 @@ import {
   acercarseAPuerta,
   arrancarMision,
   distanciaAPuerta,
+  marcarPuntoDeAvance,
 } from '../navegador.mjs';
 import { leerHud as leerDespejeHud, leerPad as leerDespejePad } from './despeje.mjs';
 
@@ -87,6 +90,8 @@ const MIRA_BARRIDO = { x: 700, y: 320 };
 const PUNTO_BARRIDO = { x: 540, y: 262 };
 /** El rendido entra en intel a menos de 95 px: se barre con 25 px de margen. */
 const DISTANCIA_BARRIDO = 120;
+/** A menos de 85 px la cámara del binomio marca al rendido sin depender del ángulo. */
+const CERCANIA_CAMARA = 60;
 /** Pared este del comedor (x = 660) menos 20 px de aire. */
 const X_MAXIMA_BARRIDO = 640;
 
@@ -192,6 +197,16 @@ async function caminarHasta(page, tecla, umbral) {
       },
       { eje: direccion.eje, umbral, hacia: direccion.hacia },
       { timeout: 8000 }
+    );
+  } catch {
+    // El mensaje de Playwright no dice qué paso se trabó ni contra qué: se leen las dos
+    // posiciones reales para que el fallo se pueda ubicar sin abrir la traza.
+    const jugador = await leerJugador(page);
+    const binomio = await leerBinomio(page);
+    throw new Error(
+      `el operador no llegó a ${tecla} ${umbral} en 8 s ` +
+        `(jugador en ${jugador ? `${jugador.x.toFixed(1)}, ${jugador.y.toFixed(1)}` : '?'}; ` +
+        `binomio en ${binomio ? `${binomio.x.toFixed(1)}, ${binomio.y.toFixed(1)}` : '?'})`
     );
   } finally {
     await page.keyboard.up(tecla);
@@ -690,10 +705,34 @@ export async function comprobarPersistencia(page, { url }) {
     // [6] esposa al rendido más cercano al binomio, no al que el operador tiene delante:
     // con Kobra-2 parado en el vano del salón, Milán —a un paso y todavía en contacto por
     // el espejo de la sonda— gana la carrera a Lukas y la orden se lo lleva a él. Por eso
-    // se le manda seguir [1] hasta la cocina y se espera el contacto de su cámara de
-    // casco con el rendido antes de pedir el arresto: con el binomio dentro, Lukas es el
+    // el binomio tiene que estar dentro de la cocina y se espera el contacto de su cámara
+    // de casco con el rendido antes de pedir el arresto: con el binomio dentro, Lukas es el
     // más cercano y la elección deja de depender de dónde se pare cada uno.
-    await page.keyboard.press('Digit1');
+    //
+    // Se le lleva con un PUNTO DE AVANCE, no con [1]: en FOLLOW su punto de arrastre cae
+    // detrás del operador y, desde el fondo de la cocina, eso es al otro lado de la pared
+    // sur, donde el guiado local se clava (medido: binomio en 477.0, 297.1, con y = 297
+    // fuera de la estancia y sin línea de visión al rendido). El marcador navega la ruta y
+    // abre las puertas que estorban. El punto se pone a `CERCANIA_CAMARA` px del rendido,
+    // sobre la recta que lo une con el punto del barrido —ambos pisos transitables—: a
+    // menos de 85 px la cámara del binomio lo marca sin depender del ángulo con el que
+    // llegue, y el operador sigue a más de 95 px del suyo, como exige la comprobación.
+    const haciaElBarrido = {
+      x: puntoBarrido.x - sospechoso.x,
+      y: puntoBarrido.y - sospechoso.y,
+    };
+    const largo = Math.hypot(haciaElBarrido.x, haciaElBarrido.y) || 1;
+    const puntoBinomio = {
+      x: Math.min(
+        X_MAXIMA_BARRIDO,
+        Math.max(270, sospechoso.x + (haciaElBarrido.x / largo) * CERCANIA_CAMARA)
+      ),
+      y: Math.min(270, Math.max(110, sospechoso.y + (haciaElBarrido.y / largo) * CERCANIA_CAMARA)),
+    };
+    const puntoMarcado = await marcarPuntoDeAvance(page, puntoBinomio);
+    // Sin marcador no hay ruta: se deja el seguimiento como último recurso, que al menos
+    // arrima al binomio al vano, y la espera de cámara decide.
+    if (!puntoMarcado) await page.keyboard.press('Digit1');
     const leerContactoDeCamara = () =>
       page
         .evaluate(
@@ -711,6 +750,12 @@ export async function comprobarPersistencia(page, { url }) {
           { selector: PANEL_DESPEJE, sala: SALA_CONTACTO }
         )
         .catch(() => null);
+    // El ratón del pad movió también la mira del operador: al cerrar el pad apuntaba al
+    // marcador —hacia el rendido— y `visibleToPlayer` pasaba a true, que es justo lo que
+    // la comprobación exige que no ocurra. Se devuelve la mira a la pared antes de
+    // esperar la cámara del binomio.
+    await apuntarA(page, MIRA_BARRIDO);
+
     let porCamara = false;
     let lecturaCamara = null;
     const limiteDelSeguimiento = Date.now() + 20000;
@@ -725,9 +770,15 @@ export async function comprobarPersistencia(page, { url }) {
     }
     if (!porCamara) {
       const squad = await leerBinomio(page);
+      const distanciaAlPunto = squad
+        ? Math.hypot(squad.x - puntoBinomio.x, squad.y - puntoBinomio.y)
+        : Number.NaN;
       fail(
         `persistencia: la cámara de Kobra-2 no puso ${SALA_CONTACTO} en contacto antes de la ` +
-          `orden [6] (binomio en ${squad ? `${squad.x.toFixed(1)}, ${squad.y.toFixed(1)}` : 'sin binomio'}; ` +
+          `orden [6] (binomio en ${squad ? `${squad.x.toFixed(1)}, ${squad.y.toFixed(1)}` : 'sin binomio'}, ` +
+          `a ${Number.isNaN(distanciaAlPunto) ? '?' : distanciaAlPunto.toFixed(0)} px del punto de ` +
+          `avance (${puntoBinomio.x.toFixed(0)}, ${puntoBinomio.y.toFixed(0)}) que el pad ` +
+          `${puntoMarcado ? 'fijó' : 'no fijó'}; ` +
           `contacto ${lecturaCamara?.contacto || 'ninguno'}, a la vista del binomio ` +
           `${lecturaCamara?.visibleToSquad === true}, del operador ` +
           `${lecturaCamara?.visibleToPlayer === true})`

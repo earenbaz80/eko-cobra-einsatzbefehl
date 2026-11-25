@@ -192,6 +192,76 @@ export async function acercarseAPuerta(page, puertaId) {
   return medida.distancia;
 }
 
+/** Banda del mundo que proyecta el mapa del EKO-Pad (`handleSvgMapClick`): worldX = 80 + relX * 1060, worldY = 60 + relY * 700. */
+export const MAPA_PAD = { x: 80, y: 60, w: 1060, h: 700 };
+
+const MAPA_PAD_SVG = '[role="dialog"] svg.cursor-crosshair';
+
+/**
+ * Marca un PUNTO DE AVANCE en el EKO-Pad y espera a que el pad lo confirme.
+ *
+ * Es la única orden que lleva al binomio a una estancia concreta: en FOLLOW su
+ * punto de arrastre queda detrás del operador —a menudo al otro lado de una pared,
+ * donde el guiado local se clava— y en HOLD no se mueve. El marcador de rally sí
+ * recorre la ruta y abre las puertas que estorban (`squadAbrePuertasEnRuta`).
+ * Devuelve false si el pad no llega a fijarlo; nunca deja el pad abierto.
+ *
+ * La estancia no se comprueba en el texto: el pad la nombra en alemán (`nameDe`) y
+ * eso ya no coincidiría con el id interno. Que el binomio llegó donde se apuntó lo
+ * mide quien llama, con su posición real.
+ *
+ * @param {import('playwright').Page} page
+ * @param {{ x: number, y: number }} punto punto del mundo a marcar
+ */
+export async function marcarPuntoDeAvance(page, punto) {
+  let abierto = false;
+  try {
+    await page.keyboard.press('KeyM');
+    const mapa = page.locator(MAPA_PAD_SVG);
+    await mapa.waitFor({ state: 'visible', timeout: 8000 });
+    abierto = true;
+    await page.getByRole('button', { name: /Avance GPS/ }).click();
+    await page.evaluate((selector) => {
+      document.querySelector(selector)?.scrollIntoView({ block: 'center' });
+    }, MAPA_PAD_SVG);
+    await page.waitForTimeout(200);
+
+    // Misma proyección que el manejador del pad, así el punto cae donde se pulsa.
+    const enPantalla = await page.evaluate(
+      ({ selector, mapaPad, destino }) => {
+        const svg = document.querySelector(selector);
+        if (!svg) return null;
+        const caja = svg.getBoundingClientRect();
+        if (caja.width <= 0 || caja.height <= 0) return null;
+        const x = caja.left + ((destino.x - mapaPad.x) / mapaPad.w) * caja.width;
+        const y = caja.top + ((destino.y - mapaPad.y) / mapaPad.h) * caja.height;
+        return {
+          x,
+          y,
+          dentro: x > 0 && y > 0 && x < window.innerWidth && y < window.innerHeight,
+        };
+      },
+      { selector: MAPA_PAD_SVG, mapaPad: MAPA_PAD, destino: punto }
+    );
+    if (!enPantalla?.dentro) return false;
+    await page.mouse.click(enPantalla.x, enPantalla.y);
+    await page.waitForFunction(
+      () =>
+        (window.__eko?.snapshot()?.radioFeed ?? []).some((linea) =>
+          /PUNTO DE AVANCE/.test(linea?.text ?? '')
+        ),
+      undefined,
+      { timeout: 4000 }
+    );
+    return true;
+  } catch {
+    return false;
+  } finally {
+    // Sólo se cierra lo que se abrió: un Escape de más abre el menú de pausa.
+    if (abierto) await page.keyboard.press('Escape').catch(() => {});
+  }
+}
+
 /**
  * @param {import('playwright').Page} page
  * @param {{ origin: string, badRequests: string[], consoleErrors: string[], prefijo?: string, fallosDeRed?: boolean }} opciones
