@@ -14,8 +14,8 @@
  *   6. que el JS de entrada y los assets críticos no superan sus topes de peso,
  *   7. en modo remoto, que lo publicado devuelve los Content-Type y las cabeceras
  *      de caché con las que Pages sirve el juego,
- *   8. y, si algo falla, deja captura y traza de Playwright en `.smoke-fallos/` para
- *      ver la pantalla en el artifact del CI.
+ *   8. y, si algo falla, deja captura, traza de Playwright y la línea de tiempo del
+ *      motor en `.smoke-fallos/` para ver la pantalla y la secuencia en el artifact del CI.
  *
  * Cada bloque vive en su módulo, con nombre propio:
  *   smoke/checks/entrega.mjs     pesos, Content-Type y caché (local y remoto)
@@ -52,6 +52,7 @@ import { instalarAzarDeterminista } from './smoke/determinismo.mjs';
 import { fail, fallos } from './smoke/informe.mjs';
 import { arrancarServidorLocal } from './smoke/servidor-local.mjs';
 import { vigilarPagina } from './smoke/navegador.mjs';
+import { arrancarVigilante, detenerVigilante, textoLineaDeTiempo } from './smoke/vigilante.mjs';
 import { arrancarTraza, escribirInforme, guardarDiagnostico, limpiarDiagnostico, DIR_DIAGNOSTICO } from './smoke/diagnostico.mjs';
 import { comprobarEntrega } from './smoke/checks/entrega.mjs';
 import { comprobarMisiones } from './smoke/checks/misiones.mjs';
@@ -93,7 +94,15 @@ console.log(`perfil de humo: ${ES_RAPIDO ? 'rápido (PR)' : 'completo'}`);
 console.log(`aleatoriedad determinista: semilla ${SEMILLA_E2E_TEXTO}`);
 
 limpiarDiagnostico();
-const browser = await chromium.launch();
+// Sin estos tres flags, la pestaña en segundo plano se ralentiza: el motor sigue
+// corriendo con `dt` grande, el cuerpo salta decenas de píxeles por frame y una
+// tecla mantenida 100 ms lo deja 30 px más allá del punto pedido.
+const ARGUMENTOS_DE_NAVEGADOR = [
+  '--disable-background-timer-throttling',
+  '--disable-backgrounding-occluded-windows',
+  '--disable-renderer-backgrounding',
+];
+const browser = await chromium.launch({ args: ARGUMENTOS_DE_NAVEGADOR });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 
 // La traza se graba durante toda la pasada: solo se guarda si algo falla.
@@ -107,6 +116,19 @@ const badRequests = [];
 const consoleErrors = [];
 const contexto = { url, origin, page, badRequests, consoleErrors, semilla: SEMILLA_E2E };
 vigilarPagina(page, { origin, badRequests, consoleErrors });
+// Vigilante de la línea de tiempo: muestrea el motor cada 250 ms y su volcado va al
+// informe del fallo, para ver cómo se llegó al estado final y no sólo cuál fue.
+arrancarVigilante(page);
+
+/**
+ * Pestaña de la comprobación de persistencia. Corre en su propio contexto para que
+ * arranque con storage limpio: sin partida guardada heredada ni el estado que dejan
+ * las comprobaciones anteriores, un fallo suyo es del paso. Se conserva sólo si falla,
+ * para que la captura y la traza sean de la pestaña que falló.
+ */
+let contextoPersistencia = null;
+let paginaPersistencia = null;
+let navegadorPersistencia = null;
 
 try {
   if (ES_RAPIDO) {
@@ -121,9 +143,34 @@ try {
     await comprobarOrdenesEscuadron(page, contexto);
     await comprobarRendimiento(page, contexto);
     await comprobarMovil(browser, contexto);
-    // Al final: la recarga y los cinco segundos de autoguardado no deben contaminar
-    // la medición de frames, que es la comprobación más sensible al ruido del runner.
-    await comprobarPersistencia(page, contexto);
+    // Al final, y en su propio contexto con storage limpio: la recarga y los cinco
+    // segundos de autoguardado no contaminan la medición de frames, y la comprobación
+    // no hereda partida guardada ni estado de las pasadas anteriores.
+    const fallosAntesDePersistencia = fallos.length;
+    // En su propio navegador: con el motor de la pasada principal en la misma instancia,
+    // esta pestaña se queda con frames de ~100-500 ms y el operador no puede pararse en
+    // una coordenada —avanza 20 px por frame—; sola corre a 60 fps como en CI.
+    navegadorPersistencia = await chromium.launch({ args: ARGUMENTOS_DE_NAVEGADOR });
+    contextoPersistencia = await navegadorPersistencia.newContext({
+      viewport: { width: 1280, height: 800 },
+    });
+    paginaPersistencia = await contextoPersistencia.newPage();
+    await instalarAzarDeterminista(contextoPersistencia, SEMILLA_E2E);
+    await arrancarTraza(contextoPersistencia);
+    arrancarVigilante(paginaPersistencia, 'persistencia');
+    try {
+      await comprobarPersistencia(paginaPersistencia, contexto);
+    } finally {
+      detenerVigilante('persistencia');
+    }
+    // Si pasó, se cierra ya: una pestaña con el motor corriendo no debe robarle CPU a
+    // las comprobaciones de arte que vienen después.
+    if (fallos.length === fallosAntesDePersistencia) {
+      await contextoPersistencia.tracing.stop().catch(() => {});
+      await contextoPersistencia.close();
+      contextoPersistencia = null;
+      paginaPersistencia = null;
+    }
     // Recorre cada pantalla con el pase ya caliente: título, misión, pausa y EKO-PAD en
     // escritorio, y las mismas cuatro en un contexto táctil de 390x844.
     await comprobarPantallasDeArte(page, contexto);
@@ -136,11 +183,21 @@ try {
 } finally {
   if (badRequests.length) fail(`peticiones fallidas (${badRequests.length}):\n  ${badRequests.slice(0, 10).join('\n  ')}`);
   if (consoleErrors.length) fail(`errores en consola (${consoleErrors.length}):\n  ${consoleErrors.slice(0, 10).join('\n  ')}`);
+  detenerVigilante();
   if (fallos.length) {
-    escribirInforme(fallos);
+    escribirInforme(fallos, textoLineaDeTiempo());
     await guardarDiagnostico(contextoNavegador, page, 'escritorio');
-    console.error(`captura y traza en ${DIR_DIAGNOSTICO} (el CI las sube como artifact)`);
+    if (paginaPersistencia) {
+      await guardarDiagnostico(contextoPersistencia, paginaPersistencia, 'persistencia');
+    }
+    console.error(
+      `captura, traza y línea de tiempo del motor en ${DIR_DIAGNOSTICO} (el CI las sube como artifact)`
+    );
+  } else if (contextoPersistencia) {
+    await contextoPersistencia.tracing.stop().catch(() => {});
   }
+  await contextoPersistencia?.close();
+  await navegadorPersistencia?.close();
   await browser.close();
   server?.close();
 }

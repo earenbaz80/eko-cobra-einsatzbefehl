@@ -21,11 +21,19 @@ export const arrancarTraza = (contexto) => contexto.tracing.start({ screenshots:
 /**
  * Deja el informe del fallo por escrito junto a la captura. El log de un job se pierde
  * al terminar el run; este fichero viaja en el artifact y se puede leer después.
+ *
+ * `extra` lleva la línea de tiempo del motor (ver `vigilante.mjs`): el estado final dice
+ * dónde se trabó, la secuencia dice cómo se llegó hasta ahí.
  */
-export function escribirInforme(fallos) {
+export function escribirInforme(fallos, extra = '') {
   if (!fallos.length) return;
   mkdirSync(DIR_DIAGNOSTICO, { recursive: true });
-  writeFileSync(join(DIR_DIAGNOSTICO, 'informe.txt'), `${fallos.map((fallo) => `- ${fallo}`).join('\n')}\n`, 'utf8');
+  const texto = `${fallos.map((fallo) => `- ${fallo}`).join('\n')}\n`;
+  writeFileSync(
+    join(DIR_DIAGNOSTICO, 'informe.txt'),
+    extra ? `${texto}\n${extra}\n` : texto,
+    'utf8'
+  );
 }
 
 /** Captura la pestaña tal como está. Nunca lanza: el fallo original es el que importa. */
