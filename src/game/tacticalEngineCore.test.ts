@@ -1127,6 +1127,66 @@ describe('luces e interruptores', () => {
   });
 });
 
+describe('interacción contextual en el vano', () => {
+  it('[E] en el vano abre la puerta y no esposa al rendido que espera detrás', () => {
+    const rendido = {
+      id: 'SUSPECT_COCINA',
+      name: 'Lukas',
+      role: 'SUSPECT',
+      state: 'SURRENDERED',
+      x: 215,
+      y: 375,
+      radius: 10,
+      isArmed: false,
+    } as unknown as ActorEntity;
+    const door = { ...mainDoor } as DoorEntity;
+    const operador = { ...player, x: 215, y: 410 } as ActorEntity;
+    const engine = createEngine({
+      getPlayer: vi.fn(() => operador),
+      actors: [rendido],
+      doors: [door],
+      checkMissionCompletion: vi.fn(),
+    });
+    vi.spyOn(soundEngine, 'playDoorAction').mockImplementation(() => {});
+    vi.spyOn(soundEngine, 'playArrestCuffs').mockImplementation(() => {});
+
+    // El rendido está a 35 px, dentro del alcance del esposado (52 px), y la puerta
+    // a 35 px del operador: la hoja gana porque es lo que tiene delante.
+    engine.handleContextualInteract();
+
+    expect(door.isOpen).toBe(true);
+    expect(rendido.state).toBe('SURRENDERED');
+    expect(soundEngine.playArrestCuffs).not.toHaveBeenCalled();
+  });
+
+  it('esposa al rendido cuando no hay puerta en rango', () => {
+    const rendido = {
+      id: 'SUSPECT_COCINA',
+      name: 'Lukas',
+      role: 'SUSPECT',
+      state: 'SURRENDERED',
+      x: 185,
+      y: 380,
+      radius: 10,
+      isArmed: false,
+    } as unknown as ActorEntity;
+    // El operador está a 65 px del centro de la hoja, fuera de los 62 px de [E].
+    const engine = createEngine({
+      getPlayer: vi.fn(() => player),
+      actors: [rendido],
+      doors: [{ ...mainDoor } as DoorEntity],
+      checkMissionCompletion: vi.fn(),
+      roeEvents: [],
+      criticalEvents: [],
+    });
+    vi.spyOn(soundEngine, 'playArrestCuffs').mockImplementation(() => {});
+
+    engine.handleContextualInteract();
+
+    expect(rendido.state).toBe('ARRESTED');
+  });
+});
+
 describe('colisión de la hoja de puerta', () => {
   it('una puerta abierta no deja pasar balas por su hoja, pero sí por el hueco', () => {
     const openDoor = { ...mainDoor, currentAngle: 0, isOpen: true } as DoorEntity;

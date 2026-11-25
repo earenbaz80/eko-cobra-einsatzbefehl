@@ -1122,6 +1122,20 @@ export async function comprobarPersistencia(page, { url }) {
       return;
     }
 
+    // [E] sobre la hoja es la puerta, no el arresto: el rendido de detrás tiene que
+    // seguir en pie con las manos arriba. Si la comprobación lo encuentra esposado o
+    // desaparecido, el fallo se nombra en el paso de la puerta y no más tarde, como
+    // un rendido que nunca llegó al barrido.
+    const rendidoTrasLaPuerta = await hostilEnSala(page, SALA_CONTACTO);
+    if (rendidoTrasLaPuerta?.state !== 'SURRENDERED') {
+      fail(
+        `persistencia: al abrir ${PUERTA_COCINA} el rendido de ${SALA_CONTACTO} ` +
+          `desapareció (${rendidoTrasLaPuerta?.state ?? 'sin hostil'}); [E] sobre la ` +
+          `hoja lo esposó en vez de accionar la puerta`
+      );
+      return;
+    }
+
     // Barrido sin verlo: la mira se queda al este, contra la pared, mientras el
     // operador camina hasta el fondo de la cocina. A más de 95 px y fuera del
     // cono, el rendido no entra en la intel del jugador y la estancia queda

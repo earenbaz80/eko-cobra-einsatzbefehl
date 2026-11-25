@@ -2806,6 +2806,12 @@ public nightMode: boolean = false;
     this.mirrorDoorId = null;
     this.thermalActive = false;
 
+    // La puerta gana al cuerpo: plantado en el vano, [E] acciona la hoja que el
+    // operador tiene delante, no la persona que espera detrás. Con el arresto
+    // primero, abrir la puerta de la cocina esposaba al rendido que estaba a 39 px
+    // y la hoja quedaba cerrada. Para esposar se da un paso fuera del vano.
+    if (this.interactWithNearbyDoor(player)) return;
+
     for (const actor of this.actors) {
       if (!this.isContextInteractableActor(actor, player.x, player.y)) continue;
 
@@ -2865,48 +2871,56 @@ public nightMode: boolean = false;
       this.toggleLightSwitch(lightSwitch);
       return;
     }
+  }
 
+  /**
+   * Acciona en pasos de [E] la puerta que el operador tiene delante: cerrada -> 28 %
+   * -> 65 % -> franca -> cerrada. Va antes que el arresto porque plantado en el vano
+   * [E] es la hoja, no el rendido que espera detrás; devuelve true cuando actuó para
+   * que [E] no siga con otra interacción.
+   */
+  protected interactWithNearbyDoor(player: ActorEntity): boolean {
     const door = this.findNearestDoor(player.x, player.y, 62);
-    if (door) {
-      if (door.isLocked) {
-        door.isLocked = false;
-        door.isOpen = true;
-        door.currentAngle = door.closedAngle + (door.openAngle - door.closedAngle) * 0.28;
-        soundEngine.playDoorAction(false);
-        this.pushRadio('KOBRA-1', `${door.name} desbloqueada y entreabierta (28% peek).`, 'info');
-      } else {
-        // Incremental inching: Closed -> 28% peek -> 65% wide -> Fully Open -> Closed
-        const closed = door.closedAngle;
-        const open = door.openAngle;
-        const diff = open - closed;
-        const cur = door.currentAngle;
+    if (!door) return false;
+    if (door.isLocked) {
+      door.isLocked = false;
+      door.isOpen = true;
+      door.currentAngle = door.closedAngle + (door.openAngle - door.closedAngle) * 0.28;
+      soundEngine.playDoorAction(false);
+      this.pushRadio('KOBRA-1', `${door.name} desbloqueada y entreabierta (28% peek).`, 'info');
+    } else {
+      // Incremental inching: Closed -> 28% peek -> 65% wide -> Fully Open -> Closed
+      const closed = door.closedAngle;
+      const open = door.openAngle;
+      const diff = open - closed;
+      const cur = door.currentAngle;
 
-        if (!door.isOpen || Math.abs(cur - closed) < 0.05) {
-          // Closed -> 28% peek
-          door.isOpen = true;
-          door.currentAngle = closed + diff * 0.28;
-          soundEngine.playDoorAction(false);
-          this.pushRadio('KOBRA-1', `${door.name} entreabierta con precaución (28% peek).`, 'info');
-        } else if (Math.abs(cur - (closed + diff * 0.28)) < 0.05) {
-          // 28% -> 65% peek
-          door.currentAngle = closed + diff * 0.65;
-          soundEngine.playDoorAction(false);
-          this.pushRadio('KOBRA-1', `${door.name} abierta a mitad (65% peek).`, 'info');
-        } else if (door.isOpen && Math.abs(cur - open) > 0.05) {
-          // -> Fully open
-          door.currentAngle = open;
-          soundEngine.playDoorAction(false);
-          this.pushRadio('KOBRA-1', `${door.name} completamente abierta.`, 'info');
-        } else {
-          // Fully open -> Closed
-          door.isOpen = false;
-          door.currentAngle = closed;
-          soundEngine.playDoorAction(false);
-          this.pushRadio('KOBRA-1', `${door.name} cerrada y asegurada.`, 'info');
-        }
+      if (!door.isOpen || Math.abs(cur - closed) < 0.05) {
+        // Closed -> 28% peek
+        door.isOpen = true;
+        door.currentAngle = closed + diff * 0.28;
+        soundEngine.playDoorAction(false);
+        this.pushRadio('KOBRA-1', `${door.name} entreabierta con precaución (28% peek).`, 'info');
+      } else if (Math.abs(cur - (closed + diff * 0.28)) < 0.05) {
+        // 28% -> 65% peek
+        door.currentAngle = closed + diff * 0.65;
+        soundEngine.playDoorAction(false);
+        this.pushRadio('KOBRA-1', `${door.name} abierta a mitad (65% peek).`, 'info');
+      } else if (door.isOpen && Math.abs(cur - open) > 0.05) {
+        // -> Fully open
+        door.currentAngle = open;
+        soundEngine.playDoorAction(false);
+        this.pushRadio('KOBRA-1', `${door.name} completamente abierta.`, 'info');
+      } else {
+        // Fully open -> Closed
+        door.isOpen = false;
+        door.currentAngle = closed;
+        soundEngine.playDoorAction(false);
+        this.pushRadio('KOBRA-1', `${door.name} cerrada y asegurada.`, 'info');
       }
-      this.emitHudSnapshot();
     }
+    this.emitHudSnapshot();
+    return true;
   }
 
   public handleWheel(deltaY: number) {
@@ -5687,6 +5701,8 @@ public nightMode: boolean = false;
       }
     }
 
+    // Mismo orden que `handleContextualInteract`: con la puerta en rango el cartel
+    // anuncia la puerta y no el esposado de un rendido que espera detrás.
     for (const actor of this.actors) {
       if (actor.role === 'PLAYER' || actor.role === 'SQUAD') continue;
       if (actor.state === 'DEAD' || actor.state === 'ARRESTED') continue;
@@ -8640,6 +8656,22 @@ public nightMode: boolean = false;
         : `C4 armada en ${nearbyCharge.targetName}: [J] despejar zona · aléjate >190 px antes de detonar`;
     }
 
+    // Mismo orden que `handleContextualInteract`: con la puerta en rango el cartel
+    // anuncia la puerta y no el esposado de un rendido que espera detrás.
+    const door = this.findNearestDoor(player.x, player.y, 64);
+    if (door) {
+      if (!door.isOpen) {
+        const sensorLabel =
+          this.plan.inspectionDevice === 'THERMAL_CAM'
+            ? 'Cámara Térmica FLIR'
+            : this.plan.inspectionDevice === 'MICRO_CAM'
+              ? 'Micro-Cámara Óptica'
+              : 'Espejo Táctico';
+        return `${door.name}: [Q] ${sensorLabel} · [F] Patada · [C] C4 (${this.c4.count}) · [X] Ariete`;
+      }
+      return `${door.name}: [E] Cerrar puerta`;
+    }
+
     for (const actor of this.actors) {
       if (actor.role === 'PLAYER' || actor.role === 'SQUAD') continue;
       if (Math.hypot(actor.x - player.x, actor.y - player.y) <= 54) {
@@ -8670,20 +8702,6 @@ public nightMode: boolean = false;
       if (!ev.secured && Math.hypot(ev.x - player.x, ev.y - player.y) <= 50) {
         return `[E] asegurar arma como evidencia (${ev.label})`;
       }
-    }
-
-    const door = this.findNearestDoor(player.x, player.y, 64);
-    if (door) {
-      if (!door.isOpen) {
-        const sensorLabel =
-          this.plan.inspectionDevice === 'THERMAL_CAM'
-            ? 'Cámara Térmica FLIR'
-            : this.plan.inspectionDevice === 'MICRO_CAM'
-              ? 'Micro-Cámara Óptica'
-              : 'Espejo Táctico';
-        return `${door.name}: [Q] ${sensorLabel} · [F] Patada · [C] C4 (${this.c4.count}) · [X] Ariete`;
-      }
-      return `${door.name}: [E] Cerrar puerta`;
     }
 
     const extWin = this.findNearestExteriorWindow(player.x, player.y, 68);
