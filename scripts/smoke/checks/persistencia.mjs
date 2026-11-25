@@ -228,10 +228,9 @@ const TOPE_RELOJ_TOQUE = 6000;
 /** Velocidad base del operador en el motor, en px/s de simulación. */
 const VELOCIDAD_CAMINATA = 168;
 /** Lo que se deja sin recorrer en cada toque, para no pasarse del punto. */
-const MARGEN_FRENADA = 8;
-/** Tope y mínimo de un toque, en segundos de simulación. */
-const TOPE_TOQUE_SIM = 1.5;
-const TOQUE_MINIMO_SIM = 0.02;
+const MARGEN_FRENADA = 6;
+/** Espera máxima a que el cuerpo empiece a moverse tras pulsar, en ms de reloj. */
+const ESPERA_PRIMER_PASO = 800;
 /**
  * Distancia a la que se da por alcanzado un punto intermedio de la ruta: lo que avanza
  * el cuerpo en el toque más corto. Con menos, el operador rebota alrededor del punto
@@ -362,6 +361,11 @@ async function diagnosticoDelBloqueo(page) {
       jugador: { x: jugador.x, y: jugador.y },
       binomio: binomio ? { x: binomio.x, y: binomio.y } : null,
       obstaculos,
+      // Si el motor corre pero el cuerpo no se mueve, la causa no es la geometría:
+      // el juego puede estar en pausa o con un modal que se come el teclado.
+      estado: estado.gameState,
+      modal: document.querySelector('[role="dialog"]')?.getAttribute('aria-label') ?? null,
+      foco: document.hasFocus(),
     };
   }, RADIO_OBSTACULO);
 }
@@ -446,15 +450,15 @@ async function aquietar(page, jugador) {
 }
 
 /**
- * Acerca al operador a un punto en toques medidos en simulación, no en reloj.
+ * Acerca al operador a un punto sosteniendo la tecla hasta que el cuerpo llega.
  *
- * Cada toque pide recorrer `distancia - MARGEN_FRENADA` px y se sostiene hasta que el
- * reloj del motor (`tiempo`) suma los segundos que eso tarda a 200 px/s. Así el toque
- * cubre la distancia aunque el runner esté cargado y la simulación avance despacio: lo
- * que cambia es el reloj de pared, no el recorrido. El corte lo hace `mantenerTeclas`
- * limpiando las teclas del motor, así que un `keyup` tardío ya no empuja al cuerpo más
- * allá del punto; el margen de frenada cubre el frame que se procesa entre la última
- * lectura y el corte. El presupuesto de la caminata también va en simulación.
+ * El toque va en lazo cerrado sobre la posición, no sobre un cronómetro: se lee el motor
+ * cada 25 ms y la tecla sigue puesta mientras el cuerpo se acerque. Con el runner cargado
+ * el `keydown` puede tardar en llegar al motor, y una dosis por tiempo se vencía antes de
+ * mover: en el CI el operador se quedó 12 s de simulación en 204.7 px sin avanzar. Aquí
+ * ese retraso sólo alarga el toque. El corte limpia las teclas retenidas del motor, así
+ * que un `keyup` tardío tampoco empuja al cuerpo más allá del punto. El presupuesto de la
+ * caminata sigue en simulación.
  */
 async function seguirHasta(page, punto, { holgura = HOLGURA_PASO, tope = TOPE_CAMINATA } = {}) {
   const comienzo = Date.now();
@@ -472,7 +476,7 @@ async function seguirHasta(page, punto, { holgura = HOLGURA_PASO, tope = TOPE_CA
     const distancia = Math.hypot(dx, dy);
     simulacion = Math.max(0, jugador.tiempo - arranque.tiempo);
     if (distancia <= holgura) {
-      // El cuerpo ya viene parado: `mantenerTeclas` cortó y asentó en el toque anterior, y
+      // El cuerpo ya viene parado: `sostenerHasta` cortó y asentó en el toque anterior, y
       // cada caminata termina con `aquietar`. Volver a asentar acá sumaba una parada por
       // tramo —siete en el barrido de la cocina— y era lo que agotaba el presupuesto.
       return { ok: true, muestras, distancia, jugador, simulacion };
@@ -505,19 +509,17 @@ async function seguirHasta(page, punto, { holgura = HOLGURA_PASO, tope = TOPE_CA
       const costados = porY
         ? [dy >= 0 ? 'KeyS' : 'KeyW', dx >= 0 ? 'KeyD' : 'KeyA']
         : [dx >= 0 ? 'KeyD' : 'KeyA', dy >= 0 ? 'KeyS' : 'KeyW'];
-      await mantenerTeclas(page, [costados[rodeos % 2]], 0.08);
+      await pulsarTeclas(page, [costados[rodeos % 2]]);
       rodeos += 1;
       sinAvance = 0;
       jugador = (await leerMuestra(page)) ?? jugador;
       muestras += 1;
       continue;
     }
-    const segundos = Math.min(
-      TOPE_TOQUE_SIM,
-      Math.max(TOQUE_MINIMO_SIM, (distancia - MARGEN_FRENADA) / VELOCIDAD_CAMINATA)
-    );
-    await mantenerTeclas(page, teclas, segundos);
-    const actual = await leerMuestra(page);
+    // Se apunta a un poco más cerca que la holgura: el frame que se procesa entre la
+    // última lectura y el corte puede dejar al cuerpo unos píxeles más allá.
+    const segundos = Math.max(0.03, (distancia - MARGEN_FRENADA) / VELOCIDAD_CAMINATA);
+    const actual = await sostenerHasta(page, teclas, punto, segundos, tope - simulacion);
     if (!actual) break;
     const avance = Math.hypot(actual.x - jugador.x, actual.y - jugador.y);
     sinAvance = avance < 0.5 ? sinAvance + 1 : 0;
@@ -537,29 +539,63 @@ async function seguirHasta(page, punto, { holgura = HOLGURA_PASO, tope = TOPE_CA
 }
 
 /**
- * Sostiene las teclas los segundos de simulación pedidos y corta en el acto.
+ * Sostiene las teclas el tiempo de simulación que cuesta recorrer la distancia pedida y
+ * corta en el acto.
  *
- * `waitForTimeout(ms)` mide reloj: con la máquina cargada el motor avanza menos y el
- * toque queda corto, que es lo que gastaba el presupuesto de la caminata. Aquí se espera
- * a que el reloj de simulación sume lo pedido, leyendo el motor entre pulsos. El corte
- * no depende del `keyup` —que con la máquina cargada llega tarde y deja al cuerpo 40 px
- * más allá—: `soltarTeclas` limpia las teclas retenidas del motor, así el frame siguiente
- * ya no mueve al operador. Después se espera el tick siguiente para leer una posición
- * asentada.
+ * El reloj empieza a contar cuando el cuerpo se mueve, no cuando se pulsa: con el runner
+ * cargado el `keydown` puede tardar en llegar al motor y una dosis que arranca en la
+ * pulsación se vencía antes de mover —el CI se quedó 12 s de simulación con el operador
+ * en 204.7 px—. Si el cuerpo no arranca en `ESPERA_PRIMER_PASO` ms, el toque termina y el
+ * bucle decide con el rodeo. También se corta si el cuerpo cruza el punto: seguir de
+ * largo es lo que lo dejaba 50 px más allá del carril, contra el jamb. El corte no
+ * depende del `keyup`: `soltarTeclas` limpia las teclas retenidas del motor.
  */
-async function mantenerTeclas(page, teclas, segundos) {
+async function sostenerHasta(page, teclas, punto, segundos, restanteSim) {
   for (const tecla of teclas) await page.keyboard.down(tecla);
   const limite = Date.now() + TOPE_RELOJ_TOQUE;
+  let actual = null;
   try {
-    const comienzo = await leerMuestra(page);
-    if (comienzo) {
-      while (Date.now() < limite) {
-        await page.waitForTimeout(25);
-        const actual = await leerMuestra(page);
-        if (!actual) break;
-        if (actual.tiempo - comienzo.tiempo >= segundos) break;
+    const referencia = await leerMuestra(page);
+    let inicio = null;
+    const esperaMax = Math.min(limite, Date.now() + ESPERA_PRIMER_PASO);
+    while (Date.now() < esperaMax) {
+      await page.waitForTimeout(20);
+      actual = await leerMuestra(page);
+      if (!actual || !referencia) break;
+      if (Math.hypot(actual.x - referencia.x, actual.y - referencia.y) > 0.5) {
+        inicio = actual;
+        break;
       }
     }
+    if (inicio) {
+      const objetivo = Math.min(segundos, restanteSim);
+      while (Date.now() < limite) {
+        await page.waitForTimeout(20);
+        actual = await leerMuestra(page);
+        if (!actual) break;
+        if (actual.tiempo - inicio.tiempo >= objetivo) break;
+        const cruzoX =
+          Math.abs(punto.x - inicio.x) > 1 &&
+          Math.sign(punto.x - actual.x) !== Math.sign(punto.x - inicio.x);
+        const cruzoY =
+          Math.abs(punto.y - inicio.y) > 1 &&
+          Math.sign(punto.y - actual.y) !== Math.sign(punto.y - inicio.y);
+        if (cruzoX || cruzoY) break;
+      }
+    }
+  } finally {
+    await soltarTeclas(page);
+  }
+  await page.waitForTimeout(ASENTAR_MS);
+  await asentarCuerpo(page);
+  return (await leerMuestra(page)) ?? actual;
+}
+
+/** Pulso corto de desenganche: baja la tecla, la sostiene `ms` y la suelta en el acto. */
+async function pulsarTeclas(page, teclas, ms = 90) {
+  for (const tecla of teclas) await page.keyboard.down(tecla);
+  try {
+    await page.waitForTimeout(ms);
   } finally {
     await soltarTeclas(page);
   }
@@ -652,6 +688,9 @@ async function caminarA(page, destino, paso) {
             `${ruta.puntos.map((item) => `(${item.x}, ${item.y})`).join(' → ')}; ` +
             `jugador en ${jugador ? `${jugador.x.toFixed(1)}, ${jugador.y.toFixed(1)}` : '?'}` +
             `; binomio en ${binomio ? `${binomio.x.toFixed(1)}, ${binomio.y.toFixed(1)}` : '?'}` +
+            `; juego ${bloqueo?.estado ?? '?'}` +
+            `${bloqueo?.modal ? ` con ${bloqueo.modal} abierto` : ''}` +
+            `${bloqueo?.foco === false ? ' (sin foco)' : ''}` +
             `; ${estorbo})`
         );
       }
@@ -682,6 +721,8 @@ async function caminarA(page, destino, paso) {
           `(ruta ${ruta.puntos.map((item) => `(${item.x}, ${item.y})`).join(' → ')}` +
           `; jugador en ${final.x.toFixed(1)}, ${final.y.toFixed(1)}` +
           `; binomio en ${bloqueo?.binomio ? `${bloqueo.binomio.x.toFixed(1)}, ${bloqueo.binomio.y.toFixed(1)}` : '?'}` +
+          `; juego ${bloqueo?.estado ?? '?'}` +
+          `${bloqueo?.modal ? ` con ${bloqueo.modal} abierto` : ''}` +
           `; ${estorbo})`
       );
     }
