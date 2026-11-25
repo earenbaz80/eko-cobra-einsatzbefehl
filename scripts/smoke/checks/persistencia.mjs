@@ -516,10 +516,7 @@ async function seguirHasta(page, punto, { holgura = HOLGURA_PASO, tope = TOPE_CA
       muestras += 1;
       continue;
     }
-    // Se apunta a un poco más cerca que la holgura: el frame que se procesa entre la
-    // última lectura y el corte puede dejar al cuerpo unos píxeles más allá.
-    const segundos = Math.max(0.03, (distancia - MARGEN_FRENADA) / VELOCIDAD_CAMINATA);
-    const actual = await sostenerHasta(page, teclas, punto, segundos, tope - simulacion);
+    const actual = await sostenerHasta(page, teclas, punto, tope - simulacion);
     if (!actual) break;
     const avance = Math.hypot(actual.x - jugador.x, actual.y - jugador.y);
     sinAvance = avance < 0.5 ? sinAvance + 1 : 0;
@@ -545,12 +542,14 @@ async function seguirHasta(page, punto, { holgura = HOLGURA_PASO, tope = TOPE_CA
  * El reloj empieza a contar cuando el cuerpo se mueve, no cuando se pulsa: con el runner
  * cargado el `keydown` puede tardar en llegar al motor y una dosis que arranca en la
  * pulsación se vencía antes de mover —el CI se quedó 12 s de simulación con el operador
- * en 204.7 px—. Si el cuerpo no arranca en `ESPERA_PRIMER_PASO` ms, el toque termina y el
- * bucle decide con el rodeo. También se corta si el cuerpo cruza el punto: seguir de
- * largo es lo que lo dejaba 50 px más allá del carril, contra el jamb. El corte no
- * depende del `keyup`: `soltarTeclas` limpia las teclas retenidas del motor.
+ * en 204.7 px—. La dosis se recalcula sobre lo que falta desde esa primera muestra: si
+ * entre la pulsación y el primer movimiento el cuerpo ya recorrió medio tramo, sumarle
+ * la distancia original lo pasaba de largo (CI: 296.8 px con destino 250). Si el cuerpo
+ * no arranca en `ESPERA_PRIMER_PASO` ms, el toque termina y el bucle decide con el rodeo.
+ * También se corta si el cuerpo cruza el punto. El corte no depende del `keyup`:
+ * `soltarTeclas` limpia las teclas retenidas del motor.
  */
-async function sostenerHasta(page, teclas, punto, segundos, restanteSim) {
+async function sostenerHasta(page, teclas, punto, restanteSim) {
   for (const tecla of teclas) await page.keyboard.down(tecla);
   const limite = Date.now() + TOPE_RELOJ_TOQUE;
   let actual = null;
@@ -568,7 +567,11 @@ async function sostenerHasta(page, teclas, punto, segundos, restanteSim) {
       }
     }
     if (inicio) {
-      const objetivo = Math.min(segundos, restanteSim);
+      const falta = Math.hypot(punto.x - inicio.x, punto.y - inicio.y);
+      const objetivo = Math.min(
+        Math.max(0.03, (falta - MARGEN_FRENADA) / VELOCIDAD_CAMINATA),
+        restanteSim
+      );
       while (Date.now() < limite) {
         await page.waitForTimeout(20);
         actual = await leerMuestra(page);
