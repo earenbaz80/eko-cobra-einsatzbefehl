@@ -34,7 +34,10 @@
  * con [6], y el binomio entra antes en la estancia con un PUNTO DE AVANCE del pad
  * pegado al rendido: la orden elige al rendido más cercano al binomio, no al que ve
  * el operador, y su cámara de casco es la confirmación de que está dentro. La
- * posición real de los actores se lee de `actors` en el snapshot E2E.
+ * posición real de los actores se lee de `actors` en el snapshot E2E. En cuanto la
+ * cámara lo ve, un HOLD fija al binomio en el apostadero: al llegar al punto de
+ * avance el motor suelta el marcador y vuelve a seguirlo al operador, y el contacto
+ * se caía antes de leer el pad, que entonces marcaba DESPEJADA por ocupación.
  *
  * El arresto cierra el ciclo: con el hostil en intel, sólo esposarlo lo saca de la
  * cuenta de hostiles conocidos, y la sala vuelve a DESPEJADA por la presencia del
@@ -93,7 +96,7 @@ const NOMBRE_SALA_SONDA = 'Salón Principal';
 const SALA_CONTACTO = 'WOHNKUECHE';
 /** Nombre que publica el HUD para esa estancia. */
 const NOMBRE_SALA_CONTACTO = 'Cocina-Comedor';
-/** Punto al este de la cocina: lejos del hostil y fuera del cono de la mira. */
+/** Mira al este de la cocina: se usa cuando el rendido queda al oeste. */
 const MIRA_BARRIDO = { x: 700, y: 320 };
 /** La misma mira contra la pared oeste, para barrer caminando hacia el vano. */
 const MIRA_BARRIDO_OESTE = { x: 320, y: 320 };
@@ -877,6 +880,15 @@ async function estadoEnPad(page, sala) {
   return filas.find((fila) => fila.sala === sala)?.estado ?? null;
 }
 
+/** El tablero entero del EKO-Pad, para decir en el fallo dónde cayó el contacto. */
+async function tableroEnPad(page) {
+  await page.keyboard.press('KeyM');
+  await page.locator('[data-testid="pad-despeje"]').waitFor({ state: 'visible', timeout: 8000 });
+  const filas = (await leerDespejePad(page)) ?? [];
+  await page.keyboard.press('Escape');
+  return filas;
+}
+
 /** Estancias despejadas que lista el último autoguardado, para los mensajes de fallo. */
 async function despejadasGuardadas(page) {
   return JSON.stringify((await leerGuardado(page))?.estanciasDespejadas ?? null);
@@ -1136,11 +1148,13 @@ export async function comprobarPersistencia(page, { url }) {
       return;
     }
 
-    // Barrido sin verlo: la mira se queda al este, contra la pared, mientras el
-    // operador camina hasta el fondo de la cocina. A más de 95 px y fuera del
-    // cono, el rendido no entra en la intel del jugador y la estancia queda
-    // DESPEJADA aunque él siga dentro. La distancia se afirma sobre la posición real
-    // del sospechoso y el punto de barrido se deriva de ella, no se da por supuesta.
+    // Barrido sin verlo: la mira se queda contra la pared del lado contrario al
+    // rendido, mientras el operador camina hasta el fondo de la cocina. A más de 95 px
+    // y fuera del cono, el rendido no entra en la intel del jugador y la estancia queda
+    // DESPEJADA aunque él siga dentro. La distancia y el lado se afirman sobre la
+    // posición real del sospechoso, y el punto de barrido se deriva de ella, no se da
+    // por supuesto: con la mira fija al este el cono alcanzaba al rendido que deriva
+    // hacia ese lado y la cámara dejaba de ser la única fuente del contacto.
     const sospechoso = await hostilEnSala(page, SALA_CONTACTO);
     if (!sospechoso || sospechoso.state !== 'SURRENDERED') {
       fail(
@@ -1197,8 +1211,11 @@ export async function comprobarPersistencia(page, { url }) {
         motivoBarrido = intento.motivo;
       }
     }
-    // La mira acompaña al extremo elegido: se barre mirando a la pared de enfrente.
-    const miraBarrido = puntoBarrido.x >= PUNTO_BARRIDO.x ? MIRA_BARRIDO : MIRA_BARRIDO_OESTE;
+    // La mira se aparta del rendido, no del punto de partida: el barrido existe para que
+    // el hostil quede fuera del intel del operador, y con la mira puesta de su lado el
+    // cono lo alcanza a cualquier distancia por debajo del alcance de la linterna. El
+    // rendido deriva con el ruido, así que el lado se decide con su posición real.
+    const miraBarrido = sospechoso.x >= puntoBarrido.x ? MIRA_BARRIDO_OESTE : MIRA_BARRIDO;
     const distanciaAlBarrido = Math.hypot(
       sospechoso.x - puntoBarrido.x,
       sospechoso.y - puntoBarrido.y
@@ -1379,13 +1396,13 @@ export async function comprobarPersistencia(page, { url }) {
       );
       return;
     }
-    await apuntarA(page, MIRA_BARRIDO);
+    await apuntarA(page, miraBarrido);
     await caminarA(
       page,
       { x: puntoBarrido.x, y: puntoBarrido.y },
       `arresto: plantarse en el fondo de ${SALA_CONTACTO}`
     );
-    await apuntarA(page, MIRA_BARRIDO);
+    await apuntarA(page, miraBarrido);
 
     // [6] esposa al rendido más cercano al binomio, no al que el operador tiene delante:
     // con Kobra-2 parado en el vano del salón, Milán —a un paso y todavía en contacto por
@@ -1473,9 +1490,9 @@ export async function comprobarPersistencia(page, { url }) {
         .catch(() => null);
     // El ratón del pad movió también la mira del operador: al cerrar el pad apuntaba al
     // marcador —hacia el rendido— y `visibleToPlayer` pasaba a true, que es justo lo que
-    // la comprobación exige que no ocurra. Se devuelve la mira a la pared antes de
-    // esperar la cámara del binomio.
-    await apuntarA(page, MIRA_BARRIDO);
+    // la comprobación exige que no ocurra. Se devuelve la mira a la pared del lado
+    // contrario al rendido, que es la que el cono no alcanza.
+    await apuntarA(page, miraBarrido);
 
     // El HUD publica un solo contacto, el primero del orden del mapa, y el salón sigue en
     // contacto por el espejo de la sonda: la cocina no es lo que muestra
@@ -1543,15 +1560,64 @@ export async function comprobarPersistencia(page, { url }) {
       return;
     }
 
+    // El binomio se queda donde la cámara ve al rendido. Al llegar al punto de avance el
+    // motor suelta el marcador y vuelve a seguirlo al operador, así que la vista se caía
+    // entre el bucle y la lectura del pad: el pad marcaba DESPEJADA por ocupación —la
+    // regla correcta sin hostil conocido— y el fallo parecía del despeje. HOLD cancela el
+    // marcador y lo fija en el apostadero, donde la cámara sigue viéndolo.
+    await page.keyboard.press('Digit2');
+    await page.waitForFunction(
+      () => window.__eko?.snapshot()?.squad?.command === 'HOLD',
+      undefined,
+      { timeout: 5000 }
+    );
+    const contactoFijado = await leerContactoDeCamara();
+    const distanciaFijada =
+      contactoFijado?.binomio && contactoFijado?.actor
+        ? Math.hypot(
+            contactoFijado.binomio.x - contactoFijado.actor.x,
+            contactoFijado.binomio.y - contactoFijado.actor.y
+          )
+        : Number.NaN;
+    if (!contactoFijado?.visibleToSquad || distanciaFijada >= ALCANCE_CAMARA) {
+      fail(
+        `persistencia: con el binomio en HOLD la cámara deja de ver al rendido ` +
+          `(a ${Number.isNaN(distanciaFijada) ? '?' : distanciaFijada.toFixed(1)} px, ` +
+          `alcance ${ALCANCE_CAMARA}; vista del binomio ` +
+          `${contactoFijado?.visibleToSquad === true}); el contacto tiene que sostenerse ` +
+          `sin que nadie siga caminando`
+      );
+      return;
+    }
+
     const contactoRendido = await estadoEnPad(page, SALA_CONTACTO);
     if (contactoRendido !== 'EN_CONTACTO') {
       const squad = await leerBinomio(page);
+      // Lo que la cámara ve en este instante, no en el último muestreo del bucle: si el
+      // binomio se movió mientras se abría el pad, el fallo tiene que decirlo con la
+      // lectura del momento y con el tablero entero, para no culpar al despeje de un
+      // contacto que ya no existe.
+      const ahora = await leerContactoDeCamara();
+      const tablero = await tableroEnPad(page);
+      const enContacto = tablero
+        .filter((fila) => fila.estado === 'EN_CONTACTO')
+        .map((fila) => fila.sala);
+      const distanciaAhora =
+        ahora?.binomio && ahora?.actor
+          ? Math.hypot(ahora.binomio.x - ahora.actor.x, ahora.binomio.y - ahora.actor.y)
+          : Number.NaN;
       fail(
         `persistencia: la cámara del binomio ve al rendido pero ${SALA_CONTACTO} figura ` +
           `${contactoRendido ?? 'ausente'} en el EKO-Pad ` +
           `(binomio en ${squad ? `${squad.x.toFixed(1)}, ${squad.y.toFixed(1)}` : 'sin binomio'}; ` +
           `rendido en ${lecturaCamara?.actor ? `${lecturaCamara.actor.x.toFixed(1)}, ${lecturaCamara.actor.y.toFixed(1)}` : '?'}; ` +
-          `a ${Number.isNaN(distanciaBinomio) ? '?' : distanciaBinomio.toFixed(1)} px, alcance ${ALCANCE_CAMARA})`
+          `a ${Number.isNaN(distanciaBinomio) ? '?' : distanciaBinomio.toFixed(1)} px, alcance ${ALCANCE_CAMARA}; ` +
+          `al leer el pad el binomio está en ` +
+          `${ahora?.binomio ? `${ahora.binomio.x.toFixed(1)}, ${ahora.binomio.y.toFixed(1)}` : '?'}, ` +
+          `el rendido en ${ahora?.actor ? `${ahora.actor.x.toFixed(1)}, ${ahora.actor.y.toFixed(1)}` : '?'} ` +
+          `a ${Number.isNaN(distanciaAhora) ? '?' : distanciaAhora.toFixed(1)} px, la vista del binomio ` +
+          `${ahora?.visibleToSquad === true}, la del operador ${ahora?.visibleToPlayer === true}, ` +
+          `y en contacto ${enContacto.join(', ') || 'ninguna estancia'})`
       );
       return;
     }

@@ -1538,10 +1538,18 @@ describe('despeje en el snapshot del HUD', () => {
   });
 
   /** Motor con el binomio dentro de la cocina y el rendido donde lo deje el caso. */
-  const motorConCamaraEnLaCocina = (rendido: ActorEntity) => {
+  const motorConCamaraEnLaCocina = (
+    rendido: ActorEntity,
+    opciones: { binomio?: { x: number; y: number } } = {}
+  ) => {
     const layout = createGrazApartmentLayout();
     const operador = { ...player, x: 1150, y: 780, roomName: 'LOGGIA' } as ActorEntity;
-    const binomio = { ...squad, x: 400, y: 232, roomName: 'WOHNKUECHE' } as ActorEntity;
+    const binomio = {
+      ...squad,
+      x: opciones.binomio?.x ?? 400,
+      y: opciones.binomio?.y ?? 232,
+      roomName: 'WOHNKUECHE',
+    } as ActorEntity;
     const onHudUpdate = vi.fn();
     const engine = createEngine({
       plan: { ...plan, inspectionDevice: 'MICRO_CAM' },
@@ -1587,7 +1595,7 @@ describe('despeje en el snapshot del HUD', () => {
       thermalActive: false,
       mirrorDoorId: null,
     });
-    return { engine, onHudUpdate };
+    return { engine, onHudUpdate, operador, binomio };
   };
 
   const makeRendido = (overrides: Partial<ActorEntity> = {}) =>
@@ -1610,6 +1618,26 @@ describe('despeje en el snapshot del HUD', () => {
       identifiedByRadio: false,
       ...overrides,
     }) as unknown as ActorEntity;
+
+  it('pone la cocina en contacto cuando la cámara la ve, sin esperar a la etiqueta', () => {
+    // Geometría medida en el humo: el rendido en el fondo de la cocina y el binomio a
+    // 60 px. La visibilidad la calcula el motor con su raycast, no se le pasa puesta:
+    // si el pad no cuenta al rendido es porque la cuenta no mira lo que la cámara ve.
+    const rendido = makeRendido({ x: 371.4, y: 263.0, visibleToSquad: false });
+    const { engine, onHudUpdate, operador } = motorConCamaraEnLaCocina(rendido, {
+      binomio: { x: 426, y: 238 },
+    });
+
+    engine.updateSuspectsAI(0.05, operador);
+    expect(rendido.visibleToSquad).toBe(true);
+
+    engine.emitHudSnapshot();
+    const hud = onHudUpdate.mock.calls[onHudUpdate.mock.calls.length - 1]?.[0] as HudSnapshot;
+    expect(hud.tacticalPad.rooms.find((r) => r.id === 'WOHNKUECHE')?.knownHostiles).toBe(1);
+    expect(hud.despeje.salas.find((sala) => sala.id === 'WOHNKUECHE')?.estado).toBe(
+      'EN_CONTACTO'
+    );
+  });
 
   it('un rendido que ve la cámara del binomio pinta su estancia EN CONTACTO', () => {
     const rendido = makeRendido();
