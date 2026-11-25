@@ -227,8 +227,11 @@ const TOPE_RELOJ_CAMINATA = 45000;
 const TOPE_RELOJ_TOQUE = 6000;
 /** Velocidad base del operador en el motor, en px/s de simulación. */
 const VELOCIDAD_CAMINATA = 168;
-/** Lo que se deja sin recorrer en cada toque, para no pasarse del punto. */
-const MARGEN_FRENADA = 6;
+/**
+ * Lo que se deja sin recorrer en cada toque. Cubre el frame y la ida y vuelta del corte:
+ * con el runner cargado el cuerpo sigue andando mientras el corte viaja a la página.
+ */
+const MARGEN_FRENADA = 14;
 /** Espera máxima a que el cuerpo empiece a moverse tras pulsar, en ms de reloj. */
 const ESPERA_PRIMER_PASO = 800;
 /**
@@ -394,12 +397,12 @@ const TECLAS_DE_MOVIMIENTO = ['KeyW', 'KeyA', 'KeyS', 'KeyD'];
  * el cuerpo se plantó 40 px más allá del punto, sin nada cerca que lo explicara.
  */
 async function soltarTeclas(page) {
-  for (const tecla of TECLAS_DE_MOVIMIENTO) await page.keyboard.up(tecla);
+  // El corte dentro de la página va primero: es una sola ida y vuelta y detiene el
+  // cuerpo en el frame siguiente. Los `keyboard.up` van después porque con el runner
+  // cargado cada uno puede tardar decenas de milisegundos y el motor sigue andando
+  // entre ellos: por eso el CI veía al operador oscilar ±50 px alrededor del punto.
   await page
     .evaluate((teclas) => {
-      // El `keyup` puede llegar tarde con la máquina cargada y el motor sigue integrando
-      // mientras tanto: limpiar sus teclas retenidas en la misma tarea corta el avance en
-      // el frame siguiente, sin depender de cuándo se entregue el evento.
       window.__eko?.clearHeldKeys?.();
       for (const tecla of teclas) {
         const letra = tecla.slice(3).toLowerCase();
@@ -411,6 +414,7 @@ async function soltarTeclas(page) {
       }
     }, TECLAS_DE_MOVIMIENTO)
     .catch(() => {});
+  for (const tecla of TECLAS_DE_MOVIMIENTO) await page.keyboard.up(tecla);
 }
 
 /** Tick, reloj de simulación y posición del jugador en una sola lectura. */
