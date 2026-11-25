@@ -496,6 +496,20 @@ export interface EkoE2EHook extends EkoE2EState {
    * cuerpo sigue avanzando mientras tanto.
    */
   clearHeldKeys(): void;
+  /**
+   * Camina hasta `destino` dentro de la página y resuelve al llegar o agotar el tope.
+   *
+   * El humo no puede cerrar el lazo desde Node: con el contenedor cargado cada ida y
+   * vuelta del protocolo tarda más de lo que el cuerpo recorre en ese tiempo y el
+   * operador oscilaba ±50 px alrededor del punto. Acá la tecla y el corte se deciden en
+   * el mismo frame del motor, así el paso no depende de la latencia externa.
+   */
+  caminarHacia(
+    destino: { x: number; y: number },
+    holgura: number,
+    topeSim: number,
+    topeMs: number
+  ): Promise<{ ok: boolean; x: number; y: number; sim: number; ms: number }>;
   /** Coordenadas CSS para pulsar una posición del mundo desde Playwright. */
   worldToScreen(x: number, y: number): { x: number; y: number };
   /** FNV-1a del buffer del pase de arte; null si `?art=classic` o aún no pintó. */
@@ -1213,6 +1227,15 @@ public nightMode: boolean = false;
 
   public clearHeldKeys() {
     this.heldKeys.clear();
+  }
+
+  /**
+   * Posición del operador y reloj de simulación sin armar la instantánea completa; la
+   * caminata del E2E lo lee en cada frame y no conviene asignar el mundo entero ahí.
+   */
+  public posicionYReloj(): { x: number; y: number; tiempo: number } | null {
+    const jugador = this.getPlayer();
+    return jugador ? { x: jugador.x, y: jugador.y, tiempo: this.elapsedSeconds } : null;
   }
 
   public randomizeBattlemapProps() {
