@@ -375,22 +375,42 @@ async function soltarTeclas(page) {
     .catch(() => {});
 }
 
+/** Tick del motor y posición del jugador en una sola lectura. */
+function leerMuestra(page) {
+  return page.evaluate(() => {
+    const snap = window.__eko?.snapshot();
+    if (!snap?.player) return null;
+    return { tick: snap.tick, x: snap.player.x, y: snap.player.y };
+  });
+}
+
+/**
+ * Espera a que el cuerpo esté parado de verdad, no sólo a que dos lecturas
+ * coincidan: con la máquina cargada dos lecturas en el mismo tick coinciden aunque
+ * el motor esté a punto de avanzar. Se espera un cambio de tick, y si en el tick
+ * nuevo el cuerpo se movió, el `keyup` no llegó al motor y se vuelve a soltar.
+ */
+async function asentarCuerpo(page) {
+  let anterior = await leerMuestra(page);
+  for (let intento = 0; intento < 40 && anterior; intento += 1) {
+    await page.waitForTimeout(30);
+    const actual = await leerMuestra(page);
+    if (!actual) return;
+    if (actual.tick === anterior.tick) continue;
+    if (Math.hypot(actual.x - anterior.x, actual.y - anterior.y) <= 0.5) return;
+    await soltarTeclas(page);
+    anterior = actual;
+  }
+}
+
 /**
  * Suelta las teclas y espera a que el cuerpo se quede quieto; si deriva, vuelve a soltar.
  * Devuelve la última posición leída, ya sin deriva.
  */
 async function aquietar(page, jugador) {
-  let actual = jugador;
-  for (let intento = 0; intento < 3; intento += 1) {
-    await soltarTeclas(page);
-    await page.waitForTimeout(120);
-    const siguiente = await leerJugador(page);
-    if (!siguiente) return actual;
-    const deriva = Math.hypot(siguiente.x - actual.x, siguiente.y - actual.y) > 1;
-    actual = siguiente;
-    if (!deriva) return actual;
-  }
-  return actual;
+  await soltarTeclas(page);
+  await asentarCuerpo(page);
+  return (await leerJugador(page)) ?? jugador;
 }
 
 /**
@@ -455,13 +475,13 @@ async function seguirHasta(page, punto, { holgura = HOLGURA_PASO, tope = TOPE_CA
 }
 
 /**
- * Da un toque de `ms`, suelta todo y espera a que la lectura refleje el cuerpo parado.
+ * Da un toque de `ms`, suelta todo y espera a que el motor lo haya procesado.
  *
  * Con la máquina cargada un frame puede durar más que `ASENTAR_MS`; leer al tiempo
  * fijo devuelve una posición a mitad del toque y el toque siguiente se decide sobre
- * datos viejos, que es como el operador acaba 30 px pasado del destino. Después del
- * margen fijo se sondea hasta que dos lecturas seguidas coinciden: la decisión
- * siguiente ya se toma sobre el cuerpo quieto.
+ * datos viejos, que es como el operador acaba 30 px pasado del destino. Además, dos
+ * lecturas separadas por milisegundos pueden caer en el mismo tick: `asentarCuerpo`
+ * espera al tick siguiente y comprueba que en él el cuerpo ya no se movió.
  */
 async function tocar(page, teclas, ms) {
   for (const tecla of teclas) await page.keyboard.down(tecla);
@@ -471,14 +491,7 @@ async function tocar(page, teclas, ms) {
     await soltarTeclas(page);
   }
   await page.waitForTimeout(ASENTAR_MS);
-  let anterior = await leerJugador(page);
-  for (let intento = 0; intento < 12 && anterior; intento += 1) {
-    await page.waitForTimeout(30);
-    const actual = await leerJugador(page);
-    if (!actual) return;
-    if (Math.hypot(actual.x - anterior.x, actual.y - anterior.y) <= 0.5) return;
-    anterior = actual;
-  }
+  await asentarCuerpo(page);
 }
 
 /**
@@ -567,9 +580,10 @@ async function caminarA(page, destino, paso) {
     if (!final) throw new Error('window.__eko no expone un jugador al terminar la ruta');
     final = await aquietar(page, final);
     if (Math.max(Math.abs(final.x - objetivo.x), Math.abs(final.y - objetivo.y)) > HOLGURA_FINAL / 2) {
-      await seguirHasta(page, objetivo, { holgura: HOLGURA_FINAL / 2, tope: 1200 });
-      // La corrección termina con el cuerpo parado: leer justo después del último toque
-      // devuelve a veces una posición de un frame antes y la aserción falla por décimas.
+      // La corrección apunta a la tolerancia que después se afirma. Con un objetivo de
+      // 2 px —más fino que el toque más corto— el caminante rebota y el tope de la
+      // pasada lo deja fuera por décimas: el CI falló a 12,1 px con la aserción en 12.
+      await seguirHasta(page, objetivo, { holgura: HOLGURA_DESTINO, tope: 1200 });
       final = await aquietar(page, (await leerJugador(page)) ?? final);
     }
     fila.px = Math.hypot(final.x - desde.x, final.y - desde.y);
