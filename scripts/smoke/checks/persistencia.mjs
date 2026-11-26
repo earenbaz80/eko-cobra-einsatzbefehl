@@ -233,8 +233,6 @@ const TOPE_RELOJ_PASO = 20000;
 const HOLGURA_PASO = 10;
 /** Distancia a la que se da por alcanzado el destino final. */
 const HOLGURA_FINAL = 4;
-/** Espera tras soltar, para que la lectura del motor sea la del cuerpo ya parado. */
-const ASENTAR_MS = 90;
 /**
  * Tolerancia de la aserción final, por eje.
  *
@@ -245,6 +243,19 @@ const ASENTAR_MS = 90;
  * permite el motor.
  */
 const HOLGURA_DESTINO = 12;
+/**
+ * Banda de la caminata con teclas reales: el operador tiene que avanzar de verdad y a
+ * la velocidad de andar del motor (168 px/s base por el perfil por defecto de la
+ * misión, 1.08 = 181 px/s). La velocidad se mide entre el primer y el último cuadro
+ * con movimiento, así que la latencia del `keydown` no entra en la cuenta y la banda
+ * puede ser estrecha: una tecla que se pierda la mitad de los cuadros deja al operador
+ * a la mitad y no pasa.
+ */
+const AVANCE_MINIMO_TECLAS = 40;
+const VELOCIDAD_ANDAR = 181;
+const HOLGURA_VELOCIDAD = 0.1;
+/** Deriva lateral tolerada cuando se sostiene una sola tecla de movimiento. */
+const DERIVA_MAXIMA_TECLAS = 8;
 /** Una fila por caminata de la pasada: duración real, px recorridos y tramos. */
 const CAMINATAS = [];
 
@@ -376,80 +387,18 @@ function describirObstaculo(obstaculo) {
   return `${obstaculo.label || obstaculo.id} a ${distancia}`;
 }
 
-/** Teclas de movimiento; se sueltan todas al final de cada pulso. */
-const TECLAS_DE_MOVIMIENTO = ['KeyW', 'KeyA', 'KeyS', 'KeyD'];
-
-/**
- * Suelta las teclas de movimiento por partida doble: por el canal del navegador y con
- * un `keyup` dentro de la página.
- *
- * Con la máquina cargada (perfil completo, otras pestañas con el motor andando) se vio
- * al operador seguir caminando después de soltar: el `keyup` del navegador se perdió y
- * el cuerpo se plantó 40 px más allá del punto, sin nada cerca que lo explicara.
- */
-async function soltarTeclas(page) {
-  // El corte dentro de la página va primero: es una sola ida y vuelta y detiene el
-  // cuerpo en el frame siguiente. Los `keyboard.up` van después porque con el runner
-  // cargado cada uno puede tardar decenas de milisegundos y el motor sigue andando
-  // entre ellos: por eso el CI veía al operador oscilar ±50 px alrededor del punto.
-  await page
-    .evaluate((teclas) => {
-      window.__eko?.clearHeldKeys?.();
-      for (const tecla of teclas) {
-        const letra = tecla.slice(3).toLowerCase();
-        for (const destino of [window, document]) {
-          destino.dispatchEvent(
-            new KeyboardEvent('keyup', { code: tecla, key: letra, bubbles: true })
-          );
-        }
-      }
-    }, TECLAS_DE_MOVIMIENTO)
-    .catch(() => {});
-  for (const tecla of TECLAS_DE_MOVIMIENTO) await page.keyboard.up(tecla);
-}
-
-/** Tick, reloj de simulación y posición del jugador en una sola lectura. */
+/** Reloj de simulación y posición del jugador en una sola lectura. */
 function leerMuestra(page) {
   return page.evaluate(() => {
     const snap = window.__eko?.snapshot();
     if (!snap?.player) return null;
     return {
-      tick: snap.tick,
       tiempo: snap.tiempo,
       x: snap.player.x,
       y: snap.player.y,
       estado: snap.gameState,
     };
   });
-}
-
-/**
- * Espera a que el cuerpo esté parado de verdad, no sólo a que dos lecturas
- * coincidan: con la máquina cargada dos lecturas en el mismo tick coinciden aunque
- * el motor esté a punto de avanzar. Se espera un cambio de tick, y si en el tick
- * nuevo el cuerpo se movió, el `keyup` no llegó al motor y se vuelve a soltar.
- */
-async function asentarCuerpo(page) {
-  let anterior = await leerMuestra(page);
-  for (let intento = 0; intento < 40 && anterior; intento += 1) {
-    await page.waitForTimeout(30);
-    const actual = await leerMuestra(page);
-    if (!actual) return;
-    if (actual.tick === anterior.tick) continue;
-    if (Math.hypot(actual.x - anterior.x, actual.y - anterior.y) <= 0.5) return;
-    await soltarTeclas(page);
-    anterior = actual;
-  }
-}
-
-/**
- * Suelta las teclas y espera a que el cuerpo se quede quieto; si deriva, vuelve a soltar.
- * Devuelve la última posición leída, ya sin deriva.
- */
-async function aquietar(page, jugador) {
-  await soltarTeclas(page);
-  await asentarCuerpo(page);
-  return (await leerMuestra(page)) ?? jugador;
 }
 
 /**
@@ -520,7 +469,9 @@ async function seguirHasta(page, punto, { holgura = HOLGURA_PASO, tope = TOPE_CA
       sinAvance += 1;
     }
   }
-  jugador = await aquietar(page, jugador);
+  // Cada caminata de la página corta y suelta sus teclas al terminar: la lectura ya
+  // es la del cuerpo parado y no hace falta asentarlo desde Node.
+  jugador = (await leerMuestra(page)) ?? jugador;
   const distancia = Math.hypot(punto.x - jugador.x, punto.y - jugador.y);
   return {
     ok: distancia <= holgura,
@@ -541,6 +492,133 @@ function costadoDe(jugador, dx, dy, rodeos) {
   return Math.abs(dx) >= Math.abs(dy)
     ? { x: jugador.x, y: jugador.y + lado }
     : { x: jugador.x + lado, y: jugador.y };
+}
+
+/**
+ * Sonda de la caminata con teclas: lee el reloj y la posición en cada cuadro y guarda
+ * el primero y el último en los que el cuerpo se movió.
+ *
+ * La ventana entre esos dos cuadros es la caminata de verdad. Medir desde la pulsación
+ * cuenta como simulación la espera hasta que el `keydown` llega al motor —decenas de
+ * milisegundos, más con la máquina cargada—, y eso obligaba a abrir la banda hasta que
+ * un cuerpo a media velocidad pasaba por bueno.
+ */
+async function instalarSondaDeCaminata(page, { desde, eje, signo }) {
+  await page.evaluate(
+    ({ arranque, eje, signo }) => {
+      const sonda = { arranque, primera: null, ultima: null, parar: false };
+      window.__ekoSonda = sonda;
+      let anterior = null;
+      const cuadro = () => {
+        const snap = window.__eko?.snapshot();
+        if (snap?.player) {
+          const actual = { x: snap.player.x, y: snap.player.y, tiempo: snap.tiempo };
+          const avance =
+            (eje === 'x' ? actual.x - sonda.arranque.x : actual.y - sonda.arranque.y) * signo;
+          if (!sonda.primera && avance >= 0.5) sonda.primera = actual;
+          if (anterior && Math.hypot(actual.x - anterior.x, actual.y - anterior.y) > 0.05) {
+            sonda.ultima = actual;
+          }
+          anterior = actual;
+        }
+        if (!sonda.parar) requestAnimationFrame(cuadro);
+      };
+      requestAnimationFrame(cuadro);
+    },
+    { arranque: { x: desde.x, y: desde.y, tiempo: desde.tiempo }, eje, signo }
+  );
+}
+
+/** Corta la sonda y devuelve los cuadros que marcó. */
+async function cerrarSondaDeCaminata(page) {
+  return page.evaluate(() => {
+    const sonda = window.__ekoSonda;
+    if (!sonda) return null;
+    sonda.parar = true;
+    return { primera: sonda.primera, ultima: sonda.ultima };
+  });
+}
+
+/**
+ * Caminata de control con las teclas reales de Playwright.
+ *
+ * Todas las demás caminatas empujan el rumbo dentro de la página (`caminarHacia`), así
+ * que no pasan por el `keydown` de la app: si ese camino se rompiera, el humo seguiría
+ * verde. Aquí la tecla la sostiene el navegador, como un operador de verdad, y se
+ * afirma el avance y la velocidad contra el reloj de simulación. La coordenada final la
+ * cierra `caminarA`.
+ */
+async function caminarConTeclas(page, hasta, paso) {
+  const desde = await leerMuestra(page);
+  if (!desde) throw new Error('window.__eko no expone un jugador');
+  const dx = hasta.x - desde.x;
+  const dy = hasta.y - desde.y;
+  const eje = Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y';
+  const delta = eje === 'x' ? dx : dy;
+  if (Math.abs(delta) < AVANCE_MINIMO_TECLAS / 2) {
+    throw new Error(`caminarConTeclas sin recorrido en «${paso}» (${delta.toFixed(1)} px)`);
+  }
+  const tecla = eje === 'x' ? (delta > 0 ? 'KeyD' : 'KeyA') : delta > 0 ? 'KeyS' : 'KeyW';
+  const signo = Math.sign(delta);
+  const umbral = eje === 'x' ? hasta.x : hasta.y;
+  await instalarSondaDeCaminata(page, { desde, eje, signo });
+  await page.keyboard.down(tecla);
+  try {
+    await page.waitForFunction(
+      ({ eje, signo, umbral }) => {
+        const jugador = window.__eko?.snapshot()?.player;
+        if (!jugador) return false;
+        return signo > 0 ? jugador[eje] >= umbral : jugador[eje] <= umbral;
+      },
+      { eje, signo, umbral },
+      { timeout: 8000, polling: 'raf' }
+    );
+  } catch {
+    // La lectura de abajo decide: sin avance, el paso falla con la medida en la mano.
+  } finally {
+    await page.keyboard.up(tecla);
+  }
+  const fin = (await leerMuestra(page)) ?? desde;
+  const sonda = await cerrarSondaDeCaminata(page);
+  const avance = (eje === 'x' ? fin.x - desde.x : fin.y - desde.y) * signo;
+  const deriva = Math.abs(eje === 'x' ? fin.y - desde.y : fin.x - desde.x);
+  const sim = Math.max(0, fin.tiempo - desde.tiempo);
+  // La velocidad sale de la ventana en movimiento, no del total: los cuadros entre la
+  // pulsación y la llegada del evento al motor no son caminata.
+  const ventana =
+    sonda?.primera && sonda?.ultima ? sonda.ultima.tiempo - sonda.primera.tiempo : 0;
+  const recorrido =
+    sonda?.primera && sonda?.ultima
+      ? Math.hypot(sonda.ultima.x - sonda.primera.x, sonda.ultima.y - sonda.primera.y)
+      : 0;
+  const velocidad = ventana > 0 ? recorrido / ventana : 0;
+  console.log(
+    `caminarConTeclas · ${tecla} · ${avance.toFixed(1)} px en ${sim.toFixed(2)} s sim ` +
+      `(${recorrido.toFixed(1)} px en ${ventana.toFixed(2)} s de movimiento: ` +
+      `${velocidad.toFixed(0)} px/s, deriva ${deriva.toFixed(1)} px) · «${paso}»`
+  );
+  if (avance < AVANCE_MINIMO_TECLAS) {
+    throw new Error(
+      `las teclas reales no movieron al operador en «${paso}»: ${avance.toFixed(1)} px ` +
+        `con ${tecla} sostenida (mínimo ${AVANCE_MINIMO_TECLAS}); el keydown de la app ` +
+        'no llega al motor'
+    );
+  }
+  if (Math.abs(velocidad - VELOCIDAD_ANDAR) > VELOCIDAD_ANDAR * HOLGURA_VELOCIDAD) {
+    const banda = `${Math.round(VELOCIDAD_ANDAR * (1 - HOLGURA_VELOCIDAD))}-` +
+      `${Math.round(VELOCIDAD_ANDAR * (1 + HOLGURA_VELOCIDAD))}`;
+    throw new Error(
+      `las teclas reales movieron al operador a ${velocidad.toFixed(0)} px/s de simulación ` +
+        `en «${paso}» (${recorrido.toFixed(1)} px en ${ventana.toFixed(2)} s de movimiento; ` +
+        `banda de andar ${banda} px/s)`
+    );
+  }
+  if (deriva > DERIVA_MAXIMA_TECLAS) {
+    throw new Error(
+      `con ${tecla} sostenida el operador derivó ${deriva.toFixed(1)} px de lado en «${paso}»`
+    );
+  }
+  return fin;
 }
 
 /**
@@ -641,13 +719,12 @@ async function caminarA(page, destino, paso) {
     // dejarlo unos píxeles fuera: antes de afirmar la coordenada se corrige una vez.
     final = await leerMuestra(page);
     if (!final) throw new Error('window.__eko no expone un jugador al terminar la ruta');
-    final = await aquietar(page, final);
     if (Math.max(Math.abs(final.x - objetivo.x), Math.abs(final.y - objetivo.y)) > HOLGURA_FINAL / 2) {
       // La corrección apunta a la tolerancia que después se afirma. Con un objetivo de
       // 2 px —más fino que el toque más corto— el caminante rebota y el tope de la
       // pasada lo deja fuera por décimas: el CI falló a 12,1 px con la aserción en 12.
       await seguirHasta(page, objetivo, { holgura: HOLGURA_DESTINO, tope: 1.5 });
-      final = await aquietar(page, (await leerMuestra(page)) ?? final);
+      final = (await leerMuestra(page)) ?? final;
     }
     fila.px = Math.hypot(final.x - desde.x, final.y - desde.y);
     const desvio = Math.max(Math.abs(final.x - objetivo.x), Math.abs(final.y - objetivo.y));
@@ -1133,6 +1210,10 @@ export async function comprobarPersistencia(page, { url }) {
     // acercarse a Milán (285 px). La puerta se cierra al salir, así que después el
     // espejo de la sonda será el único que pueda delatarlo.
     await caminarA(page, { y: 430 }, `bajar al vano de ${PUERTA_SALON}`);
+    // Caminata de control con las teclas reales del navegador: el resto empuja el rumbo
+    // dentro de la página y no pasa por el `keydown` de la app. El tramo que falta hasta
+    // la puerta lo cierra `caminarA`, que es el que afirma la coordenada.
+    await caminarConTeclas(page, { x: 455, y: 430 }, `acercarse a ${PUERTA_SALON} con teclas`);
     await caminarA(page, { x: 500 }, `acercarse a ${PUERTA_SALON}`);
     if (!(await accionarPuerta(page, PUERTA_SALON, (puerta) => puerta.isFullyOpen))) {
       fail(
