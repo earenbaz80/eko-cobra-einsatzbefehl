@@ -52,7 +52,8 @@ function caminarEnPagina(
       }
       // Si el motor perdió las teclas (un blur de la ventana las limpia), el rumbo se
       // vuelve a pulsar: sin esto la caminata se queda quieta con las teclas creídas.
-      if (Math.hypot(pos.x - ultima.x, pos.y - ultima.y) > 0.3) {
+      const avanceDelCuadro = Math.hypot(pos.x - ultima.x, pos.y - ultima.y);
+      if (avanceDelCuadro > 0.3) {
         ultima = pos;
         quieto = 0;
       } else if (quieto++ > 12) {
@@ -60,6 +61,12 @@ function caminarEnPagina(
         engine.clearHeldKeys();
         quieto = 0;
       }
+      // Un cuadro del motor con la maquina cargada avanza mas que cualquier banda fija
+      // de alineacion: con 1.5 px la correccion del eje corto no entraba nunca y el
+      // cuerpo rebotaba entre dos posiciones sin cambiar de eje (CI: 5.8 px entre
+      // 258.6 y 264.4, doce segundos de simulacion sin avanzar). No se le puede pedir
+      // al cuerpo menos precision que la que permite un cuadro.
+      const alineacion = Math.max(1.5, avanceDelCuadro);
       const dx = destino.x - pos.x;
       const dy = destino.y - pos.y;
       const rumbo: string[] = [];
@@ -67,10 +74,10 @@ function caminarEnPagina(
         // Cerca del punto se alinea el eje corto y recién después se avanza por el largo:
         // entrar en diagonal a un vano engancha el cuerpo en el jamb y lo deja a 15 px.
         if (Math.abs(dx) >= Math.abs(dy)) {
-          if (Math.abs(dy) > 1.5) rumbo.push(dy > 0 ? teclas.atras : teclas.adelante);
+          if (Math.abs(dy) > alineacion) rumbo.push(dy > 0 ? teclas.atras : teclas.adelante);
           else if (Math.abs(dx) > 1) rumbo.push(dx > 0 ? teclas.derecha : teclas.izquierda);
         } else {
-          if (Math.abs(dx) > 1.5) rumbo.push(dx > 0 ? teclas.derecha : teclas.izquierda);
+          if (Math.abs(dx) > alineacion) rumbo.push(dx > 0 ? teclas.derecha : teclas.izquierda);
           else if (Math.abs(dy) > 1) rumbo.push(dy > 0 ? teclas.atras : teclas.adelante);
         }
       } else {
